@@ -1,0 +1,10 @@
+#!/bin/bash
+set -euo pipefail
+
+script_path=$(readlink -f "$0")
+go_binpath=${script_path%/*}/../cmd/yas
+go_bin=$(basename "$go_binpath")
+
+(cd "$go_binpath" && go build -o ./"$go_bin")
+
+exec "$go_binpath"/"$go_bin" "$@"

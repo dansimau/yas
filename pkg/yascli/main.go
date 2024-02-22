@@ -1,0 +1,89 @@
+package yascli
+
+import (
+	"errors"
+	"fmt"
+	"os"
+
+	"github.com/dansimau/yas/pkg/fsutil"
+	"github.com/dansimau/yas/pkg/yas"
+	"github.com/jessevdk/go-flags"
+)
+
+var cmd *Cmd
+
+type Cmd struct {
+	yas *yas.YAS
+
+	RepoDirectory string `long:"repo" short:"r" description:"Repo directory"`
+	Verbose       bool   `long:"verbose" short:"v" description:"Verbose output"`
+}
+
+func mustAddCommand(f *flags.Command, err error) *flags.Command {
+	if err != nil {
+		panic(err)
+	}
+	return f
+}
+
+// Run executes the program with the specified arguments and returns the code
+// the process should exit with.
+func Run(args ...string) (exitCode int) {
+	// Must recreate this global on each invocation to reset flag values
+	// between invocations.
+	cmd = &Cmd{}
+
+	parser := flags.NewParser(cmd, flags.HelpFlag)
+
+	parser.CommandHandler = func(command flags.Commander, args []string) error {
+		// Apply defaults to cmd
+		if cmd.RepoDirectory == "" {
+			repoDir, err := fsutil.SearchParentsForPathFromCwd(".git")
+			if err != nil {
+				return NewError(err.Error())
+			}
+
+			cmd.RepoDirectory = repoDir
+		}
+
+		if cmd.Verbose {
+			os.Setenv("YAS_VERBOSE", "1")
+			os.Setenv("XEXEC_VERBOSE", "1")
+		}
+
+		// Init yas instance
+		y, err := yas.New(yas.Config{
+			RepoDirectory: cmd.RepoDirectory,
+		})
+		if err != nil {
+			return NewError(err.Error())
+		}
+		cmd.yas = y
+
+		// Run command
+		return command.Execute(args)
+	}
+
+	mustAddCommand(parser.AddCommand("sync", "Sync", "", &syncCmd{}))
+
+	_, err := parser.ParseArgs(args)
+	if err != nil {
+		// Handle --help, which is represented as an error by the flags package
+		if flagsErr, ok := err.(*flags.Error); ok && flagsErr.Type == flags.ErrHelp {
+			fmt.Fprintf(os.Stderr, "%s\n", err)
+			return 0
+		}
+
+		if errors.Is(err, &Error{}) {
+			// Error, just exit with a message
+			fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+		} else {
+			// unexpected error so print stack trace, if there is one
+			fmt.Fprintf(os.Stderr, "ERROR: %+v\n", err)
+		}
+
+		return 1
+	}
+
+	return 0
+}

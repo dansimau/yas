@@ -1,0 +1,63 @@
+package yas
+
+import "github.com/dansimau/yas/pkg/sliceutil"
+
+type BranchMetadata struct {
+	Name              string
+	GitHubPullRequest PullRequestMetadata
+}
+
+type PullRequestMetadata struct {
+	ID    string
+	State string
+}
+
+type Branches []BranchMetadata
+
+func (b Branches) filter(test func(BranchMetadata) bool) Branches {
+	return sliceutil.Filter(b, test)
+}
+
+func (b Branches) BranchNames() []string {
+	result := []string{}
+	for _, branch := range b {
+		result = append(result, branch.Name)
+	}
+	return result
+}
+
+func (b Branches) Get(name string) (branch BranchMetadata, exists bool) {
+	result := b.filter(func(bm BranchMetadata) bool {
+		return bm.Name == name
+	})
+
+	if len(result) == 0 {
+		return BranchMetadata{}, false
+	}
+
+	return result[0], true
+}
+
+func (b *Branches) Set(data BranchMetadata) {
+	// Remove existing entries with the same name
+	n := b.filter(func(bm BranchMetadata) bool {
+		return bm.Name != data.Name
+	})
+
+	// Add new entry
+	n = append(n, data)
+
+	*b = n
+}
+
+func (b Branches) WithPRs() Branches {
+	return b.filter(func(b BranchMetadata) bool {
+		return b.GitHubPullRequest.ID != ""
+	})
+}
+
+func (b Branches) WithPRStatus(state string) Branches {
+	return b.filter(func(b BranchMetadata) bool {
+		return b.GitHubPullRequest.State == state
+	})
+}
