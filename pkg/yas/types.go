@@ -1,6 +1,10 @@
 package yas
 
-import "github.com/dansimau/yas/pkg/sliceutil"
+import (
+	"slices"
+
+	"github.com/dansimau/yas/pkg/sliceutil"
+)
 
 type BranchMetadata struct {
 	Name              string
@@ -39,6 +43,10 @@ func (b Branches) Get(name string) (branch BranchMetadata, exists bool) {
 }
 
 func (b *Branches) Set(data BranchMetadata) {
+	if data.Name == "" {
+		panic("branch name is empty")
+	}
+
 	// Remove existing entries with the same name
 	n := b.filter(func(bm BranchMetadata) bool {
 		return bm.Name != data.Name
@@ -56,8 +64,8 @@ func (b Branches) WithPRs() Branches {
 	})
 }
 
-func (b Branches) WithPRStatus(state string) Branches {
+func (b Branches) WithPRStates(states ...string) Branches {
 	return b.filter(func(b BranchMetadata) bool {
-		return b.GitHubPullRequest.State == state
+		return slices.Contains(states, b.GitHubPullRequest.State)
 	})
 }

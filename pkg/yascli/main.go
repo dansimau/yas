@@ -15,6 +15,7 @@ var cmd *Cmd
 type Cmd struct {
 	yas *yas.YAS
 
+	DryRun        bool   `long:"dry-run" description:"Don't make any changes, just show what will happen"`
 	RepoDirectory string `long:"repo" short:"r" description:"Repo directory"`
 	Verbose       bool   `long:"verbose" short:"v" description:"Verbose output"`
 }

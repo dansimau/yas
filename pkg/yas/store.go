@@ -69,7 +69,10 @@ func (m *branchMap) Get(name string) BranchMetadata {
 	m.RLock()
 	defer m.RUnlock()
 
-	return m.data[name]
+	bm := m.data[name]
+	bm.Name = name
+
+	return bm
 }
 
 func (m *branchMap) Set(name string, data BranchMetadata) {
@@ -91,9 +94,15 @@ func (m *branchMap) ToSlice() (bm Branches) {
 }
 
 func (m *branchMap) MarshalJSON() ([]byte, error) {
+	m.RLock()
+	defer m.RUnlock()
+
 	return json.Marshal(m.data)
 }
 
 func (m *branchMap) UnmarshalJSON(data []byte) error {
+	m.Lock()
+	defer m.Unlock()
+
 	return json.Unmarshal(data, &m.data)
 }
