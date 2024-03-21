@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 
 	"github.com/dansimau/yas/pkg/fsutil"
 	"github.com/dansimau/yas/pkg/yas"
@@ -39,11 +40,12 @@ func Run(args ...string) (exitCode int) {
 	parser.CommandHandler = func(command flags.Commander, args []string) error {
 		// Apply defaults to cmd
 		if cmd.RepoDirectory == "" {
-			repoDir, err := fsutil.SearchParentsForPathFromCwd(".git")
+			gitDir, err := fsutil.SearchParentsForPathFromCwd(".git")
 			if err != nil {
 				return NewError(err.Error())
 			}
 
+			repoDir := path.Dir(gitDir)
 			cmd.RepoDirectory = repoDir
 		}
 

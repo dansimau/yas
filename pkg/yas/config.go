@@ -7,7 +7,7 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-const configFilename = "yas.yaml"
+const configFilename = ".git/yas.yaml"
 
 type Config struct {
 	RepoDirectory string `yaml:"-"`

@@ -6,6 +6,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/dansimau/yas/pkg/gitexec"
 	"github.com/dansimau/yas/pkg/log"
 	"github.com/dansimau/yas/pkg/xexec"
 	"github.com/go-git/go-git/v5"
@@ -13,9 +14,12 @@ import (
 	"github.com/sourcegraph/conc/pool"
 )
 
+const yasStateFile = ".git/.yasstate"
+
 type YAS struct {
 	cfg  Config
 	data *yasDatabase
+	git  *gitexec.Repo
 	repo *git.Repository
 }
 
@@ -25,7 +29,7 @@ func New(cfg Config) (*YAS, error) {
 		return nil, err
 	}
 
-	data, err := loadData(path.Join(cfg.RepoDirectory, ".yasstate"))
+	data, err := loadData(path.Join(cfg.RepoDirectory, yasStateFile))
 	if err != nil {
 		return nil, err
 	}
@@ -33,6 +37,7 @@ func New(cfg Config) (*YAS, error) {
 	return &YAS{
 		cfg:  cfg,
 		data: data,
+		git:  gitexec.WithRepo(cfg.RepoDirectory),
 		repo: repo,
 	}, nil
 }
@@ -59,12 +64,12 @@ func (yas *YAS) Config() Config {
 func (yas *YAS) DeleteBranch(name string) (previousRef string, err error) {
 	// Get the ref of the branch before we delete it, so we can return/print it
 	// which allows the person to undo.
-	existingRefShortHash, err := xexec.Command("git", "rev-parse", "--short", name).WithStdout(nil).Output()
+	existingRefShortHash, err := yas.git.GetShortHash(name)
 	if err != nil {
 		return "", err
 	}
 
-	if err := xexec.Command("git", "branch", "-D", name).WithStdout(nil).Run(); err != nil {
+	if err := yas.git.DeleteBranch(name); err != nil {
 		return "", err
 	}
 
@@ -139,6 +144,17 @@ func (yas *YAS) RefreshRemoteStatus(branchNames ...string) error {
 	}
 
 	return nil
+}
+
+func (yas *YAS) UpdateTrunk() error {
+	if err := yas.git.Checkout(yas.cfg.TrunkBranch); err != nil {
+		return err
+	}
+
+	// Switch back to original branch
+	defer yas.git.Checkout("-")
+
+	return yas.git.Pull()
 }
 
 func (yas *YAS) fetchGitHubPullRequestStatus(branchName string) (*PullRequestMetadata, error) {

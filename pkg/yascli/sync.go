@@ -53,5 +53,10 @@ func (c *syncCmd) Execute(args []string) error {
 		return NewError(err.Error())
 	}
 
+	fmt.Printf("🔄 Pulling %s...\n", cmd.yas.Config().TrunkBranch)
+	if err := cmd.yas.UpdateTrunk(); err != nil {
+		return NewError(err.Error())
+	}
+
 	return nil
 }

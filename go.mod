@@ -8,6 +8,7 @@ require (
 	github.com/jessevdk/go-flags v1.5.0
 	github.com/olekukonko/tablewriter v0.0.5
 	github.com/sourcegraph/conc v0.3.0
+	github.com/stretchr/testify v1.8.4
 	golang.org/x/term v0.17.0
 	gopkg.in/alessio/shellescape.v1 v1.0.0-20170105083845-52074bc9df61
 	gopkg.in/yaml.v2 v2.2.4
@@ -28,6 +29,7 @@ require (
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
 	github.com/mattn/go-runewidth v0.0.9 // indirect
 	github.com/pjbgf/sha1cd v0.3.0 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/sergi/go-diff v1.1.0 // indirect
 	github.com/skeema/knownhosts v1.2.1 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
@@ -39,4 +41,5 @@ require (
 	golang.org/x/sys v0.17.0 // indirect
 	golang.org/x/tools v0.13.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
