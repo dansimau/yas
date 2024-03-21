@@ -1,9 +1,11 @@
 package yas
 
 import (
+	"errors"
 	"os"
 	"path"
 
+	"github.com/dansimau/yas/pkg/fsutil"
 	"gopkg.in/yaml.v2"
 )
 
@@ -14,7 +16,15 @@ type Config struct {
 	TrunkBranch   string `yaml:"trunkBranch"`
 }
 
-func readConfig(repoDirectory string) (*Config, error) {
+func IsConfigured(repoDirectory string) bool {
+	return fsutil.FileExists(path.Join(repoDirectory, configFilename))
+}
+
+func ReadConfig(repoDirectory string) (*Config, error) {
+	if !IsConfigured(repoDirectory) {
+		return nil, errors.New("repository not configured")
+	}
+
 	yamlBytes, err := os.ReadFile(path.Join(repoDirectory, configFilename))
 	if err != nil {
 		return nil, err
@@ -30,9 +40,9 @@ func readConfig(repoDirectory string) (*Config, error) {
 	return &config, nil
 }
 
-// writeConfig writes config to config file underneath the repo directory
+// WriteConfig writes config to config file underneath the repo directory
 // (defined) in the config itself. It returns the path to the file it wrote to.
-func writeConfig(cfg Config) (string, error) {
+func WriteConfig(cfg Config) (string, error) {
 	yamlBytes, err := yaml.Marshal(cfg)
 	if err != nil {
 		return "", err

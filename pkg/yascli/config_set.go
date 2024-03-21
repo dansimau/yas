@@ -1,13 +1,22 @@
 package yascli
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/dansimau/yas/pkg/yas"
+)
 
 type configSetCmd struct {
 	TrunkBranch *string `long:"trunk-branch" description:"The name of your trunk branch, e.g. main, develop" required:"true"`
 }
 
 func (c *configSetCmd) Execute(args []string) error {
-	cfg := cmd.yas.Config()
+	yasInstance, err := yas.NewFromRepository(cmd.RepoDirectory)
+	if err != nil {
+		return NewError(err.Error())
+	}
+
+	cfg := yasInstance.Config()
 	changed := false
 
 	if c.TrunkBranch != nil {
@@ -19,7 +28,7 @@ func (c *configSetCmd) Execute(args []string) error {
 		if cmd.DryRun {
 			fmt.Println("[DRY-RUN] Not writing config")
 		} else {
-			f, err := cmd.yas.UpdateConfig(cfg)
+			f, err := yasInstance.UpdateConfig(cfg)
 			if err != nil {
 				return NewError(err.Error())
 			}

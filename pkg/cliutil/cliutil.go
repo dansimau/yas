@@ -25,28 +25,60 @@ func PrintTable(rows [][]string) {
 	table.Render()
 }
 
-// PromptWithValidation prompts the user for input and returns the result.
-// Before returning, it runs the specified validator. If the validator fails,
-// it outputs the error to the user and repeats the input prompt until the
-// input is valid.
-func PromptWithValidation(text string, validator func(input string) error) string {
+type PromptOptions struct {
+	Text      string
+	Default   string
+	Validator func(input string) error
+}
+
+func Prompt(opts PromptOptions) string {
 Prompt:
 	scanner := bufio.NewScanner(os.Stdin)
-	fmt.Fprint(os.Stderr, text+" ")
+
+	if opts.Text != "" {
+		fmt.Fprint(os.Stderr, opts.Text+" ")
+	}
+
+	if opts.Default != "" {
+		fmt.Fprintf(os.Stderr, "[%s] ", opts.Default)
+	}
+
 	scanner.Scan()
 	if err := scanner.Err(); err != nil {
 		panic(err)
 	}
 
-	input := scanner.Text()
+	input := strings.TrimSpace(scanner.Text())
 
-	if err := validator(input); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		goto Prompt
+	if opts.Validator != nil {
+		if err := opts.Validator(input); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			goto Prompt
+		}
+	}
+
+	if input == "" && opts.Default != "" {
+		return opts.Default
 	}
 
 	return input
 }
+
+// // PromptWithValidation prompts the user for input and returns the result.
+// // Before returning, it runs the specified validator. If the validator fails,
+// // it outputs the error to the user and repeats the input prompt until the
+// // input is valid.
+// func PromptWithValidation(text string, validator func(input string) error) string {
+// Prompt:
+// 	input := Prompt(text)
+
+// 	if err := validator(input); err != nil {
+// 		fmt.Fprintln(os.Stderr, err)
+// 		goto Prompt
+// 	}
+
+// 	return input
+// }
 
 // ReadSecretInputFromTerminal disables echoing and reads input interactively.
 func ReadSecretInputFromTerminal(in *os.File) (string, error) {
@@ -93,7 +125,10 @@ func confirmationValidator(input string) error {
 // Confirm outputs the message and prompts the user for a "yes" or "no"
 // response.
 func Confirm(message string, defaultIfEmpty bool) bool {
-	input := PromptWithValidation(message, confirmationValidator)
+	input := Prompt(PromptOptions{
+		Text:      message,
+		Validator: confirmationValidator,
+	})
 	result, _ := parseConfirmationInput(input, defaultIfEmpty)
 	return result
 }

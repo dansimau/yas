@@ -7,15 +7,12 @@ import (
 	"path"
 
 	"github.com/dansimau/yas/pkg/fsutil"
-	"github.com/dansimau/yas/pkg/yas"
 	"github.com/jessevdk/go-flags"
 )
 
 var cmd *Cmd
 
 type Cmd struct {
-	yas *yas.YAS
-
 	DryRun        bool   `long:"dry-run" description:"Don't make any changes, just show what will happen"`
 	RepoDirectory string `long:"repo" short:"r" description:"Repo directory"`
 	Verbose       bool   `long:"verbose" short:"v" description:"Verbose output"`
@@ -54,18 +51,12 @@ func Run(args ...string) (exitCode int) {
 			os.Setenv("XEXEC_VERBOSE", "1")
 		}
 
-		// Init yas instance
-		y, err := yas.NewFromRepository(cmd.RepoDirectory)
-		if err != nil {
-			return NewError(err.Error())
-		}
-		cmd.yas = y
-
 		// Run command
 		return command.Execute(args)
 	}
 
 	mustAddCommand(parser.AddCommand("config", "Manage repository-specific configuration", "", &configCmd{}))
+	mustAddCommand(parser.AddCommand("init", "Set up initial configuration", "", &initCmd{}))
 	mustAddCommand(parser.AddCommand("sync", "Sync", "", &syncCmd{}))
 
 	_, err := parser.ParseArgs(args)

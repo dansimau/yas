@@ -2,7 +2,6 @@ package yas
 
 import (
 	"encoding/json"
-	"os"
 	"path"
 	"strings"
 
@@ -43,15 +42,9 @@ func New(cfg Config) (*YAS, error) {
 }
 
 func NewFromRepository(repoDirectory string) (*YAS, error) {
-	cfg, err := readConfig(repoDirectory)
+	cfg, err := ReadConfig(repoDirectory)
 	if err != nil {
-		if os.IsNotExist(err) {
-			cfg = &Config{
-				RepoDirectory: repoDirectory,
-			}
-		} else {
-			return nil, err
-		}
+		return nil, err
 	}
 
 	return New(*cfg)
@@ -79,7 +72,7 @@ func (yas *YAS) DeleteBranch(name string) (previousRef string, err error) {
 // UpdateConfig sets the new config and writes it to the configuration file.
 func (yas *YAS) UpdateConfig(cfg Config) (string, error) {
 	yas.cfg = cfg
-	return writeConfig(cfg)
+	return WriteConfig(cfg)
 }
 
 func (yas *YAS) TrackedBranches() Branches {

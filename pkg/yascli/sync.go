@@ -2,30 +2,34 @@ package yascli
 
 import (
 	"fmt"
+
+	"github.com/dansimau/yas/pkg/yas"
 )
 
-type syncCmd struct{}
+type syncCmd struct {
+	yasInstance *yas.YAS
+}
 
 func (c *syncCmd) trackUntrackedBranches() error {
-	untrackedBranches, err := cmd.yas.UntrackedBranches()
+	untrackedBranches, err := c.yasInstance.UntrackedBranches()
 	if err != nil {
 		return err
 	}
 
-	return cmd.yas.RefreshRemoteStatus(untrackedBranches...)
+	return c.yasInstance.RefreshRemoteStatus(untrackedBranches...)
 }
 
 func (c *syncCmd) checkForClosedPRs() error {
 	fmt.Println("🧹 Checking for merged PRs...")
 	// Fetch latest PR metadata from GitHub for branches that have PRs
-	if err := cmd.yas.RefreshRemoteStatus(cmd.yas.TrackedBranches().WithPRs().BranchNames()...); err != nil {
+	if err := c.yasInstance.RefreshRemoteStatus(c.yasInstance.TrackedBranches().WithPRs().BranchNames()...); err != nil {
 		return err
 	}
 
 	// Check for closed PRs here
-	for _, branch := range cmd.yas.TrackedBranches().WithPRStates("MERGED") {
+	for _, branch := range c.yasInstance.TrackedBranches().WithPRStates("MERGED") {
 		if !cmd.DryRun {
-			previousRef, err := cmd.yas.DeleteBranch(branch.Name)
+			previousRef, err := c.yasInstance.DeleteBranch(branch.Name)
 			if err != nil {
 				return fmt.Errorf("error deleting branch %s: %w", branch.Name, err)
 			}
@@ -40,9 +44,15 @@ func (c *syncCmd) checkForClosedPRs() error {
 }
 
 func (c *syncCmd) Execute(args []string) error {
+	yasInstance, err := yas.NewFromRepository(cmd.RepoDirectory)
+	if err != nil {
+		return NewError(err.Error())
+	}
+	c.yasInstance = yasInstance
+
 	// TODO: Remove - this is for debugging
 	if len(args) > 0 {
-		return cmd.yas.RefreshRemoteStatus(args...)
+		return yasInstance.RefreshRemoteStatus(args...)
 	}
 
 	if err := c.trackUntrackedBranches(); err != nil {
@@ -53,8 +63,8 @@ func (c *syncCmd) Execute(args []string) error {
 		return NewError(err.Error())
 	}
 
-	fmt.Printf("🔄 Pulling %s...\n", cmd.yas.Config().TrunkBranch)
-	if err := cmd.yas.UpdateTrunk(); err != nil {
+	fmt.Printf("🔄 Pulling %s...\n", yasInstance.Config().TrunkBranch)
+	if err := yasInstance.UpdateTrunk(); err != nil {
 		return NewError(err.Error())
 	}
 
