@@ -10,6 +10,7 @@ require (
 	github.com/sourcegraph/conc v0.3.0
 	golang.org/x/term v0.17.0
 	gopkg.in/alessio/shellescape.v1 v1.0.0-20170105083845-52074bc9df61
+	gopkg.in/yaml.v2 v2.2.4
 )
 
 require (

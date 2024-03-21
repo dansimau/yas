@@ -53,9 +53,7 @@ func Run(args ...string) (exitCode int) {
 		}
 
 		// Init yas instance
-		y, err := yas.New(yas.Config{
-			RepoDirectory: cmd.RepoDirectory,
-		})
+		y, err := yas.NewFromRepository(cmd.RepoDirectory)
 		if err != nil {
 			return NewError(err.Error())
 		}
@@ -65,6 +63,7 @@ func Run(args ...string) (exitCode int) {
 		return command.Execute(args)
 	}
 
+	mustAddCommand(parser.AddCommand("config", "Manage repository-specific configuration", "", &configCmd{}))
 	mustAddCommand(parser.AddCommand("sync", "Sync", "", &syncCmd{}))
 
 	_, err := parser.ParseArgs(args)
