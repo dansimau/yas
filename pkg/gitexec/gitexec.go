@@ -72,7 +72,11 @@ func (r *Repo) Checkout(ref string) error {
 }
 
 func (r *Repo) DeleteBranch(branch string) error {
-	return r.run("git", "branch", "-D", branch)
+	return xexec.Command("git", "branch", "-D", branch).
+		WithEnvVars(CleanedGitEnv()).
+		WithWorkingDir(r.path).
+		Run()
+
 }
 
 func (r *Repo) GetCurrentBranchName() (string, error) {

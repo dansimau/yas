@@ -34,16 +34,11 @@ func (c *syncCmd) checkForClosedPRs() error {
 		}
 
 		if !cmd.DryRun {
-			previousRef, err := c.yasInstance.DeleteBranch(branch.Name)
-			if err != nil {
+			if err := c.yasInstance.DeleteBranch(branch.Name); err != nil {
 				return fmt.Errorf("error deleting branch %s: %w", branch.Name, err)
 			}
-
-			if previousRef != "" {
-				fmt.Printf("🧹 Deleted branch: %s (ref was: %s)\n", branch.Name, previousRef)
-			}
 		} else {
-			fmt.Printf("🧹 Delete branch: %s [DRY-RUN]\n", branch.Name)
+			fmt.Printf("Would delete branch: %s [DRY-RUN]\n", branch.Name)
 		}
 	}
 

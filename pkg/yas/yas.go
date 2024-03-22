@@ -56,48 +56,41 @@ func (yas *YAS) Config() Config {
 	return yas.cfg
 }
 
-func (yas *YAS) DeleteBranch(name string) (previousRef string, err error) {
+func (yas *YAS) DeleteBranch(name string) error {
 	branchExists, err := yas.git.BranchExists(name)
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	if !branchExists {
 		if err := yas.cleanupBranch(name); err != nil {
-			return "", err
+			return err
 		}
 
-		return "", nil
+		return nil
 	}
 
 	currentBranchName, err := yas.git.GetCurrentBranchName()
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	// Can't delete the branch while we're on it; switch to trunk
 	if currentBranchName == name {
 		if err := yas.git.Checkout(yas.cfg.TrunkBranch); err != nil {
-			return "", fmt.Errorf("can't delete branch while on it; failed to checkout trunk: %w", err)
+			return fmt.Errorf("can't delete branch while on it; failed to checkout trunk: %w", err)
 		}
 	}
 
-	// Get the ref of the branch before we delete it, so we can return/print it
-	// which allows the person to undo.
-	existingRefShortHash, err := yas.git.GetShortHash(name)
-	if err != nil {
-		return "", err
-	}
-
 	if err := yas.git.DeleteBranch(name); err != nil {
-		return "", err
+		return err
 	}
 
-	// If this fails, make it a warning, since the most important thing here is
-	// to return the previous hash now that the branch has been removed
-	yas.cleanupBranch(name) // TODO: emit warning if this fails
+	if err := yas.cleanupBranch(name); err != nil {
+		return err
+	}
 
-	return strings.TrimSpace(string(existingRefShortHash)), nil
+	return nil
 }
 
 func (yas *YAS) Submit() error {
