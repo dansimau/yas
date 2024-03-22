@@ -28,6 +28,11 @@ func (c *syncCmd) checkForClosedPRs() error {
 
 	// Check for closed PRs here
 	for _, branch := range c.yasInstance.TrackedBranches().WithPRStates("MERGED") {
+		// Don't delete the trunk branch
+		if branch.Name == c.yasInstance.Config().TrunkBranch {
+			continue
+		}
+
 		if !cmd.DryRun {
 			previousRef, err := c.yasInstance.DeleteBranch(branch.Name)
 			if err != nil {
