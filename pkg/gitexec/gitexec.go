@@ -49,22 +49,22 @@ func (r *Repo) output(args ...string) ([]byte, error) {
 }
 
 func (r *Repo) BranchExists(ref string) (bool, error) {
-	err := r.run("git", "show-ref", fmt.Sprintf("refs/heads/%s", ref))
-	exitErr, isExitError := err.(*exec.ExitError)
-	if !isExitError {
+	if err := r.run("git", "show-ref", fmt.Sprintf("refs/heads/%s", ref)); err != nil {
+		exitErr, isExitError := err.(*exec.ExitError)
+		if !isExitError {
+			return false, err
+		}
+
+		// Exit code 1 means the branch doesn't exist
+		if exitErr.ExitCode() == 1 {
+			return false, nil
+		}
+
+		// Unrecognized exit code
 		return false, err
 	}
 
-	if exitErr.ExitCode() == 0 {
-		return true, nil
-	}
-
-	if exitErr.ExitCode() == 1 {
-		return false, nil
-	}
-
-	// Unrecognized exit code
-	return false, err
+	return true, nil
 }
 
 func (r *Repo) Checkout(ref string) error {

@@ -70,6 +70,18 @@ func (yas *YAS) DeleteBranch(name string) (previousRef string, err error) {
 		return "", nil
 	}
 
+	currentBranchName, err := yas.git.GetCurrentBranchName()
+	if err != nil {
+		return "", err
+	}
+
+	// Can't delete the branch while we're on it; switch to trunk
+	if currentBranchName == name {
+		if err := yas.git.Checkout(yas.cfg.TrunkBranch); err != nil {
+			return "", fmt.Errorf("can't delete branch while on it; failed to checkout trunk: %w", err)
+		}
+	}
+
 	// Get the ref of the branch before we delete it, so we can return/print it
 	// which allows the person to undo.
 	existingRefShortHash, err := yas.git.GetShortHash(name)
