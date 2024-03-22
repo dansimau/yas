@@ -2,6 +2,8 @@ package yas
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"path"
 	"strings"
 
@@ -84,6 +86,31 @@ func (yas *YAS) DeleteBranch(name string) (previousRef string, err error) {
 	yas.cleanupBranch(name) // TODO: emit warning if this fails
 
 	return strings.TrimSpace(string(existingRefShortHash)), nil
+}
+
+func (yas *YAS) Submit() error {
+	currentBranch, err := yas.git.GetCurrentBranchName()
+	if err != nil {
+		return err
+	}
+
+	if currentBranch == "HEAD" {
+		return errors.New("cannot submit in detached HEAD state")
+	}
+
+	if err := yas.refreshRemoteStatus(currentBranch); err != nil {
+		return err
+	}
+
+	if err := yas.git.Push(); err != nil {
+		return fmt.Errorf("failed to push: %w", err)
+	}
+
+	if err := xexec.Command("gh", "pr", "create", "--draft", "--fill-first").Run(); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // UpdateConfig sets the new config and writes it to the configuration file.

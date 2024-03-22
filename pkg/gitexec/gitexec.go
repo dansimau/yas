@@ -75,6 +75,15 @@ func (r *Repo) DeleteBranch(branch string) error {
 	return r.run("git", "branch", "-D", branch)
 }
 
+func (r *Repo) GetCurrentBranchName() (string, error) {
+	output, err := r.output("git", "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return "", err
+	}
+
+	return strings.TrimSpace(string(output)), nil
+}
+
 func (r *Repo) GetShortHash(ref string) (string, error) {
 	output, err := r.output("git", "rev-parse", "--short", ref)
 	if err != nil {
@@ -82,6 +91,13 @@ func (r *Repo) GetShortHash(ref string) (string, error) {
 	}
 
 	return strings.TrimSpace(string(output)), nil
+}
+
+func (r *Repo) Push() error {
+	return xexec.Command("git", "push").
+		WithEnvVars(CleanedGitEnv()).
+		WithWorkingDir(r.path).
+		Run()
 }
 
 func (r *Repo) Pull() error {
