@@ -34,7 +34,9 @@ func (c *syncCmd) checkForClosedPRs() error {
 				return fmt.Errorf("error deleting branch %s: %w", branch.Name, err)
 			}
 
-			fmt.Printf("🧹 Deleted branch: %s (ref was: %s)\n", branch.Name, previousRef)
+			if previousRef != "" {
+				fmt.Printf("🧹 Deleted branch: %s (ref was: %s)\n", branch.Name, previousRef)
+			}
 		} else {
 			fmt.Printf("🧹 Delete branch: %s [DRY-RUN]\n", branch.Name)
 		}

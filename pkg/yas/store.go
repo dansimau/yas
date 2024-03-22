@@ -75,6 +75,13 @@ func (m *branchMap) Get(name string) BranchMetadata {
 	return bm
 }
 
+func (m *branchMap) Remove(name string) {
+	m.Lock()
+	defer m.Unlock()
+
+	delete(m.data, name)
+}
+
 func (m *branchMap) Set(name string, data BranchMetadata) {
 	m.Lock()
 	defer m.Unlock()

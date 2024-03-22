@@ -55,6 +55,19 @@ func (yas *YAS) Config() Config {
 }
 
 func (yas *YAS) DeleteBranch(name string) (previousRef string, err error) {
+	branchExists, err := yas.git.BranchExists(name)
+	if err != nil {
+		return "", err
+	}
+
+	if !branchExists {
+		if err := yas.cleanupBranch(name); err != nil {
+			return "", err
+		}
+
+		return "", nil
+	}
+
 	// Get the ref of the branch before we delete it, so we can return/print it
 	// which allows the person to undo.
 	existingRefShortHash, err := yas.git.GetShortHash(name)
@@ -65,6 +78,10 @@ func (yas *YAS) DeleteBranch(name string) (previousRef string, err error) {
 	if err := yas.git.DeleteBranch(name); err != nil {
 		return "", err
 	}
+
+	// If this fails, make it a warning, since the most important thing here is
+	// to return the previous hash now that the branch has been removed
+	yas.cleanupBranch(name) // TODO: emit warning if this fails
 
 	return strings.TrimSpace(string(existingRefShortHash)), nil
 }
@@ -137,6 +154,11 @@ func (yas *YAS) RefreshRemoteStatus(branchNames ...string) error {
 	}
 
 	return nil
+}
+
+func (yas *YAS) cleanupBranch(name string) error {
+	yas.data.Branches.Remove(name)
+	return yas.data.Save()
 }
 
 func (yas *YAS) UpdateTrunk() error {
