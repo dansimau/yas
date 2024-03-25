@@ -127,6 +127,48 @@ func (yas *YAS) fetchGitHubPullRequestStatus(branchName string) (*PullRequestMet
 	return &data[0], nil
 }
 
+func (yas *YAS) SetParent(branchName, parentBranchName string) error {
+	if branchName == "" {
+		currentBranch, err := yas.git.GetCurrentBranchName()
+		if err != nil {
+			return err
+		}
+
+		branchName = currentBranch
+	}
+
+	if parentBranchName == "" {
+		forkPoint, err := yas.git.GetForkPoint(branchName)
+		if err != nil {
+			return err // TODO return typed err
+		}
+
+		if forkPoint == "" {
+			return errors.New("failed to autodetect parent branch (specify --parent)") // TODO type err
+		}
+
+		branchName, err := yas.git.GetLocalBranchNameForCommit(forkPoint + "^")
+		if err != nil {
+			return err // TODO return typed err
+		}
+
+		if branchName == "" {
+			return errors.New("failed to autodetect parent branch (specify --parent)") // TODO type err
+		}
+
+		parentBranchName = branchName
+	}
+
+	branchMetdata := yas.data.Branches.Get(branchName)
+	branchMetdata.Parent = parentBranchName
+	yas.data.Branches.Set(branchName, branchMetdata)
+	yas.data.Save()
+
+	fmt.Printf("Set '%s' as parent of '%s'\n", parentBranchName, branchName)
+
+	return nil
+}
+
 func (yas *YAS) Submit() error {
 	currentBranch, err := yas.git.GetCurrentBranchName()
 	if err != nil {

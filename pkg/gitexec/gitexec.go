@@ -1,7 +1,6 @@
 package gitexec
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -42,12 +41,17 @@ func (r *Repo) run(args ...string) error {
 	return err
 }
 
-func (r *Repo) output(args ...string) ([]byte, error) {
-	return xexec.Command(args...).
+func (r *Repo) output(args ...string) (string, error) {
+	b, err := xexec.Command(args...).
 		WithEnvVars(CleanedGitEnv()).
 		WithWorkingDir(r.path).
 		WithStdout(nil).
 		Output()
+	if err != nil {
+		return "", err
+	}
+
+	return strings.TrimSpace(string(b)), nil
 }
 
 func (r *Repo) BranchExists(ref string) (bool, error) {
@@ -82,21 +86,19 @@ func (r *Repo) DeleteBranch(branch string) error {
 }
 
 func (r *Repo) GetCurrentBranchName() (string, error) {
-	output, err := r.output("git", "rev-parse", "--abbrev-ref", "HEAD")
-	if err != nil {
-		return "", err
-	}
+	return r.output("git", "rev-parse", "--abbrev-ref", "HEAD")
+}
 
-	return strings.TrimSpace(string(output)), nil
+func (r *Repo) GetLocalBranchNameForCommit(ref string) (string, error) {
+	return r.output("git", "name-rev", "--refs", "refs/heads/*", "--name-only", ref)
+}
+
+func (r *Repo) GetForkPoint(branchName string) (ref string, err error) {
+	return r.output("git", "merge-base", "--fork-point", branchName)
 }
 
 func (r *Repo) GetShortHash(ref string) (string, error) {
-	output, err := r.output("git", "rev-parse", "--short", ref)
-	if err != nil {
-		return "", err
-	}
-
-	return strings.TrimSpace(string(output)), nil
+	return r.output("git", "rev-parse", "--short", ref)
 }
 
 func (r *Repo) Push() error {
@@ -114,17 +116,17 @@ func (r *Repo) Pull() error {
 }
 
 func (r *Repo) GitVersion() (*version.Version, error) {
-	b, err := r.output("git", "--version")
+	s, err := r.output("git", "--version")
 	if err != nil {
 		return nil, err
 	}
 
-	v := bytes.SplitN(b, []byte(" "), 4)
+	v := strings.SplitN(s, " ", 4)
 	if len(v) < 3 {
-		return nil, fmt.Errorf("unable to parse version from: %s", string(b))
+		return nil, fmt.Errorf("unable to parse version from: %s", s)
 	}
 
-	versionStr := strings.TrimSpace(string(v[2]))
+	versionStr := v[2]
 
 	version, err := version.NewVersion(versionStr)
 	if err != nil {
