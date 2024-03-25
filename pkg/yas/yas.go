@@ -13,6 +13,7 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/hashicorp/go-version"
+	"github.com/heimdalr/dag"
 	"github.com/sourcegraph/conc/pool"
 )
 
@@ -125,6 +126,40 @@ func (yas *YAS) fetchGitHubPullRequestStatus(branchName string) (*PullRequestMet
 	}
 
 	return &data[0], nil
+}
+
+func (yas *YAS) List() error {
+	graph := dag.NewDAG()
+
+	trunkBranch := yas.data.Branches.Get(yas.cfg.TrunkBranch)
+	graph.AddVertexByID(yas.cfg.TrunkBranch, trunkBranch)
+
+	for _, branch := range yas.data.Branches.ToSlice().WithParents() {
+		graph.AddVertexByID(branch.Name, branch)
+	}
+
+	for _, branch := range yas.data.Branches.ToSlice().WithParents() {
+		graph.AddEdge(branch.Parent, branch.Name)
+	}
+
+	stacks, err := graph.GetChildren(yas.cfg.TrunkBranch)
+	if err != nil {
+		return err
+	}
+
+	for branchName := range stacks {
+		children, err := graph.GetOrderedDescendants(branchName)
+		if err != nil {
+			return err
+		}
+
+		tree := []string{branchName}
+		tree = append(tree, children...)
+
+		fmt.Printf("* %s\n", strings.Join(tree, " → "))
+	}
+
+	return nil
 }
 
 func (yas *YAS) SetParent(branchName, parentBranchName string) error {

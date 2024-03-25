@@ -59,6 +59,12 @@ func (b *Branches) Set(data BranchMetadata) {
 	*b = n
 }
 
+func (b Branches) WithParents() Branches {
+	return b.filter(func(b BranchMetadata) bool {
+		return b.Parent != ""
+	})
+}
+
 func (b Branches) WithPRs() Branches {
 	return b.filter(func(b BranchMetadata) bool {
 		return b.GitHubPullRequest.ID != ""
