@@ -1,6 +1,7 @@
 package gitexec
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -86,11 +87,20 @@ func (r *Repo) DeleteBranch(branch string) error {
 }
 
 func (r *Repo) GetCurrentBranchName() (string, error) {
-	return r.output("git", "rev-parse", "--abbrev-ref", "HEAD")
+	s, err := r.output("git", "branch", "--show-current")
+	if err != nil {
+		return "", err
+	}
+
+	if s == "" {
+		return "", errors.New("currently in detached state")
+	}
+
+	return s, nil
 }
 
 func (r *Repo) GetLocalBranchNameForCommit(ref string) (string, error) {
-	return r.output("git", "name-rev", "--refs", "refs/heads/*", "--name-only", ref)
+	return r.output("git", "branch", "--points-at", ref, "--format=%(refname:lstrip=2)")
 }
 
 func (r *Repo) GetForkPoint(branchName string) (ref string, err error) {
@@ -103,6 +113,13 @@ func (r *Repo) GetShortHash(ref string) (string, error) {
 
 func (r *Repo) Push() error {
 	return xexec.Command("git", "push").
+		WithEnvVars(CleanedGitEnv()).
+		WithWorkingDir(r.path).
+		Run()
+}
+
+func (r *Repo) Rebase(upstream, branchName string) error {
+	return xexec.Command("git", "rebase", upstream, branchName, "--update-refs").
 		WithEnvVars(CleanedGitEnv()).
 		WithWorkingDir(r.path).
 		Run()

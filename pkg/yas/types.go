@@ -9,7 +9,7 @@ import (
 type BranchMetadata struct {
 	Name              string
 	GitHubPullRequest PullRequestMetadata
-	Parent            string `json:"omitempty"`
+	Parent            string `json:",omitempty"`
 }
 
 type PullRequestMetadata struct {

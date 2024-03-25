@@ -60,6 +60,7 @@ func Run(args ...string) (exitCode int) {
 	mustAddCommand(parser.AddCommand("init", "Set up initial configuration", "", &initCmd{}))
 	mustAddCommand(parser.AddCommand("list", "List stacks", "", &listCmd{}))
 	mustAddCommand(parser.AddCommand("submit", "Submit", "", &submitCmd{}))
+	mustAddCommand(parser.AddCommand("restack", "Rebase all branches in the current stack", "", &restackCmd{}))
 	mustAddCommand(parser.AddCommand("sync", "Sync", "", &syncCmd{}))
 
 	_, err := parser.ParseArgs(args)

@@ -31,12 +31,12 @@ type YAS struct {
 func New(cfg Config) (*YAS, error) {
 	repo, err := git.PlainOpen(cfg.RepoDirectory)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to open git repo: %w", err)
 	}
 
 	data, err := loadData(path.Join(cfg.RepoDirectory, yasStateFile))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to load YAS state: %w", err)
 	}
 
 	yas := &YAS{
@@ -47,7 +47,7 @@ func New(cfg Config) (*YAS, error) {
 	}
 
 	if err := yas.validate(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("validation failed: %w", err)
 	}
 
 	return yas, nil
@@ -56,7 +56,7 @@ func New(cfg Config) (*YAS, error) {
 func NewFromRepository(repoDirectory string) (*YAS, error) {
 	cfg, err := ReadConfig(repoDirectory)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read config")
 	}
 
 	return New(*cfg)
@@ -128,29 +128,69 @@ func (yas *YAS) fetchGitHubPullRequestStatus(branchName string) (*PullRequestMet
 	return &data[0], nil
 }
 
-func (yas *YAS) List() error {
+func (yas *YAS) graph() (*dag.DAG, error) {
 	graph := dag.NewDAG()
 
 	trunkBranch := yas.data.Branches.Get(yas.cfg.TrunkBranch)
 	graph.AddVertexByID(yas.cfg.TrunkBranch, trunkBranch)
 
 	for _, branch := range yas.data.Branches.ToSlice().WithParents() {
-		graph.AddVertexByID(branch.Name, branch)
+		graph.AddVertexByID(branch.Name, branch) // TODO handle errors
 	}
 
 	for _, branch := range yas.data.Branches.ToSlice().WithParents() {
-		graph.AddEdge(branch.Parent, branch.Name)
+		graph.AddEdge(branch.Parent, branch.Name) // TODO handle errors
 	}
 
-	stacks, err := graph.GetChildren(yas.cfg.TrunkBranch)
+	return graph, nil
+}
+
+func (yas *YAS) Restack() error {
+	graph, err := yas.graph()
 	if err != nil {
 		return err
 	}
 
+	currentBranchName, err := yas.git.GetCurrentBranchName()
+	if err != nil {
+		return err
+	}
+
+	vertex, err := graph.GetVertex(currentBranchName)
+	if err != nil {
+		return err
+	}
+
+	descendents, _, err := graph.GetDescendantsGraph(vertex.(BranchMetadata).Name)
+	if err != nil {
+		return err
+	}
+
+	for _, v := range descendents.GetLeaves() {
+		if err := yas.git.Rebase(yas.cfg.TrunkBranch, v.(BranchMetadata).Name); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (yas *YAS) List() error {
+	graph, err := yas.graph()
+	if err != nil {
+		return fmt.Errorf("failed to get graph: %w")
+	}
+
+	stacks, err := graph.GetChildren(yas.cfg.TrunkBranch)
+	if err != nil {
+		return fmt.Errorf("failed to get stacks: %w")
+	}
+
 	for branchName := range stacks {
+		// TODO: bug, we are only showing first branch in the tree
 		children, err := graph.GetOrderedDescendants(branchName)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to get descendents: %w")
 		}
 
 		tree := []string{branchName}
