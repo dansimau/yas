@@ -12,8 +12,11 @@ import (
 	"github.com/dansimau/yas/pkg/xexec"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/hashicorp/go-version"
 	"github.com/sourcegraph/conc/pool"
 )
+
+var minimumRequiredGitVersion = version.Must(version.NewVersion("2.38"))
 
 const yasStateFile = ".git/.yasstate"
 
@@ -35,12 +38,18 @@ func New(cfg Config) (*YAS, error) {
 		return nil, err
 	}
 
-	return &YAS{
+	yas := &YAS{
 		cfg:  cfg,
 		data: data,
 		git:  gitexec.WithRepo(cfg.RepoDirectory),
 		repo: repo,
-	}, nil
+	}
+
+	if err := yas.validate(); err != nil {
+		return nil, err
+	}
+
+	return yas, nil
 }
 
 func NewFromRepository(repoDirectory string) (*YAS, error) {
@@ -50,6 +59,11 @@ func NewFromRepository(repoDirectory string) (*YAS, error) {
 	}
 
 	return New(*cfg)
+}
+
+func (yas *YAS) cleanupBranch(name string) error {
+	yas.data.Branches.Remove(name)
+	return yas.data.Save()
 }
 
 func (yas *YAS) Config() Config {
@@ -93,6 +107,26 @@ func (yas *YAS) DeleteBranch(name string) error {
 	return nil
 }
 
+func (yas *YAS) fetchGitHubPullRequestStatus(branchName string) (*PullRequestMetadata, error) {
+	log.Info("Fetching PRs for branch", branchName)
+
+	b, err := xexec.Command("gh", "pr", "list", "--head", branchName, "--state", "all", "--json", "id,state").WithStdout(nil).Output()
+	if err != nil {
+		return nil, err
+	}
+
+	data := []PullRequestMetadata{}
+	if err := json.Unmarshal(b, &data); err != nil {
+		return nil, err
+	}
+
+	if len(data) == 0 {
+		return nil, nil
+	}
+
+	return &data[0], nil
+}
+
 func (yas *YAS) Submit() error {
 	currentBranch, err := yas.git.GetCurrentBranchName()
 	if err != nil {
@@ -118,14 +152,14 @@ func (yas *YAS) Submit() error {
 	return nil
 }
 
+func (yas *YAS) TrackedBranches() Branches {
+	return yas.data.Branches.ToSlice()
+}
+
 // UpdateConfig sets the new config and writes it to the configuration file.
 func (yas *YAS) UpdateConfig(cfg Config) (string, error) {
 	yas.cfg = cfg
 	return WriteConfig(cfg)
-}
-
-func (yas *YAS) TrackedBranches() Branches {
-	return yas.data.Branches.ToSlice()
 }
 
 func (yas *YAS) UntrackedBranches() ([]string, error) {
@@ -188,11 +222,6 @@ func (yas *YAS) RefreshRemoteStatus(branchNames ...string) error {
 	return nil
 }
 
-func (yas *YAS) cleanupBranch(name string) error {
-	yas.data.Branches.Remove(name)
-	return yas.data.Save()
-}
-
 func (yas *YAS) UpdateTrunk() error {
 	if err := yas.git.Checkout(yas.cfg.TrunkBranch); err != nil {
 		return err
@@ -204,22 +233,15 @@ func (yas *YAS) UpdateTrunk() error {
 	return yas.git.Pull()
 }
 
-func (yas *YAS) fetchGitHubPullRequestStatus(branchName string) (*PullRequestMetadata, error) {
-	log.Info("Fetching PRs for branch", branchName)
-
-	b, err := xexec.Command("gh", "pr", "list", "--head", branchName, "--state", "all", "--json", "id,state").WithStdout(nil).Output()
+func (yas *YAS) validate() error {
+	gitVersion, err := yas.git.GitVersion()
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("unable to determine git version: %w", err)
 	}
 
-	data := []PullRequestMetadata{}
-	if err := json.Unmarshal(b, &data); err != nil {
-		return nil, err
+	if gitVersion.LessThan(minimumRequiredGitVersion) {
+		return fmt.Errorf("git version %s is less than the required version %s", gitVersion.String(), minimumRequiredGitVersion.String())
 	}
 
-	if len(data) == 0 {
-		return nil, nil
-	}
-
-	return &data[0], nil
+	return nil
 }

@@ -1,12 +1,14 @@
 package gitexec
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 
 	"github.com/dansimau/yas/pkg/xexec"
+	"github.com/hashicorp/go-version"
 )
 
 type CloneOptions struct {
@@ -109,6 +111,27 @@ func (r *Repo) Pull() error {
 		WithEnvVars(CleanedGitEnv()).
 		WithWorkingDir(r.path).
 		Run()
+}
+
+func (r *Repo) GitVersion() (*version.Version, error) {
+	b, err := r.output("git", "--version")
+	if err != nil {
+		return nil, err
+	}
+
+	v := bytes.SplitN(b, []byte(" "), 4)
+	if len(v) < 3 {
+		return nil, fmt.Errorf("unable to parse version from: %s", string(b))
+	}
+
+	versionStr := strings.TrimSpace(string(v[2]))
+
+	version, err := version.NewVersion(versionStr)
+	if err != nil {
+		return nil, err
+	}
+
+	return version, nil
 }
 
 // CleanedGitEnv ensures we have a clean environment to execute the git
