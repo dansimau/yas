@@ -15,6 +15,7 @@ import (
 	"github.com/hashicorp/go-version"
 	"github.com/heimdalr/dag"
 	"github.com/sourcegraph/conc/pool"
+	"github.com/xlab/treeprint"
 )
 
 var minimumRequiredGitVersion = version.Must(version.NewVersion("2.38"))
@@ -175,29 +176,28 @@ func (yas *YAS) Restack() error {
 	return nil
 }
 
+func (yas *YAS) toTree(graph *dag.DAG, rootNode string) (treeprint.Tree, error) {
+	tree := treeprint.NewWithRoot(rootNode)
+
+	if err := addNodesFromGraph(tree, graph, rootNode); err != nil {
+		return nil, err
+	}
+
+	return tree, nil
+}
+
 func (yas *YAS) List() error {
 	graph, err := yas.graph()
 	if err != nil {
-		return fmt.Errorf("failed to get graph: %w")
+		return fmt.Errorf("failed to get graph: %w", err)
 	}
 
-	stacks, err := graph.GetChildren(yas.cfg.TrunkBranch)
+	tree, err := yas.toTree(graph, yas.cfg.TrunkBranch)
 	if err != nil {
-		return fmt.Errorf("failed to get stacks: %w")
+		return err
 	}
 
-	for branchName := range stacks {
-		// TODO: bug, we are only showing first branch in the tree
-		children, err := graph.GetOrderedDescendants(branchName)
-		if err != nil {
-			return fmt.Errorf("failed to get descendents: %w")
-		}
-
-		tree := []string{branchName}
-		tree = append(tree, children...)
-
-		fmt.Printf("* %s\n", strings.Join(tree, " → "))
-	}
+	fmt.Print(tree.String())
 
 	return nil
 }
