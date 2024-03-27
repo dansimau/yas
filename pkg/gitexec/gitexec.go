@@ -75,7 +75,7 @@ func (r *Repo) BranchExists(ref string) (bool, error) {
 }
 
 func (r *Repo) Checkout(ref string) error {
-	return r.run("git", "checkout", "-q", ref)
+	return r.run("git", "-c", "core.hooksPath=/dev/null", "checkout", "-q", ref)
 }
 
 func (r *Repo) DeleteBranch(branch string) error {
@@ -119,7 +119,7 @@ func (r *Repo) Push() error {
 }
 
 func (r *Repo) Rebase(upstream, branchName string) error {
-	return xexec.Command("git", "rebase", upstream, branchName, "--update-refs").
+	return xexec.Command("git", "-c", "core.hooksPath=/dev/null", "rebase", upstream, branchName, "--update-refs").
 		WithEnvVars(CleanedGitEnv()).
 		WithWorkingDir(r.path).
 		Run()
