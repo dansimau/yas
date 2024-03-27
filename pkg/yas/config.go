@@ -22,7 +22,7 @@ func IsConfigured(repoDirectory string) bool {
 
 func ReadConfig(repoDirectory string) (*Config, error) {
 	if !IsConfigured(repoDirectory) {
-		return nil, errors.New("repository not configured")
+		return nil, errors.New("repository not configured (hint: run `yas init`)")
 	}
 
 	yamlBytes, err := os.ReadFile(path.Join(repoDirectory, configFilename))
@@ -49,7 +49,7 @@ func WriteConfig(cfg Config) (string, error) {
 	}
 
 	configFilePath := path.Join(cfg.RepoDirectory, configFilename)
-	if err := os.WriteFile(configFilePath, yamlBytes, 0644); err != nil {
+	if err := os.WriteFile(configFilePath, yamlBytes, 0o644); err != nil {
 		return "", err
 	}
 

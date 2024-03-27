@@ -57,7 +57,7 @@ func New(cfg Config) (*YAS, error) {
 func NewFromRepository(repoDirectory string) (*YAS, error) {
 	cfg, err := ReadConfig(repoDirectory)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read config")
+		return nil, fmt.Errorf("failed to read config: %w", err)
 	}
 
 	return New(*cfg)

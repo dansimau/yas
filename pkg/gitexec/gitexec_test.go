@@ -5,11 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"gotest.tools/v3/assert"
 )
 
 func TestCleanGitEnvVars(t *testing.T) {
-
 	testEnvName := "GIT_TEST_VAR"
 	testEnvValue := "foo"
 
@@ -24,7 +23,7 @@ func TestCleanGitEnvVars(t *testing.T) {
 		}
 	}
 
-	assert.True(t, containsGitVar)
+	assert.Assert(t, containsGitVar)
 
 	cleanedEnvVars := CleanedGitEnv()
 	containsGitVar = false
@@ -35,6 +34,5 @@ func TestCleanGitEnvVars(t *testing.T) {
 		}
 	}
 
-	assert.False(t, containsGitVar)
-
+	assert.Assert(t, !containsGitVar)
 }

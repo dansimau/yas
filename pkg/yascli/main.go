@@ -39,7 +39,7 @@ func Run(args ...string) (exitCode int) {
 		if cmd.RepoDirectory == "" {
 			gitDir, err := fsutil.SearchParentsForPathFromCwd(".git")
 			if err != nil {
-				return NewError(err.Error())
+				return NewError("cannot find repository (.git directory) (hint: specify --repo or run yas from inside repostory)")
 			}
 
 			repoDir := path.Dir(gitDir)
