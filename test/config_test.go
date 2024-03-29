@@ -1,4 +1,4 @@
-package yas_test
+package test
 
 import (
 	"testing"

@@ -11,12 +11,19 @@ type configSetCmd struct {
 }
 
 func (c *configSetCmd) Execute(args []string) error {
-	yasInstance, err := yas.NewFromRepository(cmd.RepoDirectory)
-	if err != nil {
-		return NewError(err.Error())
+	cfg := &yas.Config{
+		RepoDirectory: cmd.RepoDirectory,
 	}
 
-	cfg := yasInstance.Config()
+	if yas.IsConfigured(cmd.RepoDirectory) {
+		_cfg, err := yas.ReadConfig(cmd.RepoDirectory)
+		if err != nil {
+			return NewError(err.Error())
+		}
+
+		cfg = _cfg
+	}
+
 	changed := false
 
 	if c.TrunkBranch != nil {
@@ -28,7 +35,7 @@ func (c *configSetCmd) Execute(args []string) error {
 		if cmd.DryRun {
 			fmt.Println("[DRY-RUN] Not writing config")
 		} else {
-			f, err := yasInstance.UpdateConfig(cfg)
+			f, err := yas.WriteConfig(*cfg)
 			if err != nil {
 				return NewError(err.Error())
 			}

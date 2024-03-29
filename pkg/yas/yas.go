@@ -357,7 +357,8 @@ func (yas *YAS) validate() error {
 	}
 
 	if gitVersion.LessThan(minimumRequiredGitVersion) {
-		return fmt.Errorf("git version %s is less than the required version %s", gitVersion.String(), minimumRequiredGitVersion.String())
+		path, _ := yas.git.GitPath()
+		return fmt.Errorf("git version %s (%s) is less than the required version %s", gitVersion.String(), path, minimumRequiredGitVersion.String())
 	}
 
 	return nil

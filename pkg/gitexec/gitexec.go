@@ -3,7 +3,6 @@ package gitexec
 import (
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 
@@ -83,7 +82,6 @@ func (r *Repo) DeleteBranch(branch string) error {
 		WithEnvVars(CleanedGitEnv()).
 		WithWorkingDir(r.path).
 		Run()
-
 }
 
 func (r *Repo) GetCurrentBranchName() (string, error) {
@@ -132,6 +130,15 @@ func (r *Repo) Pull() error {
 		Run()
 }
 
+func (r *Repo) GitPath() (path string, err error) {
+	path, err = r.output("which", "git")
+	if err != nil {
+		return "", err
+	}
+
+	return path, nil
+}
+
 func (r *Repo) GitVersion() (*version.Version, error) {
 	s, err := r.output("git", "--version")
 	if err != nil {
@@ -151,22 +158,4 @@ func (r *Repo) GitVersion() (*version.Version, error) {
 	}
 
 	return version, nil
-}
-
-// CleanedGitEnv ensures we have a clean environment to execute the git
-// binary in. If we don't clean this, GIT_ variables from a parent git context
-// could interfere with our subcommands (for example, if we are running inside
-// a pre-commit hook or on CI).
-func CleanedGitEnv() []string {
-	newEnv := []string{}
-
-	for _, envVar := range os.Environ() {
-		if strings.HasPrefix(envVar, "GIT_") {
-			continue
-		}
-
-		newEnv = append(newEnv, envVar)
-	}
-
-	return newEnv
 }
