@@ -262,7 +262,17 @@ func (yas *YAS) Submit() error {
 		return fmt.Errorf("failed to push: %w", err)
 	}
 
-	if err := xexec.Command("gh", "pr", "create", "--draft", "--fill-first").Run(); err != nil {
+	prCreateArgs := []string{
+		"--draft",
+		"--fill-first",
+	}
+
+	metadata := yas.data.Branches.Get(currentBranch)
+	if metadata.Parent != "" {
+		prCreateArgs = append(prCreateArgs, "--base", metadata.Parent)
+	}
+
+	if err := xexec.Command(append([]string{"gh", "pr", "create"}, prCreateArgs...)...).Run(); err != nil {
 		return err
 	}
 
