@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 yas (Yet Another Stacked Diff Tool) is a CLI tool for managing stacked PRs on GitHub, written in Go. It enables developers to create and maintain hierarchical branches where each branch depends on its parent, forming a stack of changes.
 
-## Build and Test Commands
+## Build, Test & Lint Commands
 
 ```bash
 # Build the binary
@@ -24,6 +24,9 @@ go test ./test -run TestUpdateTrunk
 
 # Run tests with verbose output
 go test -v ./...
+
+# Run lint checks
+make lint
 ```
 
 ## Architecture

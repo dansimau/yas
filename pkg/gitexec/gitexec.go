@@ -73,6 +73,54 @@ func (r *Repo) BranchExists(ref string) (bool, error) {
 	return true, nil
 }
 
+func (r *Repo) RemoteBranchExists(ref string) (bool, error) {
+	if err := r.run("git", "show-ref", "refs/remotes/origin/"+ref); err != nil {
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
+			return false, err
+		}
+
+		// Exit code 1 means the branch doesn't exist
+		if exitErr.ExitCode() == 1 {
+			return false, nil
+		}
+
+		// Unrecognized exit code
+		return false, err
+	}
+
+	return true, nil
+}
+
+// DetectMainBranch attempts to automatically detect the main branch name.
+// It checks for common branch names ("main", "master") in both local and remote branches,
+// returning the first match found.
+func (r *Repo) DetectMainBranch() (string, error) {
+	candidates := []string{"main", "master"}
+
+	for _, candidate := range candidates {
+		// Check local branch first
+		exists, err := r.BranchExists(candidate)
+		if err != nil {
+			return "", err
+		}
+		if exists {
+			return candidate, nil
+		}
+
+		// Check remote branch
+		exists, err = r.RemoteBranchExists(candidate)
+		if err != nil {
+			return "", err
+		}
+		if exists {
+			return candidate, nil
+		}
+	}
+
+	return "", nil
+}
+
 func (r *Repo) Checkout(ref string) error {
 	return r.run("git", "-c", "core.hooksPath=/dev/null", "checkout", "-q", ref)
 }

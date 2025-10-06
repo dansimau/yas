@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/dansimau/yas/pkg/cliutil"
+	"github.com/dansimau/yas/pkg/gitexec"
 	"github.com/dansimau/yas/pkg/yas"
 )
 
@@ -22,6 +23,14 @@ func (c *initCmd) Execute(args []string) error {
 		}
 
 		cfg = _cfg
+	}
+
+	// If no trunk branch is already configured, try to auto-detect it
+	if cfg.TrunkBranch == "" {
+		repo := gitexec.WithRepo(cmd.RepoDirectory)
+		if detectedBranch, err := repo.DetectMainBranch(); err == nil && detectedBranch != "" {
+			cfg.TrunkBranch = detectedBranch
+		}
 	}
 
 	cfg.TrunkBranch = cliutil.Prompt(cliutil.PromptOptions{
