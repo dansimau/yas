@@ -77,11 +77,19 @@ func (r *Repo) Checkout(ref string) error {
 	return r.run("git", "-c", "core.hooksPath=/dev/null", "checkout", "-q", ref)
 }
 
+func (r *Repo) CreateBranch(branch string) error {
+	return r.run("git", "checkout", "-b", branch)
+}
+
 func (r *Repo) DeleteBranch(branch string) error {
 	return xexec.Command("git", "branch", "-D", branch).
 		WithEnvVars(CleanedGitEnv()).
 		WithWorkingDir(r.path).
 		Run()
+}
+
+func (r *Repo) GetConfig(key string) (string, error) {
+	return r.output("git", "config", key)
 }
 
 func (r *Repo) GetCurrentBranchName() (string, error) {
