@@ -7,23 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/olekukonko/tablewriter"
 	"golang.org/x/term"
 )
-
-func PrintTable(rows [][]string) {
-	table := tablewriter.NewWriter(os.Stdout)
-	table.SetAutoFormatHeaders(false)
-	table.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
-	table.SetHeader(rows[0])
-	table.SetBorder(false)
-
-	for _, row := range rows[1:] {
-		table.Append(row)
-	}
-
-	table.Render()
-}
 
 type PromptOptions struct {
 	Text      string
