@@ -53,3 +53,64 @@ func TestUpdateTrunk(t *testing.T) {
 		`)
 	})
 }
+
+func TestUpdateTrunkTopicA(t *testing.T) {
+	testutil.WithTempWorkingDir(t, func() {
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+
+			# main
+			touch main
+			git add main
+			git commit -m "main-0"
+
+			# main -> topic-a
+			git checkout -b topic-a
+			touch a
+			git add a
+			git commit -m "topic-a-0"
+
+			# main -> topic-a ->topic-b
+			git checkout -b topic-b
+			touch b
+			git add b
+			git commit -m "topic-b-0"
+
+			# update main
+			# main
+			# (ref) -> topic-a -> topic-b
+			git checkout main
+			echo 1 > main
+			git add main
+			git commit -m "main-1"
+
+			# update topic-a
+			# main
+			# (ref) -> (ref) -> topic-a
+			# (ref) -> (ref) -> topic-b
+			git checkout topic-a
+			echo 1 > a
+			git add a
+			git commit -m "topic-a-1"
+
+			# on branch topic-b
+			git checkout topic-b
+		`)
+
+		// After restack:
+		// main -> topic-a -> topic-b
+
+		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
+		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "--branch=topic-b", "--parent=topic-a"), 0)
+		assert.Equal(t, yascli.Run("restack"), 0)
+
+		equalLines(t, mustExecOutput("git", "log", "--pretty=%D : %s"), `
+			HEAD -> topic-b : topic-b-0
+			topic-a : topic-a-1
+			: topic-a-0
+			main : main-1
+			: main-0
+		`)
+	})
+}

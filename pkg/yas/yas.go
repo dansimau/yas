@@ -146,6 +146,8 @@ func (yas *YAS) graph() (*dag.DAG, error) {
 	return graph, nil
 }
 
+// Restack rebases all branches in the current stack from top to the current
+// branch.
 func (yas *YAS) Restack() error {
 	graph, err := yas.graph()
 	if err != nil {
@@ -157,18 +159,41 @@ func (yas *YAS) Restack() error {
 		return err
 	}
 
-	vertex, err := graph.GetVertex(currentBranchName)
-	if err != nil {
-		return err
+	rebaseQueue := []string{}
+
+	// Walk back up to top of stack (trunk or a branch without parent)
+	topBranch := currentBranchName
+	for topBranch != yas.cfg.TrunkBranch {
+		rebaseQueue = append(rebaseQueue, topBranch)
+
+		parents, err := graph.GetParents(topBranch)
+		if err != nil {
+			return err
+		}
+		if len(parents) == 0 {
+			break
+		}
+		// There should only be one parent
+		for parentID := range parents {
+			topBranch = parentID
+			break
+		}
 	}
 
-	descendents, _, err := graph.GetDescendantsGraph(vertex.(BranchMetadata).Name)
-	if err != nil {
-		return err
-	}
+	// Reverse the queue to go from top to bottom (trunk to current branch)
+	for i := len(rebaseQueue) - 1; i >= 0; i-- {
+		branchName := rebaseQueue[i]
 
-	for _, v := range descendents.GetLeaves() {
-		if err := yas.git.Rebase(yas.cfg.TrunkBranch, v.(BranchMetadata).Name); err != nil {
+		// The parent branch is either the next branch in the queue (towards trunk), or the trunk branch itself
+		var parentBranch string
+		if i == len(rebaseQueue)-1 {
+			parentBranch = yas.cfg.TrunkBranch
+		} else {
+			parentBranch = rebaseQueue[i+1]
+		}
+
+		// Rebase this branch onto its parent
+		if err := yas.git.Rebase(parentBranch, branchName); err != nil {
 			return err
 		}
 	}

@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"golang.org/x/term"
 	"gopkg.in/alessio/shellescape.v1"
 )
 
@@ -64,7 +65,11 @@ func (c *Cmd) debugPrintCmd() {
 		quotedArgs = append(quotedArgs, shellescape.Quote(arg))
 	}
 
-	fmt.Fprintf(os.Stderr, "\033[1;30m+ %s\033[0m\n", strings.Join(quotedArgs, " "))
+	if term.IsTerminal(int(os.Stdout.Fd())) {
+		fmt.Fprintf(os.Stderr, "\033[1;30m+ %s\033[0m\n", strings.Join(quotedArgs, " "))
+	} else {
+		fmt.Fprintf(os.Stderr, "+ %s\n", strings.Join(quotedArgs, " "))
+	}
 }
 
 // Run is like exec.Run that always captures stderr output into the returned
