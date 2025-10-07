@@ -35,15 +35,16 @@ Prompt:
 
 	input := strings.TrimSpace(scanner.Text())
 
+	// Apply default value if input is empty
+	if input == "" && opts.Default != "" {
+		input = opts.Default
+	}
+
 	if opts.Validator != nil {
 		if err := opts.Validator(input); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			goto Prompt
 		}
-	}
-
-	if input == "" && opts.Default != "" {
-		return opts.Default
 	}
 
 	return input
