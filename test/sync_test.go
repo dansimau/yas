@@ -194,16 +194,17 @@ func TestSync_HandlesMultipleChildrenWhenParentMerged(t *testing.T) {
 		assert.Assert(t, exists, "topic-c should still exist")
 		assert.Equal(t, topicC.Parent, "main", "topic-c should now be a child of main")
 
-		// Verify git history for both branches
 		testutil.ExecOrFail(t, "git checkout topic-b")
 		equalLines(t, mustExecOutput("git", "log", "--pretty=%D : %s"), `
 			HEAD -> topic-b : topic-b-0
+			 : topic-a-0
 			main : main-0
 		`)
 
 		testutil.ExecOrFail(t, "git checkout topic-c")
 		equalLines(t, mustExecOutput("git", "log", "--pretty=%D : %s"), `
 			HEAD -> topic-c : topic-c-0
+			 : topic-a-0
 			main : main-0
 		`)
 	})
