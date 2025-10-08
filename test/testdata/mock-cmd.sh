@@ -40,19 +40,49 @@ case "$CMD_NAME" in
     gh)
         # Handle gh commands
         if [[ "$1" == "pr" && "$2" == "list" ]]; then
+            # Extract the branch from --head argument
+            head_branch=""
+            for ((i=1; i<=$#; i++)); do
+                if [[ "${!i}" == "--head" ]]; then
+                    ((i++))
+                    head_branch="${!i}"
+                    break
+                fi
+            done
+
             # Check if we should return an existing PR
             if [ -n "$YAS_TEST_EXISTING_PR_ID" ]; then
                 state="${YAS_TEST_PR_STATE:-OPEN}"
                 url="${YAS_TEST_PR_URL:-https://github.com/test/test/pull/1}"
                 isDraft="${YAS_TEST_PR_IS_DRAFT:-false}"
                 echo "[{\"id\":\"$YAS_TEST_EXISTING_PR_ID\",\"state\":\"$state\",\"url\":\"$url\",\"isDraft\":$isDraft}]"
+            elif [ -f "/tmp/yas-test-pr-created-$head_branch" ]; then
+                # PR was created in this test session
+                pr_url=$(cat "/tmp/yas-test-pr-created-$head_branch")
+                echo "[{\"id\":\"PR_CREATED\",\"state\":\"OPEN\",\"url\":\"$pr_url\",\"isDraft\":true}]"
             else
                 echo "[]"
             fi
             exit 0
         elif [[ "$1" == "pr" && "$2" == "create" ]]; then
+            # Extract the branch from --head argument
+            head_branch=""
+            for ((i=1; i<=$#; i++)); do
+                if [[ "${!i}" == "--head" ]]; then
+                    ((i++))
+                    head_branch="${!i}"
+                    break
+                fi
+            done
+
             # Simulate successful PR creation
-            echo "https://github.com/test/test/pull/1"
+            pr_url="https://github.com/test/test/pull/1"
+            echo "$pr_url"
+
+            # Save that we created a PR for this branch
+            if [ -n "$head_branch" ]; then
+                echo "$pr_url" > "/tmp/yas-test-pr-created-$head_branch"
+            fi
             exit 0
         elif [[ "$1" == "pr" && "$2" == "view" ]]; then
             # Return mock PR body

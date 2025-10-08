@@ -434,7 +434,17 @@ func (yas *YAS) Submit() error {
 		return errors.New("cannot submit in detached HEAD state")
 	}
 
-	return yas.submitBranch(currentBranch)
+	if err := yas.submitBranch(currentBranch); err != nil {
+		return err
+	}
+
+	// Annotate the PR with stack information
+	if err := yas.annotateBranch(currentBranch); err != nil {
+		// Don't fail the submit if annotation fails
+		fmt.Printf("Warning: failed to annotate PR: %v\n", err)
+	}
+
+	return nil
 }
 
 func (yas *YAS) SubmitStack() error {
@@ -478,6 +488,12 @@ func (yas *YAS) submitDescendants(graph *dag.DAG, branchName string) error {
 		fmt.Printf("\n=== Submitting %s ===\n", childID)
 		if err := yas.submitBranch(childID); err != nil {
 			return fmt.Errorf("failed to submit %s: %w", childID, err)
+		}
+
+		// Annotate the PR with stack information
+		if err := yas.annotateBranch(childID); err != nil {
+			// Don't fail the submit if annotation fails
+			fmt.Printf("Warning: failed to annotate PR for %s: %v\n", childID, err)
 		}
 
 		// Recursively submit this branch's descendants
@@ -527,6 +543,11 @@ func (yas *YAS) submitBranch(branchName string) error {
 		return err
 	}
 
+	// Refresh the remote status to get the new PR metadata
+	if err := yas.refreshRemoteStatus(branchName); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -540,14 +561,18 @@ func (yas *YAS) Annotate() error {
 		return errors.New("cannot annotate in detached HEAD state")
 	}
 
-	// Get the current branch metadata
-	metadata := yas.data.Branches.Get(currentBranch)
+	return yas.annotateBranch(currentBranch)
+}
+
+func (yas *YAS) annotateBranch(branchName string) error {
+	// Get the branch metadata
+	metadata := yas.data.Branches.Get(branchName)
 	if metadata.GitHubPullRequest.ID == "" {
-		return fmt.Errorf("current branch '%s' does not have a PR - run 'yas submit' first", currentBranch)
+		return fmt.Errorf("branch '%s' does not have a PR", branchName)
 	}
 
 	// Build the stack visualization
-	stackVisualization, err := yas.buildStackVisualization(currentBranch)
+	stackVisualization, err := yas.buildStackVisualization(branchName)
 	if err != nil {
 		return fmt.Errorf("failed to build stack visualization: %w", err)
 	}
