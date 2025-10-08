@@ -15,10 +15,11 @@ import (
 
 // mockPROptions holds options for mocking a PR
 type mockPROptions struct {
-	ID      string
-	State   string
-	URL     string
-	IsDraft bool
+	ID         string
+	State      string
+	URL        string
+	IsDraft    bool
+	BaseRefName string
 }
 
 // setupMockCommands creates mock git and gh commands that log to a file
@@ -62,6 +63,7 @@ func setupMockCommandsWithPR(t *testing.T, pr mockPROptions) (cmdLogFile string,
 	oldPRState := os.Getenv("YAS_TEST_PR_STATE")
 	oldPRURL := os.Getenv("YAS_TEST_PR_URL")
 	oldPRIsDraft := os.Getenv("YAS_TEST_PR_IS_DRAFT")
+	oldPRBaseRef := os.Getenv("YAS_TEST_PR_BASE_REF")
 
 	os.Setenv("PATH", tmpDir+":"+oldPath)
 	os.Setenv("YAS_TEST_REAL_GIT", realGit)
@@ -78,6 +80,9 @@ func setupMockCommandsWithPR(t *testing.T, pr mockPROptions) (cmdLogFile string,
 	if pr.IsDraft {
 		os.Setenv("YAS_TEST_PR_IS_DRAFT", "true")
 	}
+	if pr.BaseRefName != "" {
+		os.Setenv("YAS_TEST_PR_BASE_REF", pr.BaseRefName)
+	}
 
 	// Clean up any temp files from previous test runs
 	files, _ := filepath.Glob("/tmp/yas-test-pr-created-*")
@@ -93,6 +98,7 @@ func setupMockCommandsWithPR(t *testing.T, pr mockPROptions) (cmdLogFile string,
 		os.Setenv("YAS_TEST_PR_STATE", oldPRState)
 		os.Setenv("YAS_TEST_PR_URL", oldPRURL)
 		os.Setenv("YAS_TEST_PR_IS_DRAFT", oldPRIsDraft)
+		os.Setenv("YAS_TEST_PR_BASE_REF", oldPRBaseRef)
 		os.RemoveAll(tmpDir)
 
 		// Clean up temp PR files
@@ -359,4 +365,89 @@ func TestSubmit_CreatesNewPRWhenNoneExists(t *testing.T) {
 		// Verify gh pr create WAS called
 		assert.Assert(t, wasCalled(commands, "gh", "pr", "create"), "gh pr create should be called when no PR exists")
 	})
+}
+
+func TestSubmit_UpdatesPRBaseWhenLocalParentChanges(t *testing.T) {
+	// Mock an existing PR with base branch topic-a
+	cmdLogFile, cleanup := setupMockCommandsWithPR(t, mockPROptions{
+		ID:          "PR_kwDOTest123",
+		State:       "OPEN",
+		URL:         "https://github.com/test/test/pull/42",
+		IsDraft:     false,
+		BaseRefName: "topic-a", // PR currently targets topic-a
+	})
+	defer cleanup()
+
+	testutil.WithTempWorkingDir(t, func() {
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+			git remote add origin https://github.com/test/test.git
+
+			# main
+			touch main
+			git add main
+			git commit -m "main-0"
+
+			# topic-a
+			git checkout -b topic-a
+			touch a
+			git add a
+			git commit -m "topic-a-0"
+
+			# topic-b (originally child of topic-a)
+			git checkout -b topic-b
+			touch b
+			git add b
+			git commit -m "topic-b-0"
+		`)
+
+		// Initialize yas config
+		cfg := yas.Config{
+			RepoDirectory: ".",
+			TrunkBranch:   "main",
+		}
+		_, err := yas.WriteConfig(cfg)
+		assert.NilError(t, err)
+
+		// Create YAS instance
+		y, err := yas.NewFromRepository(".")
+		assert.NilError(t, err)
+
+		// Track topic-a and topic-b
+		err = y.SetParent("topic-a", "main")
+		assert.NilError(t, err)
+
+		// Set topic-b's parent to main (simulating a restack after topic-a was merged)
+		// But the PR still has topic-a as base
+		err = y.SetParent("topic-b", "main")
+		assert.NilError(t, err)
+
+		// Submit topic-b - should detect base mismatch and update
+		testutil.ExecOrFail(t, "git checkout topic-b")
+		err = y.Submit()
+		assert.NilError(t, err)
+
+		// Parse the command log
+		commands, err := parseCmdLog(cmdLogFile)
+		assert.NilError(t, err)
+
+		// Verify gh pr edit was called to update the base branch
+		editCmd := findCommand(commands, "gh", "pr", "edit")
+		assert.Assert(t, editCmd != nil, "gh pr edit should be called to update base branch")
+
+		// Verify the edit command includes --base main
+		if editCmd != nil {
+			assert.Assert(t, contains(editCmd, "--base"), "gh pr edit should include --base flag")
+			assert.Assert(t, contains(editCmd, "main"), "gh pr edit should update base to main")
+		}
+	})
+}
+
+func contains(slice []string, str string) bool {
+	for _, s := range slice {
+		if s == str {
+			return true
+		}
+	}
+	return false
 }
