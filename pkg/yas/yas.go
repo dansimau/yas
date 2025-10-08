@@ -253,6 +253,42 @@ func (yas *YAS) rebaseDescendants(graph *dag.DAG, branchName string) error {
 	return nil
 }
 
+func (yas *YAS) RestackBranchOntoParent(branchName string) error {
+	if strings.TrimSpace(branchName) == "" {
+		return errors.New("branch name cannot be empty")
+	}
+
+	branchMetadata := yas.data.Branches.Get(branchName)
+	parentBranch := branchMetadata.Parent
+	if parentBranch == "" {
+		parentBranch = yas.cfg.TrunkBranch
+	}
+
+	startingBranch, err := yas.git.GetCurrentBranchName()
+	if err != nil {
+		return err
+	}
+
+	if err := yas.git.Rebase(parentBranch, branchName); err != nil {
+		return err
+	}
+
+	graph, err := yas.graph()
+	if err != nil {
+		return err
+	}
+
+	if err := yas.rebaseDescendants(graph, branchName); err != nil {
+		return err
+	}
+
+	if err := yas.git.Checkout(startingBranch); err != nil {
+		return fmt.Errorf("restack succeeded but failed to return to branch %s: %w", startingBranch, err)
+	}
+
+	return nil
+}
+
 func (yas *YAS) toTree(graph *dag.DAG, rootNode string, currentBranch string) (treeprint.Tree, error) {
 	rootLabel := rootNode
 

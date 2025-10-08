@@ -33,6 +33,28 @@ func (c *syncCmd) checkForClosedPRs() error {
 			continue
 		}
 
+		parentBranch := branch.Parent
+		if parentBranch == "" {
+			parentBranch = c.yasInstance.Config().TrunkBranch
+		}
+
+		for _, child := range c.yasInstance.TrackedBranches().WithParent(branch.Name) {
+			if cmd.DryRun {
+				fmt.Printf("Would restack %s onto %s [DRY-RUN]\n", child.Name, parentBranch)
+				continue
+			}
+
+			fmt.Printf("🔁 Restacking %s onto %s...\n", child.Name, parentBranch)
+
+			if err := c.yasInstance.SetParent(child.Name, parentBranch); err != nil {
+				return fmt.Errorf("error updating parent for %s: %w", child.Name, err)
+			}
+
+			if err := c.yasInstance.RestackBranchOntoParent(child.Name); err != nil {
+				return fmt.Errorf("error restacking %s: %w", child.Name, err)
+			}
+		}
+
 		if !cmd.DryRun {
 			if err := c.yasInstance.DeleteBranch(branch.Name); err != nil {
 				return fmt.Errorf("error deleting branch %s: %w", branch.Name, err)

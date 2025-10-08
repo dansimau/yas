@@ -78,3 +78,9 @@ func (b Branches) WithPRStates(states ...string) Branches {
 		return slices.Contains(states, b.GitHubPullRequest.State)
 	})
 }
+
+func (b Branches) WithParent(parent string) Branches {
+	return b.filter(func(branch BranchMetadata) bool {
+		return branch.Parent == parent
+	})
+}
