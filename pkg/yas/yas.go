@@ -377,12 +377,22 @@ func (yas *YAS) Submit() error {
 		return fmt.Errorf("failed to push: %w", err)
 	}
 
+	metadata := yas.data.Branches.Get(currentBranch)
+
+	// Check if PR already exists
+	if metadata.GitHubPullRequest.ID != "" {
+		fmt.Printf("PR already exists (ID: %s, State: %s), pushed new commits\n",
+			metadata.GitHubPullRequest.ID,
+			metadata.GitHubPullRequest.State)
+		return nil
+	}
+
+	// Create new PR
 	prCreateArgs := []string{
 		"--draft",
 		"--fill-first",
 	}
 
-	metadata := yas.data.Branches.Get(currentBranch)
 	if metadata.Parent != "" {
 		prCreateArgs = append(prCreateArgs, "--base", metadata.Parent)
 	}
