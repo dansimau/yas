@@ -643,9 +643,8 @@ func (yas *YAS) formatStackLine(branchName string, indent int, isCurrent bool) s
 	line += "* "
 
 	if metadata.GitHubPullRequest.ID != "" {
-		// Format: [PR title](PR URL)
-		prTitle := getPRTitle(metadata.GitHubPullRequest.URL)
-		line += fmt.Sprintf("[%s](%s)", prTitle, metadata.GitHubPullRequest.URL)
+		// Just use the URL directly
+		line += metadata.GitHubPullRequest.URL
 	} else {
 		// No PR, just show branch name
 		line += branchName
@@ -656,13 +655,6 @@ func (yas *YAS) formatStackLine(branchName string, indent int, isCurrent bool) s
 	}
 
 	return line
-}
-
-func getPRTitle(prURL string) string {
-	// For now, extract PR number from URL and use it as title
-	// In a real implementation, we'd fetch the actual PR title
-	prNumber := extractPRNumber(prURL)
-	return fmt.Sprintf("#%s", prNumber)
 }
 
 func extractPRNumber(prURL string) string {
