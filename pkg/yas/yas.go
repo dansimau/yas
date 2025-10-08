@@ -218,7 +218,7 @@ func (yas *YAS) DeleteMergedBranch(name string) error {
 func (yas *YAS) fetchGitHubPullRequestStatus(branchName string) (*PullRequestMetadata, error) {
 	log.Info("Fetching PRs for branch", branchName)
 
-	b, err := xexec.Command("gh", "pr", "list", "--head", branchName, "--state", "all", "--json", "id,state,url,isDraft").WithStdout(nil).Output()
+	b, err := xexec.Command("gh", "pr", "list", "--head", branchName, "--state", "all", "--json", "id,state,url,isDraft,baseRefName").WithStdout(nil).Output()
 	if err != nil {
 		return nil, err
 	}
@@ -674,8 +674,32 @@ func (yas *YAS) submitBranch(branchName string) error {
 			state = "DRAFT"
 		}
 
+		// Check if base branch needs updating
+		needsBaseUpdate := metadata.Parent != "" &&
+			metadata.GitHubPullRequest.BaseRefName != "" &&
+			metadata.Parent != metadata.GitHubPullRequest.BaseRefName
+
+		if needsBaseUpdate {
+			prNumber := extractPRNumber(metadata.GitHubPullRequest.URL)
+			fmt.Printf("Updating PR base branch from %s to %s...\n",
+				metadata.GitHubPullRequest.BaseRefName,
+				metadata.Parent)
+
+			if err := xexec.Command("gh", "pr", "edit", prNumber, "--base", metadata.Parent).Run(); err != nil {
+				return fmt.Errorf("failed to update PR base branch: %w", err)
+			}
+
+			// Refresh remote status to update our cached base branch
+			if err := yas.refreshRemoteStatus(branchName); err != nil {
+				return err
+			}
+
+			// Update metadata after refresh
+			metadata = yas.data.Branches.Get(branchName)
+		}
+
 		// Show appropriate message based on what happened
-		if !needsPush {
+		if !needsPush && !needsBaseUpdate {
 			fmt.Printf("PR exists: %s (state: %s), up to date\n",
 				metadata.GitHubPullRequest.URL,
 				state)
