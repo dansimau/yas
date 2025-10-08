@@ -97,14 +97,39 @@ func parseCmdLog(logFile string) ([][]string, error) {
 	return commands, scanner.Err()
 }
 
-// findCommand finds a command in the log that matches the given predicate
-func findCommand(commands [][]string, predicate func([]string) bool) bool {
+// findCommand finds a command in the log and returns it
+func findCommand(commands [][]string, commandName string, subcommand ...string) []string {
 	for _, cmd := range commands {
-		if predicate(cmd) {
-			return true
+		if len(cmd) == 0 {
+			continue
 		}
+		if cmd[0] != commandName {
+			continue
+		}
+		// Check subcommands if provided
+		if len(subcommand) > 0 {
+			if len(cmd) < len(subcommand)+1 {
+				continue
+			}
+			match := true
+			for i, sub := range subcommand {
+				if cmd[i+1] != sub {
+					match = false
+					break
+				}
+			}
+			if !match {
+				continue
+			}
+		}
+		return cmd
 	}
-	return false
+	return nil
+}
+
+// wasCalled checks if a command exists in the log
+func wasCalled(commands [][]string, commandName string, subcommand ...string) bool {
+	return findCommand(commands, commandName, subcommand...) != nil
 }
 
 func TestSubmit_SkipsCreatingPRWhenAlreadyExists(t *testing.T) {
@@ -151,22 +176,13 @@ func TestSubmit_SkipsCreatingPRWhenAlreadyExists(t *testing.T) {
 		assert.NilError(t, err)
 
 		// Verify git push was called
-		foundPush := findCommand(commands, func(cmd []string) bool {
-			return len(cmd) >= 2 && cmd[0] == "git" && cmd[1] == "push"
-		})
-		assert.Assert(t, foundPush, "git push should be called")
+		assert.Assert(t, wasCalled(commands, "git", "push"), "git push should be called")
 
 		// Verify gh pr list was called (to check for existing PR)
-		foundPRList := findCommand(commands, func(cmd []string) bool {
-			return len(cmd) >= 3 && cmd[0] == "gh" && cmd[1] == "pr" && cmd[2] == "list"
-		})
-		assert.Assert(t, foundPRList, "gh pr list should be called")
+		assert.Assert(t, wasCalled(commands, "gh", "pr", "list"), "gh pr list should be called")
 
 		// Verify gh pr create was NOT called
-		foundPRCreate := findCommand(commands, func(cmd []string) bool {
-			return len(cmd) >= 3 && cmd[0] == "gh" && cmd[1] == "pr" && cmd[2] == "create"
-		})
-		assert.Assert(t, !foundPRCreate, "gh pr create should NOT be called when PR exists")
+		assert.Assert(t, !wasCalled(commands, "gh", "pr", "create"), "gh pr create should NOT be called when PR exists")
 	})
 }
 
@@ -214,21 +230,12 @@ func TestSubmit_CreatesNewPRWhenNoneExists(t *testing.T) {
 		assert.NilError(t, err)
 
 		// Verify git push was called
-		foundPush := findCommand(commands, func(cmd []string) bool {
-			return len(cmd) >= 2 && cmd[0] == "git" && cmd[1] == "push"
-		})
-		assert.Assert(t, foundPush, "git push should be called")
+		assert.Assert(t, wasCalled(commands, "git", "push"), "git push should be called")
 
 		// Verify gh pr list was called (to check for existing PR)
-		foundPRList := findCommand(commands, func(cmd []string) bool {
-			return len(cmd) >= 3 && cmd[0] == "gh" && cmd[1] == "pr" && cmd[2] == "list"
-		})
-		assert.Assert(t, foundPRList, "gh pr list should be called")
+		assert.Assert(t, wasCalled(commands, "gh", "pr", "list"), "gh pr list should be called")
 
 		// Verify gh pr create WAS called
-		foundPRCreate := findCommand(commands, func(cmd []string) bool {
-			return len(cmd) >= 3 && cmd[0] == "gh" && cmd[1] == "pr" && cmd[2] == "create"
-		})
-		assert.Assert(t, foundPRCreate, "gh pr create should be called when no PR exists")
+		assert.Assert(t, wasCalled(commands, "gh", "pr", "create"), "gh pr create should be called when no PR exists")
 	})
 }
