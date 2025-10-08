@@ -146,54 +146,36 @@ func (yas *YAS) graph() (*dag.DAG, error) {
 	return graph, nil
 }
 
-// Restack rebases all branches in the current stack from top to the current
-// branch.
+// Restack rebases all branches starting from trunk, including all descendants
+// and forks.
 func (yas *YAS) Restack() error {
 	graph, err := yas.graph()
 	if err != nil {
 		return err
 	}
 
-	currentBranchName, err := yas.git.GetCurrentBranchName()
+	// Start from trunk and rebase all descendants recursively
+	if err := yas.rebaseDescendants(graph, yas.cfg.TrunkBranch); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (yas *YAS) rebaseDescendants(graph *dag.DAG, branchName string) error {
+	children, err := graph.GetChildren(branchName)
 	if err != nil {
 		return err
 	}
 
-	rebaseQueue := []string{}
-
-	// Walk back up to top of stack (trunk or a branch without parent)
-	topBranch := currentBranchName
-	for topBranch != yas.cfg.TrunkBranch {
-		rebaseQueue = append(rebaseQueue, topBranch)
-
-		parents, err := graph.GetParents(topBranch)
-		if err != nil {
+	for childID := range children {
+		// Rebase child onto parent (branchName)
+		if err := yas.git.Rebase(branchName, childID); err != nil {
 			return err
 		}
-		if len(parents) == 0 {
-			break
-		}
-		// There should only be one parent
-		for parentID := range parents {
-			topBranch = parentID
-			break
-		}
-	}
 
-	// Reverse the queue to go from top to bottom (trunk to current branch)
-	for i := len(rebaseQueue) - 1; i >= 0; i-- {
-		branchName := rebaseQueue[i]
-
-		// The parent branch is either the next branch in the queue (towards trunk), or the trunk branch itself
-		var parentBranch string
-		if i == len(rebaseQueue)-1 {
-			parentBranch = yas.cfg.TrunkBranch
-		} else {
-			parentBranch = rebaseQueue[i+1]
-		}
-
-		// Rebase this branch onto its parent
-		if err := yas.git.Rebase(parentBranch, branchName); err != nil {
+		// Recursively rebase this child's descendants
+		if err := yas.rebaseDescendants(graph, childID); err != nil {
 			return err
 		}
 	}
