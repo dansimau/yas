@@ -9,11 +9,11 @@ import (
 	"github.com/dansimau/yas/pkg/yas"
 )
 
-type nbCmd struct {
+type branchCmd struct {
 	Parent string `long:"parent" description:"Parent branch name (default: current branch)" required:"false"`
 }
 
-func (c *nbCmd) Execute(args []string) error {
+func (c *branchCmd) Execute(args []string) error {
 	if len(args) == 0 {
 		return NewError("branch name is required")
 	}
