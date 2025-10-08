@@ -414,12 +414,12 @@ func TestSubmit_UpdatesPRBaseWhenLocalParentChanges(t *testing.T) {
 		assert.NilError(t, err)
 
 		// Track topic-a and topic-b
-		err = y.SetParent("topic-a", "main")
+		err = y.SetParent("topic-a", "main", "")
 		assert.NilError(t, err)
 
 		// Set topic-b's parent to main (simulating a restack after topic-a was merged)
 		// But the PR still has topic-a as base
-		err = y.SetParent("topic-b", "main")
+		err = y.SetParent("topic-b", "main", "")
 		assert.NilError(t, err)
 
 		// Submit topic-b - should detect base mismatch and update

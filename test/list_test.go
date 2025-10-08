@@ -469,12 +469,12 @@ func TestList_ShowsNeedsSubmit_WhenBaseRefDiffers(t *testing.T) {
 		assert.NilError(t, err)
 
 		// Track branches
-		err = y.SetParent("topic-a", "main")
+		err = y.SetParent("topic-a", "main", "")
 		assert.NilError(t, err)
 
 		// Set topic-b's parent to main (simulating restack after topic-a merged)
 		// But PR still targets topic-a
-		err = y.SetParent("topic-b", "main")
+		err = y.SetParent("topic-b", "main", "")
 		assert.NilError(t, err)
 
 		// Refresh remote status to get PR metadata
@@ -548,7 +548,7 @@ func TestList_ShowsBothNeedsRestackAndNeedsSubmit(t *testing.T) {
 		assert.NilError(t, err)
 
 		// Track topic-a
-		err = y.SetParent("topic-a", "main")
+		err = y.SetParent("topic-a", "main", "")
 		assert.NilError(t, err)
 
 		// Refresh remote status to get PR metadata
