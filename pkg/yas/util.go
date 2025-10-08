@@ -2,11 +2,28 @@ package yas
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/fatih/color"
 	"github.com/heimdalr/dag"
 	"github.com/xlab/treeprint"
 )
+
+func formatBranchName(branchName string) string {
+	lastSlash := strings.LastIndex(branchName, "/")
+	if lastSlash == -1 {
+		return branchName
+	}
+
+	prefix := branchName[:lastSlash]
+	suffix := branchName[lastSlash+1:]
+	if suffix == "" {
+		return branchName
+	}
+
+	darkGray := color.New(color.FgHiBlack).SprintFunc()
+	return fmt.Sprintf("%s%s", darkGray(prefix+"/"), suffix)
+}
 
 func (yas *YAS) addNodesFromGraph(treeNode treeprint.Tree, graph *dag.DAG, parentID string, currentBranch string) error {
 	children, err := graph.GetChildren(parentID)
@@ -15,7 +32,7 @@ func (yas *YAS) addNodesFromGraph(treeNode treeprint.Tree, graph *dag.DAG, paren
 	}
 
 	for childID := range children {
-		branchLabel := childID
+		branchLabel := formatBranchName(childID)
 
 		// Check if this branch needs rebasing
 		needsRebase, err := yas.needsRebase(childID, parentID)

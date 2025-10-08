@@ -7,6 +7,7 @@ import (
 	"github.com/dansimau/yas/pkg/testutil"
 	"github.com/dansimau/yas/pkg/yas"
 	"github.com/dansimau/yas/pkg/yascli"
+	"github.com/fatih/color"
 	"gotest.tools/v3/assert"
 )
 
@@ -379,5 +380,39 @@ func TestList_CurrentStack(t *testing.T) {
 		assert.Assert(t, strings.Contains(stackOutput, "topic-c"), "Current stack should contain topic-c (descendant)")
 		assert.Assert(t, strings.Contains(stackOutput, "topic-d"), "Current stack should contain topic-d (descendant fork)")
 		assert.Assert(t, !strings.Contains(stackOutput, "topic-x"), "Current stack should NOT contain topic-x (sibling branch)")
+	})
+}
+
+func TestList_GreysOutBranchPrefix(t *testing.T) {
+	testutil.WithTempWorkingDir(t, func() {
+		testutil.ExecOrFail(t, `
+                        git init --initial-branch=main
+
+                        # main
+                        touch main
+                        git add main
+                        git commit -m "main-0"
+
+                        # user/topic-a
+                        git checkout -b user/topic-a
+                        touch a
+                        git add a
+                        git commit -m "topic-a-0"
+                `)
+
+		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
+		assert.Equal(t, yascli.Run("add", "--branch=user/topic-a", "--parent=main"), 0)
+
+		previousNoColor := color.NoColor
+		color.NoColor = false
+		defer func() { color.NoColor = previousNoColor }()
+
+		output := captureStdout(func() {
+			assert.Equal(t, yascli.Run("list"), 0)
+		})
+
+		greyPrefix := color.New(color.FgHiBlack).Sprint("user/")
+		assert.Assert(t, strings.Contains(output, greyPrefix+"topic-a"),
+			"List should grey out branch prefix but got: %s", output)
 	})
 }
