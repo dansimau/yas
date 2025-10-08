@@ -519,8 +519,15 @@ func (yas *YAS) submitBranch(branchName string) error {
 
 	metadata := yas.data.Branches.Get(branchName)
 
+	// Get current local hash
+	currentLocalHash, err := yas.git.GetShortHash(branchName)
+	if err != nil {
+		return fmt.Errorf("failed to get local hash: %w", err)
+	}
+
 	// Get old remote hash before pushing (for showing in output)
 	var oldRemoteHash string
+	var remoteExists bool
 	if metadata.GitHubPullRequest.ID != "" {
 		// Fetch the latest remote ref
 		if err := yas.git.FetchBranch(branchName); err != nil {
@@ -531,19 +538,19 @@ func (yas *YAS) submitBranch(branchName string) error {
 			hash, err := yas.git.GetRemoteShortHash(branchName)
 			if err == nil {
 				oldRemoteHash = hash
+				remoteExists = true
 			}
 		}
 	}
 
-	// Get current local hash
-	currentLocalHash, err := yas.git.GetShortHash(branchName)
-	if err != nil {
-		return fmt.Errorf("failed to get local hash: %w", err)
-	}
+	// Check if we need to push
+	needsPush := !remoteExists || oldRemoteHash != currentLocalHash
 
-	// Force push with lease (we expect the branch may have been rebased)
-	if err := yas.git.ForcePushBranch(branchName); err != nil {
-		return fmt.Errorf("failed to push: %w", err)
+	if needsPush {
+		// Force push with lease (we expect the branch may have been rebased)
+		if err := yas.git.ForcePushBranch(branchName); err != nil {
+			return fmt.Errorf("failed to push: %w", err)
+		}
 	}
 
 	// Check if PR already exists
@@ -553,8 +560,12 @@ func (yas *YAS) submitBranch(branchName string) error {
 			state = "DRAFT"
 		}
 
-		// Show message with old hash if it changed
-		if oldRemoteHash != "" && oldRemoteHash != currentLocalHash {
+		// Show appropriate message based on what happened
+		if !needsPush {
+			fmt.Printf("PR exists: %s (state: %s), up to date\n",
+				metadata.GitHubPullRequest.URL,
+				state)
+		} else if oldRemoteHash != "" && oldRemoteHash != currentLocalHash {
 			fmt.Printf("PR exists: %s (state: %s), force pushed (was: %s)\n",
 				metadata.GitHubPullRequest.URL,
 				state,
