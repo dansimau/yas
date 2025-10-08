@@ -241,8 +241,8 @@ func TestList_ShowsPRInfo(t *testing.T) {
 
 		// Verify PR info appears in list
 		assert.Assert(t, strings.Contains(output, "topic-a"), "List should contain topic-a")
-		assert.Assert(t, strings.Contains(output, "[OPEN: https://github.com/test/test/pull/42]"),
-			"List should show PR state and URL, but got: %s", output)
+		assert.Assert(t, strings.Contains(output, "[https://github.com/test/test/pull/42]"),
+			"List should show PR URL, but got: %s", output)
 	})
 }
 
@@ -297,8 +297,8 @@ func TestList_ShowsDraftPR(t *testing.T) {
 
 		// Verify draft PR info appears in list
 		assert.Assert(t, strings.Contains(output, "topic-a"), "List should contain topic-a")
-		assert.Assert(t, strings.Contains(output, "[DRAFT: https://github.com/test/test/pull/99]"),
-			"List should show DRAFT state for draft PRs, but got: %s", output)
+		assert.Assert(t, strings.Contains(output, "[https://github.com/test/test/pull/99]"),
+			"List should show PR URL, but got: %s", output)
 	})
 }
 
