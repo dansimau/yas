@@ -206,7 +206,7 @@ func TestSubmit_SkipsCreatingPRWhenAlreadyExists(t *testing.T) {
 		// Create YAS instance and track branch
 		y, err := yas.NewFromRepository(".")
 		assert.NilError(t, err)
-		err = y.SetParent("topic-a", "main")
+		err = y.SetParent("topic-a", "main", "")
 		assert.NilError(t, err)
 
 		// Call submit - should push but NOT create PR since one exists
@@ -272,11 +272,11 @@ func TestSubmit_StackSubmitsAllBranches(t *testing.T) {
 		// Create YAS instance and track branches
 		y, err := yas.NewFromRepository(".")
 		assert.NilError(t, err)
-		err = y.SetParent("topic-a", "main")
+		err = y.SetParent("topic-a", "main", "")
 		assert.NilError(t, err)
-		err = y.SetParent("topic-b", "topic-a")
+		err = y.SetParent("topic-b", "topic-a", "")
 		assert.NilError(t, err)
-		err = y.SetParent("topic-c", "topic-b")
+		err = y.SetParent("topic-c", "topic-b", "")
 		assert.NilError(t, err)
 
 		// Call submit with --stack from topic-b
@@ -339,7 +339,7 @@ func TestSubmit_CreatesNewPRWhenNoneExists(t *testing.T) {
 		// Create YAS instance and track branch
 		y, err := yas.NewFromRepository(".")
 		assert.NilError(t, err)
-		err = y.SetParent("topic-a", "main")
+		err = y.SetParent("topic-a", "main", "")
 		assert.NilError(t, err)
 
 		// Call submit - should push AND create PR

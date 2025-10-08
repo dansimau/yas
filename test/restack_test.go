@@ -231,9 +231,9 @@ func TestRestack_ShowsReminderWhenBranchesWithPRsAreRestacked(t *testing.T) {
 		// Create YAS instance and track branches
 		y, err := yas.NewFromRepository(".")
 		assert.NilError(t, err)
-		err = y.SetParent("topic-a", "main")
+		err = y.SetParent("topic-a", "main", "")
 		assert.NilError(t, err)
-		err = y.SetParent("topic-b", "topic-a")
+		err = y.SetParent("topic-b", "topic-a", "")
 		assert.NilError(t, err)
 
 		// Submit topic-a to create a PR and populate metadata
@@ -309,11 +309,11 @@ func TestRestack_OnlyRebasesWhenNeeded(t *testing.T) {
 		// Create YAS instance and track branches
 		y, err := yas.NewFromRepository(".")
 		assert.NilError(t, err)
-		err = y.SetParent("topic-a", "main")
+		err = y.SetParent("topic-a", "main", "")
 		assert.NilError(t, err)
-		err = y.SetParent("topic-b", "topic-a")
+		err = y.SetParent("topic-b", "topic-a", "")
 		assert.NilError(t, err)
-		err = y.SetParent("topic-c", "topic-b")
+		err = y.SetParent("topic-c", "topic-b", "")
 		assert.NilError(t, err)
 
 		// Run restack
@@ -338,12 +338,12 @@ func TestRestack_OnlyRebasesWhenNeeded(t *testing.T) {
 		// topic-c needs rebasing (because topic-b was rebased)
 		assert.Equal(t, rebaseCount, 3, "Should have called git rebase 3 times (for topic-a, topic-b, topic-c)")
 
-		// Verify specific rebase commands
-		assert.Assert(t, wasCalled(commands, "git", "-c", "core.hooksPath=/dev/null", "rebase", "main", "topic-a"),
+		// Verify specific rebase commands (using new --onto format)
+		assert.Assert(t, wasCalled(commands, "git", "-c", "core.hooksPath=/dev/null", "rebase", "--onto", "main"),
 			"Should rebase topic-a onto main")
-		assert.Assert(t, wasCalled(commands, "git", "-c", "core.hooksPath=/dev/null", "rebase", "topic-a", "topic-b"),
+		assert.Assert(t, wasCalled(commands, "git", "-c", "core.hooksPath=/dev/null", "rebase", "--onto", "topic-a"),
 			"Should rebase topic-b onto topic-a")
-		assert.Assert(t, wasCalled(commands, "git", "-c", "core.hooksPath=/dev/null", "rebase", "topic-b", "topic-c"),
+		assert.Assert(t, wasCalled(commands, "git", "-c", "core.hooksPath=/dev/null", "rebase", "--onto", "topic-b"),
 			"Should rebase topic-c onto topic-b")
 	})
 }
@@ -387,9 +387,9 @@ func TestRestack_SkipsRebasingWhenNotNeeded(t *testing.T) {
 		// Create YAS instance and track branches
 		y, err := yas.NewFromRepository(".")
 		assert.NilError(t, err)
-		err = y.SetParent("topic-a", "main")
+		err = y.SetParent("topic-a", "main", "")
 		assert.NilError(t, err)
-		err = y.SetParent("topic-b", "topic-a")
+		err = y.SetParent("topic-b", "topic-a", "")
 		assert.NilError(t, err)
 
 		// Run restack - nothing should be rebased since everything is up to date

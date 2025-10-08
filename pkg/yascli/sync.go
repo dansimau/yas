@@ -34,7 +34,7 @@ func (c *syncCmd) checkForClosedPRs() error {
 		}
 
 		if !cmd.DryRun {
-			if err := c.yasInstance.DeleteBranch(branch.Name); err != nil {
+			if err := c.yasInstance.DeleteMergedBranch(branch.Name); err != nil {
 				return fmt.Errorf("error deleting branch %s: %w", branch.Name, err)
 			}
 		} else {
@@ -61,12 +61,12 @@ func (c *syncCmd) Execute(args []string) error {
 		return NewError(err.Error())
 	}
 
-	if err := c.checkForClosedPRs(); err != nil {
+	fmt.Printf("🔄 Pulling %s...\n", yasInstance.Config().TrunkBranch)
+	if err := yasInstance.UpdateTrunk(); err != nil {
 		return NewError(err.Error())
 	}
 
-	fmt.Printf("🔄 Pulling %s...\n", yasInstance.Config().TrunkBranch)
-	if err := yasInstance.UpdateTrunk(); err != nil {
+	if err := c.checkForClosedPRs(); err != nil {
 		return NewError(err.Error())
 	}
 

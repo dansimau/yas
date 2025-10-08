@@ -228,7 +228,7 @@ func TestList_ShowsPRInfo(t *testing.T) {
 		// Create YAS instance and track branch
 		y, err := yas.NewFromRepository(".")
 		assert.NilError(t, err)
-		err = y.SetParent("topic-a", "main")
+		err = y.SetParent("topic-a", "main", "")
 		assert.NilError(t, err)
 
 		// Submit to create PR and populate metadata
@@ -284,7 +284,7 @@ func TestList_ShowsDraftPR(t *testing.T) {
 		// Create YAS instance and track branch
 		y, err := yas.NewFromRepository(".")
 		assert.NilError(t, err)
-		err = y.SetParent("topic-a", "main")
+		err = y.SetParent("topic-a", "main", "")
 		assert.NilError(t, err)
 
 		// Submit to create PR and populate metadata

@@ -70,7 +70,7 @@ func (c *nbCmd) Execute(args []string) error {
 		return NewError(err.Error())
 	}
 
-	if err := yasInstance.SetParent(fullBranchName, parentBranch); err != nil {
+	if err := yasInstance.SetParent(fullBranchName, parentBranch, ""); err != nil {
 		return NewError(err.Error())
 	}
 

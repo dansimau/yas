@@ -53,6 +53,8 @@ func mustExecOutput(args ...string) (output string) {
 // equalLines asserts that both strings are equal after stripping
 // leading/trailing whitespace.
 func equalLines(t *testing.T, a, b string) {
+	t.Helper()
+
 	cleanedA := stripWhiteSpaceFromLines(a)
 	cleanedB := stripWhiteSpaceFromLines(b)
 	assert.Equal(t, cleanedA, cleanedB)

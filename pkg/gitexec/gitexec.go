@@ -206,6 +206,15 @@ func (r *Repo) Rebase(upstream, branchName string) error {
 		Run()
 }
 
+// RebaseOntoWithBranchPoint rebases branch onto newBase, replaying commits after oldBranchPoint
+// This is equivalent to: git rebase --onto <newBase> <oldBranchPoint> <branch>
+func (r *Repo) RebaseOntoWithBranchPoint(newBase, oldBranchPoint, branch string) error {
+	return xexec.Command("git", "-c", "core.hooksPath=/dev/null", "rebase", "--onto", newBase, oldBranchPoint, branch, "--update-refs").
+		WithEnvVars(CleanedGitEnv()).
+		WithWorkingDir(r.path).
+		Run()
+}
+
 func (r *Repo) Pull() error {
 	return xexec.Command("git", "pull", "--ff", "--ff-only").
 		WithEnvVars(CleanedGitEnv()).
