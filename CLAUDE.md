@@ -10,7 +10,7 @@ yas (Yet Another Stacked Diff Tool) is a CLI tool for managing stacked PRs on Gi
 
 ```bash
 # Build the binary
-go build -o bin/yas ./cmd/yas
+go build ./cmd/yas
 
 # Run all tests
 go test ./...

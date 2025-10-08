@@ -147,6 +147,64 @@ func (yas *YAS) graph() (*dag.DAG, error) {
 	return graph, nil
 }
 
+// currentStackGraph returns a subgraph containing only the current stack:
+// - Upwards: only parents in the current lineage to the trunk branch
+// - Downwards: all descendants, including those with multiple children
+func (yas *YAS) currentStackGraph(fullGraph *dag.DAG, currentBranch string) (*dag.DAG, error) {
+	stackGraph := dag.NewDAG()
+
+	// If current branch is trunk, return full graph
+	if currentBranch == yas.cfg.TrunkBranch {
+		return fullGraph, nil
+	}
+
+	// Get all ancestors (single lineage upwards to trunk)
+	ancestors, err := fullGraph.GetAncestors(currentBranch)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get all descendants (all child lineages)
+	descendants, err := fullGraph.GetDescendants(currentBranch)
+	if err != nil {
+		return nil, err
+	}
+
+	// Collect all vertices in the current stack (ancestors + current + descendants)
+	stackVertices := make(map[string]bool)
+	for id := range ancestors {
+		stackVertices[id] = true
+	}
+	stackVertices[currentBranch] = true
+	for id := range descendants {
+		stackVertices[id] = true
+	}
+
+	// Add vertices to the new graph
+	for id := range stackVertices {
+		vertex, err := fullGraph.GetVertex(id)
+		if err != nil {
+			return nil, err
+		}
+		stackGraph.AddVertexByID(id, vertex)
+	}
+
+	// Add edges between vertices that are both in the stack
+	for id := range stackVertices {
+		children, err := fullGraph.GetChildren(id)
+		if err != nil {
+			return nil, err
+		}
+		for childID := range children {
+			if stackVertices[childID] {
+				stackGraph.AddEdge(id, childID)
+			}
+		}
+	}
+
+	return stackGraph, nil
+}
+
 // Restack rebases all branches starting from trunk, including all descendants
 // and forks.
 func (yas *YAS) Restack() error {
@@ -230,7 +288,7 @@ func (yas *YAS) needsRebase(branchName, parentBranch string) (bool, error) {
 	return mergeBase != parentCommit, nil
 }
 
-func (yas *YAS) List() error {
+func (yas *YAS) List(currentStackOnly bool) error {
 	graph, err := yas.graph()
 	if err != nil {
 		return fmt.Errorf("failed to get graph: %w", err)
@@ -239,6 +297,14 @@ func (yas *YAS) List() error {
 	currentBranch, err := yas.git.GetCurrentBranchName()
 	if err != nil {
 		return err
+	}
+
+	// Filter to current stack if requested
+	if currentStackOnly {
+		graph, err = yas.currentStackGraph(graph, currentBranch)
+		if err != nil {
+			return fmt.Errorf("failed to get current stack: %w", err)
+		}
 	}
 
 	tree, err := yas.toTree(graph, yas.cfg.TrunkBranch, currentBranch)

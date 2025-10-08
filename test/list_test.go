@@ -188,3 +188,83 @@ func TestList_ShowsCurrentBranch_OnTrunk(t *testing.T) {
 			"main should show '*' (current branch) but got: %s", output)
 	})
 }
+
+func TestList_CurrentStack(t *testing.T) {
+	testutil.WithTempWorkingDir(t, func() {
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+
+			# main
+			touch main
+			git add main
+			git commit -m "main-0"
+
+			# Create stack: main -> topic-a -> topic-b -> topic-c
+			git checkout -b topic-a
+			touch a
+			git add a
+			git commit -m "topic-a-0"
+
+			git checkout -b topic-b
+			touch b
+			git add b
+			git commit -m "topic-b-0"
+
+			git checkout -b topic-c
+			touch c
+			git add c
+			git commit -m "topic-c-0"
+
+			# Create a sibling branch: main -> topic-x (not in current stack)
+			git checkout main
+			git checkout -b topic-x
+			touch x
+			git add x
+			git commit -m "topic-x-0"
+
+			# Create a fork from topic-b: topic-b -> topic-d (should be in stack)
+			git checkout topic-b
+			git checkout -b topic-d
+			touch d
+			git add d
+			git commit -m "topic-d-0"
+
+			# Go to topic-b for testing
+			git checkout topic-b
+		`)
+
+		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
+		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "--branch=topic-b", "--parent=topic-a"), 0)
+		assert.Equal(t, yascli.Run("add", "--branch=topic-c", "--parent=topic-b"), 0)
+		assert.Equal(t, yascli.Run("add", "--branch=topic-x", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "--branch=topic-d", "--parent=topic-b"), 0)
+
+		// Full list should show all branches
+		fullOutput := captureStdout(func() {
+			assert.Equal(t, yascli.Run("list"), 0)
+		})
+
+		assert.Assert(t, strings.Contains(fullOutput, "topic-a"), "Full list should contain topic-a")
+		assert.Assert(t, strings.Contains(fullOutput, "topic-b"), "Full list should contain topic-b")
+		assert.Assert(t, strings.Contains(fullOutput, "topic-c"), "Full list should contain topic-c")
+		assert.Assert(t, strings.Contains(fullOutput, "topic-x"), "Full list should contain topic-x")
+		assert.Assert(t, strings.Contains(fullOutput, "topic-d"), "Full list should contain topic-d")
+
+		// Current stack from topic-b should include:
+		// - Ancestors: main, topic-a
+		// - Current: topic-b
+		// - Descendants: topic-c, topic-d (both children)
+		// - Should NOT include: topic-x
+		stackOutput := captureStdout(func() {
+			assert.Equal(t, yascli.Run("list", "--current-stack"), 0)
+		})
+
+		assert.Assert(t, strings.Contains(stackOutput, "main"), "Current stack should contain main")
+		assert.Assert(t, strings.Contains(stackOutput, "topic-a"), "Current stack should contain topic-a")
+		assert.Assert(t, strings.Contains(stackOutput, "topic-b"), "Current stack should contain topic-b")
+		assert.Assert(t, strings.Contains(stackOutput, "topic-c"), "Current stack should contain topic-c (descendant)")
+		assert.Assert(t, strings.Contains(stackOutput, "topic-d"), "Current stack should contain topic-d (descendant fork)")
+		assert.Assert(t, !strings.Contains(stackOutput, "topic-x"), "Current stack should NOT contain topic-x (sibling branch)")
+	})
+}
