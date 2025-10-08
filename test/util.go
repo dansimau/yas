@@ -1,6 +1,9 @@
 package test
 
 import (
+	"bytes"
+	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -63,4 +66,20 @@ func stripWhiteSpaceFromLines(s string) string {
 		lines = append(lines, strings.TrimSpace(line))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// captureStdout captures stdout while executing the given function
+func captureStdout(f func()) string {
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	f()
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	return buf.String()
 }

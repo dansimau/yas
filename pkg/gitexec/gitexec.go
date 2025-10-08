@@ -161,6 +161,14 @@ func (r *Repo) GetForkPoint(branchName string) (ref string, err error) {
 	return r.output("git", "merge-base", "--fork-point", branchName)
 }
 
+func (r *Repo) GetMergeBase(ref1, ref2 string) (string, error) {
+	return r.output("git", "merge-base", ref1, ref2)
+}
+
+func (r *Repo) GetCommitHash(ref string) (string, error) {
+	return r.output("git", "rev-parse", ref)
+}
+
 func (r *Repo) GetShortHash(ref string) (string, error) {
 	return r.output("git", "rev-parse", "--short", ref)
 }

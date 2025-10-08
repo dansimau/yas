@@ -186,11 +186,28 @@ func (yas *YAS) rebaseDescendants(graph *dag.DAG, branchName string) error {
 func (yas *YAS) toTree(graph *dag.DAG, rootNode string) (treeprint.Tree, error) {
 	tree := treeprint.NewWithRoot(rootNode)
 
-	if err := addNodesFromGraph(tree, graph, rootNode); err != nil {
+	if err := yas.addNodesFromGraph(tree, graph, rootNode); err != nil {
 		return nil, err
 	}
 
 	return tree, nil
+}
+
+func (yas *YAS) needsRebase(branchName, parentBranch string) (bool, error) {
+	// Get the merge base between the branch and its parent
+	mergeBase, err := yas.git.GetMergeBase(branchName, parentBranch)
+	if err != nil {
+		return false, err
+	}
+
+	// Get the current commit of the parent branch
+	parentCommit, err := yas.git.GetCommitHash(parentBranch)
+	if err != nil {
+		return false, err
+	}
+
+	// If merge base is different from parent's current commit, rebase is needed
+	return mergeBase != parentCommit, nil
 }
 
 func (yas *YAS) List() error {
