@@ -113,7 +113,7 @@ func (yas *YAS) DeleteBranch(name string) error {
 func (yas *YAS) fetchGitHubPullRequestStatus(branchName string) (*PullRequestMetadata, error) {
 	log.Info("Fetching PRs for branch", branchName)
 
-	b, err := xexec.Command("gh", "pr", "list", "--head", branchName, "--state", "all", "--json", "id,state").WithStdout(nil).Output()
+	b, err := xexec.Command("gh", "pr", "list", "--head", branchName, "--state", "all", "--json", "id,state,url").WithStdout(nil).Output()
 	if err != nil {
 		return nil, err
 	}
@@ -381,8 +381,8 @@ func (yas *YAS) Submit() error {
 
 	// Check if PR already exists
 	if metadata.GitHubPullRequest.ID != "" {
-		fmt.Printf("PR already exists (ID: %s, State: %s), pushed new commits\n",
-			metadata.GitHubPullRequest.ID,
+		fmt.Printf("PR exists: %s (state: %s), pushed new commits\n",
+			metadata.GitHubPullRequest.URL,
 			metadata.GitHubPullRequest.State)
 		return nil
 	}

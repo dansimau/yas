@@ -15,6 +15,7 @@ type BranchMetadata struct {
 type PullRequestMetadata struct {
 	ID    string
 	State string
+	URL   string
 }
 
 type Branches []BranchMetadata
