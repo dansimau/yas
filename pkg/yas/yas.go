@@ -142,6 +142,58 @@ func (yas *YAS) DeleteBranch(name string) error {
 	return nil
 }
 
+// DeleteMergedBranch deletes a merged branch after restacking its children onto its parent
+func (yas *YAS) DeleteMergedBranch(name string) error {
+	// Get the metadata of the branch being deleted
+	branchMetadata := yas.data.Branches.Get(name)
+	parentBranch := branchMetadata.Parent
+
+	// If no parent, just delete normally
+	if parentBranch == "" {
+		return yas.DeleteBranch(name)
+	}
+
+	// Get the graph to find children
+	graph, err := yas.graph()
+	if err != nil {
+		return fmt.Errorf("failed to get graph: %w", err)
+	}
+
+	// Find all children of this branch
+	children, err := graph.GetChildren(name)
+	if err != nil {
+		return fmt.Errorf("failed to get children: %w", err)
+	}
+
+	// If there are children, restack them onto the parent
+	if len(children) > 0 {
+		fmt.Printf("Restacking %d child branch(es) onto %s...\n", len(children), parentBranch)
+
+		for childID := range children {
+			// Rebase the child onto the grandparent, removing commits from the merged branch
+			// git rebase --onto <newbase> <oldbase> <branch>
+			// This takes all commits in childID that are not in name, and rebases them onto parentBranch
+			fmt.Printf("  Rebasing %s onto %s...\n", childID, parentBranch)
+			if err := yas.git.RebaseOnto(parentBranch, name, childID); err != nil {
+				return fmt.Errorf("failed to rebase %s onto %s: %w", childID, parentBranch, err)
+			}
+
+			// Update the child's parent to point to the grandparent
+			childMetadata := yas.data.Branches.Get(childID)
+			childMetadata.Parent = parentBranch
+			yas.data.Branches.Set(childID, childMetadata)
+		}
+
+		// Save the updated metadata
+		if err := yas.data.Save(); err != nil {
+			return fmt.Errorf("failed to save updated metadata: %w", err)
+		}
+	}
+
+	// Now delete the merged branch
+	return yas.DeleteBranch(name)
+}
+
 func (yas *YAS) fetchGitHubPullRequestStatus(branchName string) (*PullRequestMetadata, error) {
 	log.Info("Fetching PRs for branch", branchName)
 
