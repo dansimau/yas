@@ -286,12 +286,12 @@ func (yas *YAS) rebaseDescendants(graph *dag.DAG, branchName string) error {
 }
 
 func (yas *YAS) toTree(graph *dag.DAG, rootNode string, currentBranch string) (treeprint.Tree, error) {
-	rootLabel := rootNode
+	rootLabel := formatBranchName(rootNode)
 
 	// Add star at the end if trunk is the current branch
 	if rootNode == currentBranch {
 		darkGray := color.New(color.FgHiBlack).SprintFunc()
-		rootLabel = fmt.Sprintf("%s %s", rootNode, darkGray("*"))
+		rootLabel = fmt.Sprintf("%s %s", rootLabel, darkGray("*"))
 	}
 
 	tree := treeprint.NewWithRoot(rootLabel)
