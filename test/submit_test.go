@@ -288,9 +288,9 @@ func TestSubmit_StackSubmitsAllBranches(t *testing.T) {
 		assert.NilError(t, err)
 
 		// Verify all branches in stack were pushed
-		assert.Assert(t, wasCalled(commands, "git", "push", "origin", "topic-a"), "topic-a should be pushed")
-		assert.Assert(t, wasCalled(commands, "git", "push", "origin", "topic-b"), "topic-b should be pushed")
-		assert.Assert(t, wasCalled(commands, "git", "push", "origin", "topic-c"), "topic-c should be pushed")
+		assert.Assert(t, wasCalled(commands, "git", "push", "--force-with-lease", "origin", "topic-a"), "topic-a should be pushed")
+		assert.Assert(t, wasCalled(commands, "git", "push", "--force-with-lease", "origin", "topic-b"), "topic-b should be pushed")
+		assert.Assert(t, wasCalled(commands, "git", "push", "--force-with-lease", "origin", "topic-c"), "topic-c should be pushed")
 
 		// Verify PRs were created for all branches
 		prCreateA := findCommand(commands, "gh", "pr", "create")

@@ -517,11 +517,41 @@ func (yas *YAS) submitBranch(branchName string) error {
 		return err
 	}
 
-	if err := yas.git.PushBranch(branchName); err != nil {
-		return fmt.Errorf("failed to push: %w", err)
+	metadata := yas.data.Branches.Get(branchName)
+
+	// Get current local hash
+	currentLocalHash, err := yas.git.GetShortHash(branchName)
+	if err != nil {
+		return fmt.Errorf("failed to get local hash: %w", err)
 	}
 
-	metadata := yas.data.Branches.Get(branchName)
+	// Get old remote hash before pushing (for showing in output)
+	var oldRemoteHash string
+	var remoteExists bool
+	if metadata.GitHubPullRequest.ID != "" {
+		// Fetch the latest remote ref
+		if err := yas.git.FetchBranch(branchName); err != nil {
+			// Ignore error if remote branch doesn't exist yet
+			log.Info("Failed to fetch remote branch (may not exist yet)", err)
+		} else {
+			// Get the short hash of the remote branch before pushing
+			hash, err := yas.git.GetRemoteShortHash(branchName)
+			if err == nil {
+				oldRemoteHash = hash
+				remoteExists = true
+			}
+		}
+	}
+
+	// Check if we need to push
+	needsPush := !remoteExists || oldRemoteHash != currentLocalHash
+
+	if needsPush {
+		// Force push with lease (we expect the branch may have been rebased)
+		if err := yas.git.ForcePushBranch(branchName); err != nil {
+			return fmt.Errorf("failed to push: %w", err)
+		}
+	}
 
 	// Check if PR already exists
 	if metadata.GitHubPullRequest.ID != "" {
@@ -529,9 +559,22 @@ func (yas *YAS) submitBranch(branchName string) error {
 		if metadata.GitHubPullRequest.IsDraft {
 			state = "DRAFT"
 		}
-		fmt.Printf("PR exists: %s (state: %s), pushed new commits\n",
-			metadata.GitHubPullRequest.URL,
-			state)
+
+		// Show appropriate message based on what happened
+		if !needsPush {
+			fmt.Printf("PR exists: %s (state: %s), up to date\n",
+				metadata.GitHubPullRequest.URL,
+				state)
+		} else if oldRemoteHash != "" && oldRemoteHash != currentLocalHash {
+			fmt.Printf("PR exists: %s (state: %s), force pushed (was: %s)\n",
+				metadata.GitHubPullRequest.URL,
+				state,
+				oldRemoteHash)
+		} else {
+			fmt.Printf("PR exists: %s (state: %s), pushed new commits\n",
+				metadata.GitHubPullRequest.URL,
+				state)
+		}
 		return nil
 	}
 
