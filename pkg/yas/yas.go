@@ -484,7 +484,7 @@ func (yas *YAS) List(currentStackOnly bool) error {
 	return nil
 }
 
-func (yas *YAS) SetParent(branchName, parentBranchName string) error {
+func (yas *YAS) SetParent(branchName, parentBranchName, branchPoint string) error {
 	if branchName == "" {
 		currentBranch, err := yas.git.GetCurrentBranchName()
 		if err != nil {
@@ -520,10 +520,13 @@ func (yas *YAS) SetParent(branchName, parentBranchName string) error {
 	branchMetdata.Parent = parentBranchName
 
 	// Capture the branch point - this is where the branch actually diverged from its parent
-	// Use merge-base to find the common ancestor, which is the true branch point
-	branchPoint, err := yas.git.GetMergeBase(branchName, parentBranchName)
-	if err != nil {
-		return fmt.Errorf("failed to get branch point: %w", err)
+	if branchPoint == "" {
+		// Autodetect: Use merge-base to find the common ancestor, which is the true branch point
+		var err error
+		branchPoint, err = yas.git.GetMergeBase(branchName, parentBranchName)
+		if err != nil {
+			return fmt.Errorf("failed to get branch point: %w", err)
+		}
 	}
 	branchMetdata.BranchPoint = branchPoint
 

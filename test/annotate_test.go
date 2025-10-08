@@ -57,11 +57,11 @@ func TestAnnotate_UpdatesPRWithStackInfo(t *testing.T) {
 		// Create YAS instance and track branches
 		y, err := yas.NewFromRepository(".")
 		assert.NilError(t, err)
-		err = y.SetParent("topic-a", "main")
+		err = y.SetParent("topic-a", "main", "")
 		assert.NilError(t, err)
-		err = y.SetParent("topic-b", "topic-a")
+		err = y.SetParent("topic-b", "topic-a", "")
 		assert.NilError(t, err)
-		err = y.SetParent("topic-c", "topic-b")
+		err = y.SetParent("topic-c", "topic-b", "")
 		assert.NilError(t, err)
 
 		// Submit topic-b to create a PR

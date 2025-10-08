@@ -59,11 +59,11 @@ func TestSync_RestacksChildrenOntoParentWhenMergedPRDeleted(t *testing.T) {
 		// Create YAS instance and track branches
 		y, err := yas.NewFromRepository(".")
 		assert.NilError(t, err)
-		err = y.SetParent("topic-a", "main")
+		err = y.SetParent("topic-a", "main", "")
 		assert.NilError(t, err)
-		err = y.SetParent("topic-b", "topic-a")
+		err = y.SetParent("topic-b", "topic-a", "")
 		assert.NilError(t, err)
-		err = y.SetParent("topic-c", "topic-b")
+		err = y.SetParent("topic-c", "topic-b", "")
 		assert.NilError(t, err)
 
 		// Simulate that topic-b has a merged PR by creating PR metadata
@@ -162,11 +162,11 @@ func TestSync_HandlesMultipleChildrenWhenParentMerged(t *testing.T) {
 		// Create YAS instance and track branches
 		y, err := yas.NewFromRepository(".")
 		assert.NilError(t, err)
-		err = y.SetParent("topic-a", "main")
+		err = y.SetParent("topic-a", "main", "")
 		assert.NilError(t, err)
-		err = y.SetParent("topic-b", "topic-a")
+		err = y.SetParent("topic-b", "topic-a", "")
 		assert.NilError(t, err)
-		err = y.SetParent("topic-c", "topic-a")
+		err = y.SetParent("topic-c", "topic-a", "")
 		assert.NilError(t, err)
 
 		// Simulate that topic-a has a merged PR
