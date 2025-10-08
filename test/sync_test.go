@@ -103,6 +103,7 @@ func TestSync_RestacksChildrenOntoParentWhenMergedPRDeleted(t *testing.T) {
 		testutil.ExecOrFail(t, "git checkout topic-c")
 		equalLines(t, mustExecOutput("git", "log", "--pretty=%D : %s"), `
 			HEAD -> topic-c : topic-c-0
+			 : topic-b-0
 			topic-a : topic-a-0
 			main : main-0
 		`)
