@@ -70,5 +70,10 @@ func (c *syncCmd) Execute(args []string) error {
 		return NewError(err.Error())
 	}
 
+	fmt.Println("🔄 Restacking branches...")
+	if err := yasInstance.Restack(); err != nil {
+		return NewError(err.Error())
+	}
+
 	return nil
 }
