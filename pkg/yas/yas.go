@@ -10,6 +10,7 @@ import (
 	"github.com/dansimau/yas/pkg/gitexec"
 	"github.com/dansimau/yas/pkg/log"
 	"github.com/dansimau/yas/pkg/xexec"
+	"github.com/fatih/color"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/hashicorp/go-version"
@@ -183,10 +184,18 @@ func (yas *YAS) rebaseDescendants(graph *dag.DAG, branchName string) error {
 	return nil
 }
 
-func (yas *YAS) toTree(graph *dag.DAG, rootNode string) (treeprint.Tree, error) {
-	tree := treeprint.NewWithRoot(rootNode)
+func (yas *YAS) toTree(graph *dag.DAG, rootNode string, currentBranch string) (treeprint.Tree, error) {
+	rootLabel := rootNode
 
-	if err := yas.addNodesFromGraph(tree, graph, rootNode); err != nil {
+	// Add star at the end if trunk is the current branch
+	if rootNode == currentBranch {
+		darkGray := color.New(color.FgHiBlack).SprintFunc()
+		rootLabel = fmt.Sprintf("%s %s", rootNode, darkGray("*"))
+	}
+
+	tree := treeprint.NewWithRoot(rootLabel)
+
+	if err := yas.addNodesFromGraph(tree, graph, rootNode, currentBranch); err != nil {
 		return nil, err
 	}
 
@@ -216,7 +225,12 @@ func (yas *YAS) List() error {
 		return fmt.Errorf("failed to get graph: %w", err)
 	}
 
-	tree, err := yas.toTree(graph, yas.cfg.TrunkBranch)
+	currentBranch, err := yas.git.GetCurrentBranchName()
+	if err != nil {
+		return err
+	}
+
+	tree, err := yas.toTree(graph, yas.cfg.TrunkBranch, currentBranch)
 	if err != nil {
 		return err
 	}

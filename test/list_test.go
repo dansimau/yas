@@ -105,3 +105,86 @@ func TestList_AfterRestack_NoWarning(t *testing.T) {
 			"After restack, should not show '(needs restack)' but got: %s", output)
 	})
 }
+
+func TestList_ShowsCurrentBranch(t *testing.T) {
+	testutil.WithTempWorkingDir(t, func() {
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+
+			# main
+			touch main
+			git add main
+			git commit -m "main-0"
+
+			# topic-a
+			git checkout -b topic-a
+			touch a
+			git add a
+			git commit -m "topic-a-0"
+
+			# topic-b
+			git checkout -b topic-b
+			touch b
+			git add b
+			git commit -m "topic-b-0"
+		`)
+
+		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
+		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "--branch=topic-b", "--parent=topic-a"), 0)
+
+		// Should show star on topic-b (current branch)
+		output := captureStdout(func() {
+			assert.Equal(t, yascli.Run("list"), 0)
+		})
+
+		lines := strings.Split(output, "\n")
+		for _, line := range lines {
+			if strings.Contains(line, "topic-b") {
+				assert.Assert(t, strings.Contains(line, "*"),
+					"topic-b should show '*' (current branch) but got: %s", line)
+			}
+		}
+	})
+}
+
+func TestList_ShowsCurrentBranch_OnTrunk(t *testing.T) {
+	testutil.WithTempWorkingDir(t, func() {
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+
+			# main
+			touch main
+			git add main
+			git commit -m "main-0"
+
+			# topic-a
+			git checkout -b topic-a
+			touch a
+			git add a
+			git commit -m "topic-a-0"
+
+			# back to main
+			git checkout main
+		`)
+
+		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
+		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
+
+		// Should show star on main (current branch)
+		output := captureStdout(func() {
+			assert.Equal(t, yascli.Run("list"), 0)
+		})
+
+		lines := strings.Split(output, "\n")
+		foundMainWithStar := false
+		for _, line := range lines {
+			if strings.Contains(line, "main") && strings.Contains(line, "*") {
+				foundMainWithStar = true
+				break
+			}
+		}
+		assert.Assert(t, foundMainWithStar,
+			"main should show '*' (current branch) but got: %s", output)
+	})
+}
