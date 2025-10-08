@@ -54,6 +54,13 @@ case "$CMD_NAME" in
             # Simulate successful PR creation
             echo "https://github.com/test/test/pull/1"
             exit 0
+        elif [[ "$1" == "pr" && "$2" == "view" ]]; then
+            # Return mock PR body
+            echo "This is the original PR description."
+            exit 0
+        elif [[ "$1" == "pr" && "$2" == "edit" ]]; then
+            # Simulate successful PR edit
+            exit 0
         fi
         ;;
 esac

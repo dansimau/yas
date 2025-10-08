@@ -56,6 +56,7 @@ func Run(args ...string) (exitCode int) {
 	}
 
 	mustAddCommand(parser.AddCommand("add", "Add/set parent of branch", "", &addCmd{}))
+	mustAddCommand(parser.AddCommand("annotate", "Annotate PR with stack information", "", &annotateCmd{}))
 	mustAddCommand(parser.AddCommand("config", "Manage repository-specific configuration", "", &configCmd{}))
 	mustAddCommand(parser.AddCommand("init", "Set up initial configuration", "", &initCmd{}))
 	mustAddCommand(parser.AddCommand("list", "List stacks", "", &listCmd{}))
