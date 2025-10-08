@@ -206,10 +206,10 @@ func (r *Repo) Rebase(upstream, branchName string) error {
 		Run()
 }
 
-// RebaseOnto rebases branchName onto newBase, removing commits from oldBase
+// RebaseOnto rebases branchName onto newBase
 // This is useful when removing a branch from a stack and rebasing its children
-func (r *Repo) RebaseOnto(newBase, oldBase, branchName string) error {
-	return xexec.Command("git", "-c", "core.hooksPath=/dev/null", "rebase", "--onto", newBase, oldBase, branchName, "--update-refs").
+func (r *Repo) RebaseOnto(newBase, branchName string) error {
+	return xexec.Command("git", "-c", "core.hooksPath=/dev/null", "rebase", "--onto", newBase, branchName, "--update-refs").
 		WithEnvVars(CleanedGitEnv()).
 		WithWorkingDir(r.path).
 		Run()
