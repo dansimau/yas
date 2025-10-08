@@ -4,12 +4,18 @@ import (
 	"github.com/dansimau/yas/pkg/yas"
 )
 
-type submitCmd struct{}
+type submitCmd struct {
+	Stack bool `long:"stack" description:"Submit all branches in the current stack"`
+}
 
 func (c *submitCmd) Execute(args []string) error {
 	yasInstance, err := yas.NewFromRepository(cmd.RepoDirectory)
 	if err != nil {
 		return NewError(err.Error())
+	}
+
+	if c.Stack {
+		return yasInstance.SubmitStack()
 	}
 
 	return yasInstance.Submit()

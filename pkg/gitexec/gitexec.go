@@ -180,6 +180,13 @@ func (r *Repo) Push() error {
 		Run()
 }
 
+func (r *Repo) PushBranch(branchName string) error {
+	return xexec.Command("git", "push", "origin", branchName).
+		WithEnvVars(CleanedGitEnv()).
+		WithWorkingDir(r.path).
+		Run()
+}
+
 func (r *Repo) Rebase(upstream, branchName string) error {
 	return xexec.Command("git", "-c", "core.hooksPath=/dev/null", "rebase", upstream, branchName, "--update-refs").
 		WithEnvVars(CleanedGitEnv()).

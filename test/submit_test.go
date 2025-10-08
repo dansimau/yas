@@ -9,6 +9,7 @@ import (
 
 	"github.com/dansimau/yas/pkg/testutil"
 	"github.com/dansimau/yas/pkg/yas"
+	"github.com/dansimau/yas/pkg/yascli"
 	"gotest.tools/v3/assert"
 )
 
@@ -212,6 +213,85 @@ func TestSubmit_SkipsCreatingPRWhenAlreadyExists(t *testing.T) {
 
 		// Verify gh pr create was NOT called
 		assert.Assert(t, !wasCalled(commands, "gh", "pr", "create"), "gh pr create should NOT be called when PR exists")
+	})
+}
+
+func TestSubmit_StackSubmitsAllBranches(t *testing.T) {
+	cmdLogFile, cleanup := setupMockCommands(t, "") // No existing PRs
+	defer cleanup()
+
+	testutil.WithTempWorkingDir(t, func() {
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+			git remote add origin https://github.com/test/test.git
+
+			# main
+			touch main
+			git add main
+			git commit -m "main-0"
+
+			# topic-a
+			git checkout -b topic-a
+			touch a
+			git add a
+			git commit -m "topic-a-0"
+
+			# topic-b (child of topic-a)
+			git checkout -b topic-b
+			touch b
+			git add b
+			git commit -m "topic-b-0"
+
+			# topic-c (child of topic-b)
+			git checkout -b topic-c
+			touch c
+			git add c
+			git commit -m "topic-c-0"
+		`)
+
+		// Initialize yas config
+		cfg := yas.Config{
+			RepoDirectory: ".",
+			TrunkBranch:   "main",
+		}
+		_, err := yas.WriteConfig(cfg)
+		assert.NilError(t, err)
+
+		// Create YAS instance and track branches
+		y, err := yas.NewFromRepository(".")
+		assert.NilError(t, err)
+		err = y.SetParent("topic-a", "main")
+		assert.NilError(t, err)
+		err = y.SetParent("topic-b", "topic-a")
+		assert.NilError(t, err)
+		err = y.SetParent("topic-c", "topic-b")
+		assert.NilError(t, err)
+
+		// Call submit with --stack from topic-b
+		testutil.ExecOrFail(t, "git checkout topic-b")
+		assert.Equal(t, yascli.Run("submit", "--stack"), 0)
+
+		// Parse the command log
+		commands, err := parseCmdLog(cmdLogFile)
+		assert.NilError(t, err)
+
+		// Verify all branches in stack were pushed
+		assert.Assert(t, wasCalled(commands, "git", "push", "origin", "topic-a"), "topic-a should be pushed")
+		assert.Assert(t, wasCalled(commands, "git", "push", "origin", "topic-b"), "topic-b should be pushed")
+		assert.Assert(t, wasCalled(commands, "git", "push", "origin", "topic-c"), "topic-c should be pushed")
+
+		// Verify PRs were created for all branches
+		prCreateA := findCommand(commands, "gh", "pr", "create")
+		assert.Assert(t, prCreateA != nil, "PR should be created for topic-a")
+
+		// Count how many PR creates happened
+		prCreateCount := 0
+		for _, cmd := range commands {
+			if len(cmd) >= 3 && cmd[0] == "gh" && cmd[1] == "pr" && cmd[2] == "create" {
+				prCreateCount++
+			}
+		}
+		assert.Equal(t, prCreateCount, 3, "Should create 3 PRs (one for each branch)")
 	})
 }
 
