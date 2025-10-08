@@ -12,8 +12,22 @@ import (
 	"gotest.tools/v3/assert"
 )
 
+// mockPROptions holds options for mocking a PR
+type mockPROptions struct {
+	ID      string
+	State   string
+	URL     string
+	IsDraft bool
+}
+
 // setupMockCommands creates mock git and gh commands that log to a file
 func setupMockCommands(t *testing.T, existingPRID string) (cmdLogFile string, cleanup func()) {
+	t.Helper()
+	return setupMockCommandsWithPR(t, mockPROptions{ID: existingPRID})
+}
+
+// setupMockCommandsWithPR creates mock git and gh commands with full PR options
+func setupMockCommandsWithPR(t *testing.T, pr mockPROptions) (cmdLogFile string, cleanup func()) {
 	t.Helper()
 
 	// Create temp directory for mock commands
@@ -44,12 +58,24 @@ func setupMockCommands(t *testing.T, existingPRID string) (cmdLogFile string, cl
 	oldRealGit := os.Getenv("YAS_TEST_REAL_GIT")
 	oldCmdLog := os.Getenv("YAS_TEST_CMD_LOG")
 	oldExistingPR := os.Getenv("YAS_TEST_EXISTING_PR_ID")
+	oldPRState := os.Getenv("YAS_TEST_PR_STATE")
+	oldPRURL := os.Getenv("YAS_TEST_PR_URL")
+	oldPRIsDraft := os.Getenv("YAS_TEST_PR_IS_DRAFT")
 
 	os.Setenv("PATH", tmpDir+":"+oldPath)
 	os.Setenv("YAS_TEST_REAL_GIT", realGit)
 	os.Setenv("YAS_TEST_CMD_LOG", cmdLogFile)
-	if existingPRID != "" {
-		os.Setenv("YAS_TEST_EXISTING_PR_ID", existingPRID)
+	if pr.ID != "" {
+		os.Setenv("YAS_TEST_EXISTING_PR_ID", pr.ID)
+	}
+	if pr.State != "" {
+		os.Setenv("YAS_TEST_PR_STATE", pr.State)
+	}
+	if pr.URL != "" {
+		os.Setenv("YAS_TEST_PR_URL", pr.URL)
+	}
+	if pr.IsDraft {
+		os.Setenv("YAS_TEST_PR_IS_DRAFT", "true")
 	}
 
 	cleanup = func() {
@@ -57,6 +83,9 @@ func setupMockCommands(t *testing.T, existingPRID string) (cmdLogFile string, cl
 		os.Setenv("YAS_TEST_REAL_GIT", oldRealGit)
 		os.Setenv("YAS_TEST_CMD_LOG", oldCmdLog)
 		os.Setenv("YAS_TEST_EXISTING_PR_ID", oldExistingPR)
+		os.Setenv("YAS_TEST_PR_STATE", oldPRState)
+		os.Setenv("YAS_TEST_PR_URL", oldPRURL)
+		os.Setenv("YAS_TEST_PR_IS_DRAFT", oldPRIsDraft)
 		os.RemoveAll(tmpDir)
 	}
 

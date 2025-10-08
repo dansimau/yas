@@ -26,6 +26,14 @@ func (yas *YAS) addNodesFromGraph(treeNode treeprint.Tree, graph *dag.DAG, paren
 			branchLabel = fmt.Sprintf("%s %s", branchLabel, yellow("(needs restack)"))
 		}
 
+		// Add PR information if available
+		branchMetadata := yas.data.Branches.Get(childID)
+		if branchMetadata.GitHubPullRequest.ID != "" {
+			pr := branchMetadata.GitHubPullRequest
+			cyan := color.New(color.FgCyan).SprintFunc()
+			branchLabel = fmt.Sprintf("%s %s", branchLabel, cyan(fmt.Sprintf("[%s]", pr.URL)))
+		}
+
 		// Add star at the end if this is the current branch
 		if childID == currentBranch {
 			darkGray := color.New(color.FgHiBlack).SprintFunc()

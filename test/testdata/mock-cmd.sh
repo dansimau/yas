@@ -42,7 +42,10 @@ case "$CMD_NAME" in
         if [[ "$1" == "pr" && "$2" == "list" ]]; then
             # Check if we should return an existing PR
             if [ -n "$YAS_TEST_EXISTING_PR_ID" ]; then
-                echo "[{\"id\":\"$YAS_TEST_EXISTING_PR_ID\",\"state\":\"OPEN\"}]"
+                state="${YAS_TEST_PR_STATE:-OPEN}"
+                url="${YAS_TEST_PR_URL:-https://github.com/test/test/pull/1}"
+                isDraft="${YAS_TEST_PR_IS_DRAFT:-false}"
+                echo "[{\"id\":\"$YAS_TEST_EXISTING_PR_ID\",\"state\":\"$state\",\"url\":\"$url\",\"isDraft\":$isDraft}]"
             else
                 echo "[]"
             fi
