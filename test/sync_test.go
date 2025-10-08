@@ -100,10 +100,10 @@ func TestSync_RestacksChildrenOntoParentWhenMergedPRDeleted(t *testing.T) {
 		assert.Equal(t, topicC.Parent, "topic-a", "topic-c should now be a child of topic-a")
 
 		// Verify git history: topic-c should be rebased onto topic-a
+		// and topic-b's commits should be removed
 		testutil.ExecOrFail(t, "git checkout topic-c")
 		equalLines(t, mustExecOutput("git", "log", "--pretty=%D : %s"), `
 			HEAD -> topic-c : topic-c-0
-			 : topic-b-0
 			topic-a : topic-a-0
 			main : main-0
 		`)
@@ -195,17 +195,16 @@ func TestSync_HandlesMultipleChildrenWhenParentMerged(t *testing.T) {
 		assert.Assert(t, exists, "topic-c should still exist")
 		assert.Equal(t, topicC.Parent, "main", "topic-c should now be a child of main")
 
+		// Verify git history: topic-a's commits should be removed from both children
 		testutil.ExecOrFail(t, "git checkout topic-b")
 		equalLines(t, mustExecOutput("git", "log", "--pretty=%D : %s"), `
 			HEAD -> topic-b : topic-b-0
-			 : topic-a-0
 			main : main-0
 		`)
 
 		testutil.ExecOrFail(t, "git checkout topic-c")
 		equalLines(t, mustExecOutput("git", "log", "--pretty=%D : %s"), `
 			HEAD -> topic-c : topic-c-0
-			 : topic-a-0
 			main : main-0
 		`)
 	})

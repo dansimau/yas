@@ -10,6 +10,7 @@ type BranchMetadata struct {
 	Name              string
 	GitHubPullRequest PullRequestMetadata
 	Parent            string `json:",omitempty"`
+	BranchPoint       string `json:",omitempty"` // Commit SHA where this branch diverged from parent
 }
 
 type PullRequestMetadata struct {

@@ -170,17 +170,38 @@ func (yas *YAS) DeleteMergedBranch(name string) error {
 		fmt.Printf("Restacking %d child branch(es) onto %s...\n", len(children), parentBranch)
 
 		for childID := range children {
+			// Get child metadata for branch point
+			childMetadata := yas.data.Branches.Get(childID)
+
 			// Rebase the child onto the grandparent, removing commits from the merged branch
-			// git rebase --onto <newbase> <oldbase> <branch>
-			// This takes all commits in childID that are not in name, and rebases them onto parentBranch
+			// git rebase --onto <grandparent> <child's-branch-point> <child>
+			// This replays only the child's commits (after its branch point) onto the grandparent
 			fmt.Printf("  Rebasing %s onto %s...\n", childID, parentBranch)
-			if err := yas.git.Rebase(parentBranch, childID); err != nil {
+
+			// If branch point is not set (legacy), we need to calculate it
+			var branchPoint string
+			if childMetadata.BranchPoint == "" {
+				// For legacy branches, use the merged branch name as the old base
+				// This is not as robust but provides backwards compatibility
+				branchPoint = name
+			} else {
+				branchPoint = childMetadata.BranchPoint
+			}
+
+			if err := yas.git.RebaseOntoWithBranchPoint(parentBranch, branchPoint, childID); err != nil {
 				return fmt.Errorf("failed to rebase %s onto %s: %w", childID, parentBranch, err)
 			}
 
 			// Update the child's parent to point to the grandparent
-			childMetadata := yas.data.Branches.Get(childID)
 			childMetadata.Parent = parentBranch
+
+			// Update the child's branch point to the grandparent's current commit
+			grandparentCommit, err := yas.git.GetCommitHash(parentBranch)
+			if err != nil {
+				return fmt.Errorf("failed to get grandparent commit: %w", err)
+			}
+			childMetadata.BranchPoint = grandparentCommit
+
 			yas.data.Branches.Set(childID, childMetadata)
 		}
 
@@ -352,9 +373,32 @@ func (yas *YAS) rebaseDescendants(graph *dag.DAG, branchName string, rebasedBran
 		}
 
 		if needsRebase {
-			// Rebase child onto parent (branchName)
-			if err := yas.git.Rebase(branchName, childID); err != nil {
-				return err
+			// Get child metadata for branch point
+			childMetadata := yas.data.Branches.Get(childID)
+
+			// If branch point is not set (legacy), fall back to regular rebase
+			if childMetadata.BranchPoint == "" {
+				if err := yas.git.Rebase(branchName, childID); err != nil {
+					return err
+				}
+			} else {
+				// Use the new branch-point-based rebase
+				if err := yas.git.RebaseOntoWithBranchPoint(branchName, childMetadata.BranchPoint, childID); err != nil {
+					return err
+				}
+			}
+
+			// Update the branch point to the new parent commit
+			parentCommit, err := yas.git.GetCommitHash(branchName)
+			if err != nil {
+				return fmt.Errorf("failed to get parent commit after rebase: %w", err)
+			}
+			childMetadata.BranchPoint = parentCommit
+			yas.data.Branches.Set(childID, childMetadata)
+
+			// Save updated metadata
+			if err := yas.data.Save(); err != nil {
+				return fmt.Errorf("failed to save metadata after rebase: %w", err)
 			}
 
 			// Track that this branch was rebased
@@ -389,11 +433,8 @@ func (yas *YAS) toTree(graph *dag.DAG, rootNode string, currentBranch string) (t
 }
 
 func (yas *YAS) needsRebase(branchName, parentBranch string) (bool, error) {
-	// Get the merge base between the branch and its parent
-	mergeBase, err := yas.git.GetMergeBase(branchName, parentBranch)
-	if err != nil {
-		return false, err
-	}
+	// Get the branch metadata to access the stored branch point
+	metadata := yas.data.Branches.Get(branchName)
 
 	// Get the current commit of the parent branch
 	parentCommit, err := yas.git.GetCommitHash(parentBranch)
@@ -401,8 +442,17 @@ func (yas *YAS) needsRebase(branchName, parentBranch string) (bool, error) {
 		return false, err
 	}
 
-	// If merge base is different from parent's current commit, rebase is needed
-	return mergeBase != parentCommit, nil
+	// If branch point is not set (legacy branch), fall back to merge-base
+	if metadata.BranchPoint == "" {
+		mergeBase, err := yas.git.GetMergeBase(branchName, parentBranch)
+		if err != nil {
+			return false, err
+		}
+		return mergeBase != parentCommit, nil
+	}
+
+	// If branch point differs from parent's current commit, rebase is needed
+	return metadata.BranchPoint != parentCommit, nil
 }
 
 func (yas *YAS) List(currentStackOnly bool) error {
@@ -468,6 +518,15 @@ func (yas *YAS) SetParent(branchName, parentBranchName string) error {
 
 	branchMetdata := yas.data.Branches.Get(branchName)
 	branchMetdata.Parent = parentBranchName
+
+	// Capture the branch point - this is where the branch actually diverged from its parent
+	// Use merge-base to find the common ancestor, which is the true branch point
+	branchPoint, err := yas.git.GetMergeBase(branchName, parentBranchName)
+	if err != nil {
+		return fmt.Errorf("failed to get branch point: %w", err)
+	}
+	branchMetdata.BranchPoint = branchPoint
+
 	yas.data.Branches.Set(branchName, branchMetdata)
 	yas.data.Save()
 
