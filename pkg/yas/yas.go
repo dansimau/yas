@@ -150,6 +150,12 @@ func (yas *YAS) graph() (*dag.DAG, error) {
 // Restack rebases all branches starting from trunk, including all descendants
 // and forks.
 func (yas *YAS) Restack() error {
+	// Remember the starting branch
+	startingBranch, err := yas.git.GetCurrentBranchName()
+	if err != nil {
+		return err
+	}
+
 	graph, err := yas.graph()
 	if err != nil {
 		return err
@@ -158,6 +164,11 @@ func (yas *YAS) Restack() error {
 	// Start from trunk and rebase all descendants recursively
 	if err := yas.rebaseDescendants(graph, yas.cfg.TrunkBranch); err != nil {
 		return err
+	}
+
+	// Return to the starting branch
+	if err := yas.git.Checkout(startingBranch); err != nil {
+		return fmt.Errorf("restack succeeded but failed to return to branch %s: %w", startingBranch, err)
 	}
 
 	return nil
