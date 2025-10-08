@@ -79,6 +79,12 @@ func setupMockCommandsWithPR(t *testing.T, pr mockPROptions) (cmdLogFile string,
 		os.Setenv("YAS_TEST_PR_IS_DRAFT", "true")
 	}
 
+	// Clean up any temp files from previous test runs
+	files, _ := filepath.Glob("/tmp/yas-test-pr-created-*")
+	for _, f := range files {
+		os.Remove(f)
+	}
+
 	cleanup = func() {
 		os.Setenv("PATH", oldPath)
 		os.Setenv("YAS_TEST_REAL_GIT", oldRealGit)
@@ -88,6 +94,12 @@ func setupMockCommandsWithPR(t *testing.T, pr mockPROptions) (cmdLogFile string,
 		os.Setenv("YAS_TEST_PR_URL", oldPRURL)
 		os.Setenv("YAS_TEST_PR_IS_DRAFT", oldPRIsDraft)
 		os.RemoveAll(tmpDir)
+
+		// Clean up temp PR files
+		files, _ := filepath.Glob("/tmp/yas-test-pr-created-*")
+		for _, f := range files {
+			os.Remove(f)
+		}
 	}
 
 	return cmdLogFile, cleanup
