@@ -187,6 +187,25 @@ func (r *Repo) PushBranch(branchName string) error {
 		Run()
 }
 
+func (r *Repo) ForcePushBranch(branchName string) error {
+	return xexec.Command("git", "push", "--force-with-lease", "origin", branchName).
+		WithEnvVars(CleanedGitEnv()).
+		WithWorkingDir(r.path).
+		Run()
+}
+
+func (r *Repo) FetchBranch(branchName string) error {
+	return r.run("git", "fetch", "origin", branchName)
+}
+
+func (r *Repo) GetRemoteCommitHash(branchName string) (string, error) {
+	return r.output("git", "rev-parse", fmt.Sprintf("origin/%s", branchName))
+}
+
+func (r *Repo) GetRemoteShortHash(branchName string) (string, error) {
+	return r.output("git", "rev-parse", "--short", fmt.Sprintf("origin/%s", branchName))
+}
+
 func (r *Repo) Rebase(upstream, branchName string) error {
 	return xexec.Command("git", "-c", "core.hooksPath=/dev/null", "rebase", upstream, branchName, "--update-refs").
 		WithEnvVars(CleanedGitEnv()).
