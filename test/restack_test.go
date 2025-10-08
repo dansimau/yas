@@ -257,6 +257,163 @@ func TestRestack_ShowsReminderWhenBranchesWithPRsAreRestacked(t *testing.T) {
 	})
 }
 
+func TestRestack_OnlyRebasesWhenNeeded(t *testing.T) {
+	cmdLogFile, cleanup := setupMockCommands(t, "")
+	defer cleanup()
+
+	testutil.WithTempWorkingDir(t, func() {
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+
+			# main
+			touch main
+			git add main
+			git commit -m "main-0"
+
+			# topic-a
+			git checkout -b topic-a
+			touch a
+			git add a
+			git commit -m "topic-a-0"
+
+			# topic-b (child of topic-a)
+			git checkout -b topic-b
+			touch b
+			git add b
+			git commit -m "topic-b-0"
+
+			# topic-c (child of topic-b)
+			git checkout -b topic-c
+			touch c
+			git add c
+			git commit -m "topic-c-0"
+
+			# update main - this makes topic-a need rebasing
+			git checkout main
+			echo 1 > main
+			git add main
+			git commit -m "main-1"
+
+			# on branch topic-c
+			git checkout topic-c
+		`)
+
+		// Initialize yas config
+		cfg := yas.Config{
+			RepoDirectory: ".",
+			TrunkBranch:   "main",
+		}
+		_, err := yas.WriteConfig(cfg)
+		assert.NilError(t, err)
+
+		// Create YAS instance and track branches
+		y, err := yas.NewFromRepository(".")
+		assert.NilError(t, err)
+		err = y.SetParent("topic-a", "main")
+		assert.NilError(t, err)
+		err = y.SetParent("topic-b", "topic-a")
+		assert.NilError(t, err)
+		err = y.SetParent("topic-c", "topic-b")
+		assert.NilError(t, err)
+
+		// Run restack
+		err = y.Restack()
+		assert.NilError(t, err)
+
+		// Parse the command log
+		commands, err := parseCmdLog(cmdLogFile)
+		assert.NilError(t, err)
+
+		// Count how many rebase commands were called
+		rebaseCount := 0
+		for _, cmd := range commands {
+			// git -c core.hooksPath=/dev/null rebase ...
+			if len(cmd) >= 5 && cmd[0] == "git" && cmd[3] == "rebase" {
+				rebaseCount++
+			}
+		}
+
+		// topic-a needs rebasing (main changed)
+		// topic-b needs rebasing (because topic-a was rebased)
+		// topic-c needs rebasing (because topic-b was rebased)
+		assert.Equal(t, rebaseCount, 3, "Should have called git rebase 3 times (for topic-a, topic-b, topic-c)")
+
+		// Verify specific rebase commands
+		assert.Assert(t, wasCalled(commands, "git", "-c", "core.hooksPath=/dev/null", "rebase", "main", "topic-a"),
+			"Should rebase topic-a onto main")
+		assert.Assert(t, wasCalled(commands, "git", "-c", "core.hooksPath=/dev/null", "rebase", "topic-a", "topic-b"),
+			"Should rebase topic-b onto topic-a")
+		assert.Assert(t, wasCalled(commands, "git", "-c", "core.hooksPath=/dev/null", "rebase", "topic-b", "topic-c"),
+			"Should rebase topic-c onto topic-b")
+	})
+}
+
+func TestRestack_SkipsRebasingWhenNotNeeded(t *testing.T) {
+	cmdLogFile, cleanup := setupMockCommands(t, "")
+	defer cleanup()
+
+	testutil.WithTempWorkingDir(t, func() {
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+
+			# main
+			touch main
+			git add main
+			git commit -m "main-0"
+
+			# topic-a
+			git checkout -b topic-a
+			touch a
+			git add a
+			git commit -m "topic-a-0"
+
+			# topic-b (child of topic-a)
+			git checkout -b topic-b
+			touch b
+			git add b
+			git commit -m "topic-b-0"
+
+			# on branch topic-b
+		`)
+
+		// Initialize yas config
+		cfg := yas.Config{
+			RepoDirectory: ".",
+			TrunkBranch:   "main",
+		}
+		_, err := yas.WriteConfig(cfg)
+		assert.NilError(t, err)
+
+		// Create YAS instance and track branches
+		y, err := yas.NewFromRepository(".")
+		assert.NilError(t, err)
+		err = y.SetParent("topic-a", "main")
+		assert.NilError(t, err)
+		err = y.SetParent("topic-b", "topic-a")
+		assert.NilError(t, err)
+
+		// Run restack - nothing should be rebased since everything is up to date
+		err = y.Restack()
+		assert.NilError(t, err)
+
+		// Parse the command log
+		commands, err := parseCmdLog(cmdLogFile)
+		assert.NilError(t, err)
+
+		// Count how many rebase commands were called
+		rebaseCount := 0
+		for _, cmd := range commands {
+			// git -c core.hooksPath=/dev/null rebase ...
+			if len(cmd) >= 5 && cmd[0] == "git" && cmd[3] == "rebase" {
+				rebaseCount++
+			}
+		}
+
+		// Nothing needs rebasing, so no rebase commands should have been called
+		assert.Equal(t, rebaseCount, 0, "Should not have called git rebase (everything is up to date)")
+	})
+}
+
 func TestRestack_NoReminderWhenNoBranchesHavePRs(t *testing.T) {
 	testutil.WithTempWorkingDir(t, func() {
 		testutil.ExecOrFail(t, `
