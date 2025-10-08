@@ -52,6 +52,10 @@ func New(cfg Config) (*YAS, error) {
 		return nil, fmt.Errorf("validation failed: %w", err)
 	}
 
+	if err := yas.pruneMissingBranches(); err != nil {
+		return nil, fmt.Errorf("failed to prune missing branches: %w", err)
+	}
+
 	return yas, nil
 }
 
@@ -66,6 +70,34 @@ func NewFromRepository(repoDirectory string) (*YAS, error) {
 
 func (yas *YAS) cleanupBranch(name string) error {
 	yas.data.Branches.Remove(name)
+	return yas.data.Save()
+}
+
+func (yas *YAS) pruneMissingBranches() error {
+	removed := false
+
+	for _, branch := range yas.data.Branches.ToSlice() {
+		if strings.TrimSpace(branch.Name) == "" {
+			continue
+		}
+
+		exists, err := yas.git.BranchExists(branch.Name)
+		if err != nil {
+			return err
+		}
+
+		if exists {
+			continue
+		}
+
+		yas.data.Branches.Remove(branch.Name)
+		removed = true
+	}
+
+	if !removed {
+		return nil
+	}
+
 	return yas.data.Save()
 }
 
