@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/dansimau/yas/pkg/testutil"
+	"github.com/dansimau/yas/pkg/yas"
 	"github.com/dansimau/yas/pkg/yascli"
 	"gotest.tools/v3/assert"
 )
@@ -186,6 +187,118 @@ func TestList_ShowsCurrentBranch_OnTrunk(t *testing.T) {
 		}
 		assert.Assert(t, foundMainWithStar,
 			"main should show '*' (current branch) but got: %s", output)
+	})
+}
+
+func TestList_ShowsPRInfo(t *testing.T) {
+	_, cleanup := setupMockCommandsWithPR(t, mockPROptions{
+		ID:      "PR_kwDOTest123",
+		State:   "OPEN",
+		URL:     "https://github.com/test/test/pull/42",
+		IsDraft: false,
+	})
+	defer cleanup()
+
+	testutil.WithTempWorkingDir(t, func() {
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+			git remote add origin https://github.com/test/test.git
+
+			# main
+			touch main
+			git add main
+			git commit -m "main-0"
+
+			# topic-a
+			git checkout -b topic-a
+			touch a
+			git add a
+			git commit -m "topic-a-0"
+		`)
+
+		// Initialize yas config
+		cfg := yas.Config{
+			RepoDirectory: ".",
+			TrunkBranch:   "main",
+		}
+		_, err := yas.WriteConfig(cfg)
+		assert.NilError(t, err)
+
+		// Create YAS instance and track branch
+		y, err := yas.NewFromRepository(".")
+		assert.NilError(t, err)
+		err = y.SetParent("topic-a", "main")
+		assert.NilError(t, err)
+
+		// Submit to create PR and populate metadata
+		err = y.Submit()
+		assert.NilError(t, err)
+
+		// Capture the list output
+		output := captureStdout(func() {
+			assert.Equal(t, yascli.Run("list"), 0)
+		})
+
+		// Verify PR info appears in list
+		assert.Assert(t, strings.Contains(output, "topic-a"), "List should contain topic-a")
+		assert.Assert(t, strings.Contains(output, "[OPEN: https://github.com/test/test/pull/42]"),
+			"List should show PR state and URL, but got: %s", output)
+	})
+}
+
+func TestList_ShowsDraftPR(t *testing.T) {
+	_, cleanup := setupMockCommandsWithPR(t, mockPROptions{
+		ID:      "PR_kwDOTest456",
+		State:   "OPEN",
+		URL:     "https://github.com/test/test/pull/99",
+		IsDraft: true,
+	})
+	defer cleanup()
+
+	testutil.WithTempWorkingDir(t, func() {
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+			git remote add origin https://github.com/test/test.git
+
+			# main
+			touch main
+			git add main
+			git commit -m "main-0"
+
+			# topic-a
+			git checkout -b topic-a
+			touch a
+			git add a
+			git commit -m "topic-a-0"
+		`)
+
+		// Initialize yas config
+		cfg := yas.Config{
+			RepoDirectory: ".",
+			TrunkBranch:   "main",
+		}
+		_, err := yas.WriteConfig(cfg)
+		assert.NilError(t, err)
+
+		// Create YAS instance and track branch
+		y, err := yas.NewFromRepository(".")
+		assert.NilError(t, err)
+		err = y.SetParent("topic-a", "main")
+		assert.NilError(t, err)
+
+		// Submit to create PR and populate metadata
+		err = y.Submit()
+		assert.NilError(t, err)
+
+		// Capture the list output
+		output := captureStdout(func() {
+			assert.Equal(t, yascli.Run("list"), 0)
+		})
+
+		// Verify draft PR info appears in list
+		assert.Assert(t, strings.Contains(output, "topic-a"), "List should contain topic-a")
+		assert.Assert(t, strings.Contains(output, "[DRAFT: https://github.com/test/test/pull/99]"),
+			"List should show DRAFT state for draft PRs, but got: %s", output)
 	})
 }
 
