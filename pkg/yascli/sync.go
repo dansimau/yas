@@ -61,12 +61,12 @@ func (c *syncCmd) Execute(args []string) error {
 		return NewError(err.Error())
 	}
 
-	if err := c.checkForClosedPRs(); err != nil {
+	fmt.Printf("🔄 Pulling %s...\n", yasInstance.Config().TrunkBranch)
+	if err := yasInstance.UpdateTrunk(); err != nil {
 		return NewError(err.Error())
 	}
 
-	fmt.Printf("🔄 Pulling %s...\n", yasInstance.Config().TrunkBranch)
-	if err := yasInstance.UpdateTrunk(); err != nil {
+	if err := c.checkForClosedPRs(); err != nil {
 		return NewError(err.Error())
 	}
 
