@@ -192,10 +192,10 @@ func TestList_ShowsCurrentBranch_OnTrunk(t *testing.T) {
 
 func TestList_ShowsPRInfo(t *testing.T) {
 	_, cleanup := setupMockCommandsWithPR(t, mockPROptions{
-		ID:      "PR_kwDOTest123",
-		State:   "OPEN",
-		URL:     "https://github.com/test/test/pull/42",
-		IsDraft: false,
+		CreatedID:      "PR_kwDOTest123",
+		CreatedState:   "OPEN",
+		CreatedURL:     "https://github.com/test/test/pull/42",
+		CreatedIsDraft: boolPtr(false),
 	})
 	defer cleanup()
 
@@ -248,10 +248,10 @@ func TestList_ShowsPRInfo(t *testing.T) {
 
 func TestList_ShowsDraftPR(t *testing.T) {
 	_, cleanup := setupMockCommandsWithPR(t, mockPROptions{
-		ID:      "PR_kwDOTest456",
-		State:   "OPEN",
-		URL:     "https://github.com/test/test/pull/99",
-		IsDraft: true,
+		CreatedID:      "PR_kwDOTest456",
+		CreatedState:   "OPEN",
+		CreatedURL:     "https://github.com/test/test/pull/99",
+		CreatedIsDraft: boolPtr(true),
 	})
 	defer cleanup()
 

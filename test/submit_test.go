@@ -12,12 +12,21 @@ import (
 	"gotest.tools/v3/assert"
 )
 
+func boolPtr(v bool) *bool {
+	return &v
+}
+
 // mockPROptions holds options for mocking a PR
 type mockPROptions struct {
 	ID      string
 	State   string
 	URL     string
 	IsDraft bool
+
+	CreatedID      string
+	CreatedState   string
+	CreatedURL     string
+	CreatedIsDraft *bool
 }
 
 // setupMockCommands creates mock git and gh commands that log to a file
@@ -61,6 +70,10 @@ func setupMockCommandsWithPR(t *testing.T, pr mockPROptions) (cmdLogFile string,
 	oldPRState := os.Getenv("YAS_TEST_PR_STATE")
 	oldPRURL := os.Getenv("YAS_TEST_PR_URL")
 	oldPRIsDraft := os.Getenv("YAS_TEST_PR_IS_DRAFT")
+	oldCreatedPRID := os.Getenv("YAS_TEST_CREATED_PR_ID")
+	oldCreatedPRState := os.Getenv("YAS_TEST_CREATED_PR_STATE")
+	oldCreatedPRURL := os.Getenv("YAS_TEST_CREATED_PR_URL")
+	oldCreatedPRIsDraft := os.Getenv("YAS_TEST_CREATED_PR_IS_DRAFT")
 
 	os.Setenv("PATH", tmpDir+":"+oldPath)
 	os.Setenv("YAS_TEST_REAL_GIT", realGit)
@@ -77,6 +90,22 @@ func setupMockCommandsWithPR(t *testing.T, pr mockPROptions) (cmdLogFile string,
 	if pr.IsDraft {
 		os.Setenv("YAS_TEST_PR_IS_DRAFT", "true")
 	}
+	if pr.CreatedID != "" {
+		os.Setenv("YAS_TEST_CREATED_PR_ID", pr.CreatedID)
+	}
+	if pr.CreatedState != "" {
+		os.Setenv("YAS_TEST_CREATED_PR_STATE", pr.CreatedState)
+	}
+	if pr.CreatedURL != "" {
+		os.Setenv("YAS_TEST_CREATED_PR_URL", pr.CreatedURL)
+	}
+	if pr.CreatedIsDraft != nil {
+		if *pr.CreatedIsDraft {
+			os.Setenv("YAS_TEST_CREATED_PR_IS_DRAFT", "true")
+		} else {
+			os.Setenv("YAS_TEST_CREATED_PR_IS_DRAFT", "false")
+		}
+	}
 
 	cleanup = func() {
 		os.Setenv("PATH", oldPath)
@@ -86,6 +115,10 @@ func setupMockCommandsWithPR(t *testing.T, pr mockPROptions) (cmdLogFile string,
 		os.Setenv("YAS_TEST_PR_STATE", oldPRState)
 		os.Setenv("YAS_TEST_PR_URL", oldPRURL)
 		os.Setenv("YAS_TEST_PR_IS_DRAFT", oldPRIsDraft)
+		os.Setenv("YAS_TEST_CREATED_PR_ID", oldCreatedPRID)
+		os.Setenv("YAS_TEST_CREATED_PR_STATE", oldCreatedPRState)
+		os.Setenv("YAS_TEST_CREATED_PR_URL", oldCreatedPRURL)
+		os.Setenv("YAS_TEST_CREATED_PR_IS_DRAFT", oldCreatedPRIsDraft)
 		os.RemoveAll(tmpDir)
 	}
 
@@ -216,7 +249,12 @@ func TestSubmit_SkipsCreatingPRWhenAlreadyExists(t *testing.T) {
 }
 
 func TestSubmit_CreatesNewPRWhenNoneExists(t *testing.T) {
-	cmdLogFile, cleanup := setupMockCommands(t, "") // No existing PR
+	cmdLogFile, cleanup := setupMockCommandsWithPR(t, mockPROptions{
+		CreatedID:      "PR_kwDOTestCreated",
+		CreatedState:   "OPEN",
+		CreatedURL:     "https://github.com/test/test/pull/123",
+		CreatedIsDraft: boolPtr(true),
+	})
 	defer cleanup()
 
 	testutil.WithTempWorkingDir(t, func() {
@@ -266,5 +304,12 @@ func TestSubmit_CreatesNewPRWhenNoneExists(t *testing.T) {
 
 		// Verify gh pr create WAS called
 		assert.Assert(t, wasCalled(commands, "gh", "pr", "create"), "gh pr create should be called when no PR exists")
+
+		branch, exists := y.TrackedBranches().Get("topic-a")
+		assert.Assert(t, exists, "topic-a branch metadata should exist")
+		assert.Equal(t, branch.GitHubPullRequest.ID, "PR_kwDOTestCreated")
+		assert.Equal(t, branch.GitHubPullRequest.State, "OPEN")
+		assert.Equal(t, branch.GitHubPullRequest.URL, "https://github.com/test/test/pull/123")
+		assert.Assert(t, branch.GitHubPullRequest.IsDraft)
 	})
 }

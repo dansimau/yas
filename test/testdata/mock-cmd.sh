@@ -52,7 +52,28 @@ case "$CMD_NAME" in
             exit 0
         elif [[ "$1" == "pr" && "$2" == "create" ]]; then
             # Simulate successful PR creation
-            echo "https://github.com/test/test/pull/1"
+            created_id="${YAS_TEST_CREATED_PR_ID:-PR_kwDOTestCreated}"
+            created_state="${YAS_TEST_CREATED_PR_STATE:-OPEN}"
+            created_url="${YAS_TEST_CREATED_PR_URL:-https://github.com/test/test/pull/1}"
+            if [ -n "$YAS_TEST_CREATED_PR_IS_DRAFT" ]; then
+                created_is_draft="$YAS_TEST_CREATED_PR_IS_DRAFT"
+            else
+                created_is_draft="true"
+            fi
+
+            has_json="false"
+            for arg in "$@"; do
+                if [ "$arg" == "--json" ]; then
+                    has_json="true"
+                    break
+                fi
+            done
+
+            if [ "$has_json" == "true" ]; then
+                echo "{\"id\":\"$created_id\",\"state\":\"$created_state\",\"url\":\"$created_url\",\"isDraft\":$created_is_draft}"
+            else
+                echo "$created_url"
+            fi
             exit 0
         fi
         ;;

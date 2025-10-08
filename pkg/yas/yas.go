@@ -401,11 +401,48 @@ func (yas *YAS) Submit() error {
 		prCreateArgs = append(prCreateArgs, "--base", metadata.Parent)
 	}
 
-	if err := xexec.Command(append([]string{"gh", "pr", "create"}, prCreateArgs...)...).Run(); err != nil {
+	prCreateArgs = append(prCreateArgs, "--json", "id,state,url,isDraft")
+
+	output, err := xexec.Command(append([]string{"gh", "pr", "create"}, prCreateArgs...)...).WithStdout(nil).Output()
+	if err != nil {
 		return err
 	}
 
+	prMetadata, err := parsePullRequestMetadata(output)
+	if err != nil {
+		return err
+	}
+
+	metadata.GitHubPullRequest = *prMetadata
+	yas.data.Branches.Set(currentBranch, metadata)
+
+	if err := yas.data.Save(); err != nil {
+		return err
+	}
+
+	if metadata.GitHubPullRequest.URL != "" {
+		fmt.Printf("Created PR: %s\n", metadata.GitHubPullRequest.URL)
+	}
+
 	return nil
+}
+
+func parsePullRequestMetadata(data []byte) (*PullRequestMetadata, error) {
+	metadata := &PullRequestMetadata{}
+	if err := json.Unmarshal(data, metadata); err == nil && metadata.ID != "" {
+		return metadata, nil
+	}
+
+	list := []PullRequestMetadata{}
+	if err := json.Unmarshal(data, &list); err != nil {
+		return nil, fmt.Errorf("failed to parse pull request metadata: %w", err)
+	}
+
+	if len(list) == 0 {
+		return nil, errors.New("gh pr create returned no pull request metadata")
+	}
+
+	return &list[0], nil
 }
 
 func (yas *YAS) TrackedBranches() Branches {
