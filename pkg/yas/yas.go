@@ -401,15 +401,71 @@ func (yas *YAS) Submit() error {
 		return errors.New("cannot submit in detached HEAD state")
 	}
 
-	if err := yas.refreshRemoteStatus(currentBranch); err != nil {
+	return yas.submitBranch(currentBranch)
+}
+
+func (yas *YAS) SubmitStack() error {
+	currentBranch, err := yas.git.GetCurrentBranchName()
+	if err != nil {
 		return err
 	}
 
-	if err := yas.git.Push(); err != nil {
+	if currentBranch == "HEAD" {
+		return errors.New("cannot submit in detached HEAD state")
+	}
+
+	// Get the full graph
+	fullGraph, err := yas.graph()
+	if err != nil {
+		return fmt.Errorf("failed to get graph: %w", err)
+	}
+
+	// Get the current stack
+	stackGraph, err := yas.currentStackGraph(fullGraph, currentBranch)
+	if err != nil {
+		return fmt.Errorf("failed to get current stack: %w", err)
+	}
+
+	// Submit all branches in the stack starting from trunk
+	if err := yas.submitDescendants(stackGraph, yas.cfg.TrunkBranch); err != nil {
+		return err
+	}
+
+	fmt.Printf("\nSuccessfully submitted all branches in stack\n")
+	return nil
+}
+
+func (yas *YAS) submitDescendants(graph *dag.DAG, branchName string) error {
+	children, err := graph.GetChildren(branchName)
+	if err != nil {
+		return err
+	}
+
+	for childID := range children {
+		fmt.Printf("\n=== Submitting %s ===\n", childID)
+		if err := yas.submitBranch(childID); err != nil {
+			return fmt.Errorf("failed to submit %s: %w", childID, err)
+		}
+
+		// Recursively submit this branch's descendants
+		if err := yas.submitDescendants(graph, childID); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (yas *YAS) submitBranch(branchName string) error {
+	if err := yas.refreshRemoteStatus(branchName); err != nil {
+		return err
+	}
+
+	if err := yas.git.PushBranch(branchName); err != nil {
 		return fmt.Errorf("failed to push: %w", err)
 	}
 
-	metadata := yas.data.Branches.Get(currentBranch)
+	metadata := yas.data.Branches.Get(branchName)
 
 	// Check if PR already exists
 	if metadata.GitHubPullRequest.ID != "" {
@@ -427,6 +483,7 @@ func (yas *YAS) Submit() error {
 	prCreateArgs := []string{
 		"--draft",
 		"--fill-first",
+		"--head", branchName,
 	}
 
 	if metadata.Parent != "" {
