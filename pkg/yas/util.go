@@ -25,7 +25,7 @@ func formatBranchName(branchName string) string {
 	return fmt.Sprintf("%s%s", darkGray(prefix+"/"), suffix)
 }
 
-func (yas *YAS) addNodesFromGraph(treeNode treeprint.Tree, graph *dag.DAG, parentID string, currentBranch string) error {
+func (yas *YAS) addNodesFromGraph(treeNode treeprint.Tree, graph *dag.DAG, parentID string, currentBranch string, showStatus bool) error {
 	children, err := graph.GetChildren(parentID)
 	if err != nil {
 		return err
@@ -70,6 +70,14 @@ func (yas *YAS) addNodesFromGraph(treeNode treeprint.Tree, graph *dag.DAG, paren
 			pr := branchMetadata.GitHubPullRequest
 			cyan := color.New(color.FgCyan).SprintFunc()
 			branchLabel = fmt.Sprintf("%s %s", branchLabel, cyan(fmt.Sprintf("[%s]", pr.URL)))
+
+			// Add review and CI status if requested
+			if showStatus {
+				reviewStatus := getReviewStatusIcon(pr.ReviewDecision)
+				ciStatus := getCIStatusIcon(pr.GetOverallCIStatus())
+				darkGray := color.New(color.FgHiBlack).SprintFunc()
+				branchLabel = fmt.Sprintf("%s %s", branchLabel, darkGray(fmt.Sprintf("(review: %s, CI: %s)", reviewStatus, ciStatus)))
+			}
 		}
 
 		// Add star at the end if this is the current branch
@@ -79,10 +87,38 @@ func (yas *YAS) addNodesFromGraph(treeNode treeprint.Tree, graph *dag.DAG, paren
 		}
 
 		childTree := treeNode.AddBranch(branchLabel)
-		if err := yas.addNodesFromGraph(childTree, graph, childID, currentBranch); err != nil {
+		if err := yas.addNodesFromGraph(childTree, graph, childID, currentBranch, showStatus); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+func getReviewStatusIcon(reviewDecision string) string {
+	switch reviewDecision {
+	case "APPROVED":
+		return "✅"
+	case "CHANGES_REQUESTED":
+		return "❌"
+	case "REVIEW_REQUIRED":
+		return "❌"
+	default:
+		return "❌" // Default to cross for any other state
+	}
+}
+
+func getCIStatusIcon(ciStatus string) string {
+	switch ciStatus {
+	case "SUCCESS":
+		return "✅"
+	case "FAILURE":
+		return "❌"
+	case "PENDING":
+		return "⏳"
+	case "": // No checks configured
+		return "—" // Em dash to indicate no checks
+	default:
+		return "❌" // Default to cross for any other state
+	}
 }

@@ -6,6 +6,7 @@ import (
 
 type listCmd struct {
 	CurrentStack bool `long:"current-stack" description:"Show only the current stack (ancestors and descendants of current branch)"`
+	Status       bool `long:"status" description:"Show PR review and CI status"`
 }
 
 func (c *listCmd) Execute(args []string) error {
@@ -14,5 +15,5 @@ func (c *listCmd) Execute(args []string) error {
 		return NewError(err.Error())
 	}
 
-	return yasInstance.List(c.CurrentStack)
+	return yasInstance.List(c.CurrentStack, c.Status)
 }
