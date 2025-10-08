@@ -52,16 +52,16 @@ func TestList_NeedsRestack(t *testing.T) {
 			assert.Equal(t, yascli.Run("list"), 0)
 		})
 
-		// topic-a should show "(needs restack)" because main has new commits
-		assert.Assert(t, strings.Contains(output, "topic-a") && strings.Contains(output, "(needs restack)"),
-			"topic-a should show '(needs restack)' but got: %s", output)
+		// topic-a should show "needs restack" because main has new commits
+		assert.Assert(t, strings.Contains(output, "topic-a") && strings.Contains(output, "needs restack"),
+			"topic-a should show 'needs restack' but got: %s", output)
 
-		// topic-b should NOT show "(needs restack)" because topic-a hasn't changed
+		// topic-b should NOT show "needs restack" because topic-a hasn't changed
 		lines := strings.Split(output, "\n")
 		for _, line := range lines {
 			if strings.Contains(line, "topic-b") {
-				assert.Assert(t, !strings.Contains(line, "(needs restack)"),
-					"topic-b should not show '(needs restack)' but got: %s", line)
+				assert.Assert(t, !strings.Contains(line, "needs restack"),
+					"topic-b should not show 'needs restack' but got: %s", line)
 			}
 		}
 	})
@@ -565,5 +565,79 @@ func TestList_ShowsBothNeedsRestackAndNeedsSubmit(t *testing.T) {
 			strings.Contains(output, "needs restack") &&
 			strings.Contains(output, "needs submit"),
 			"topic-a should show '(needs restack, needs submit)' but got: %s", output)
+	})
+}
+
+func TestList_ShowsNotSubmitted_WhenNoPRExists(t *testing.T) {
+	testutil.WithTempWorkingDir(t, func() {
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+
+			# main
+			touch main
+			git add main
+			git commit -m "main-0"
+
+			# topic-a (not submitted yet)
+			git checkout -b topic-a
+			touch a
+			git add a
+			git commit -m "topic-a-0"
+
+			git checkout main
+		`)
+
+		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
+		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
+
+		// Capture the list output
+		output := captureStdout(func() {
+			assert.Equal(t, yascli.Run("list"), 0)
+		})
+
+		// topic-a should show "(not submitted)" because it has no PR
+		assert.Assert(t, strings.Contains(output, "topic-a") && strings.Contains(output, "(not submitted)"),
+			"topic-a should show '(not submitted)' when no PR exists, but got: %s", output)
+	})
+}
+
+func TestList_ShowsNeedsRestackAndNotSubmitted(t *testing.T) {
+	testutil.WithTempWorkingDir(t, func() {
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+
+			# main
+			touch main
+			git add main
+			git commit -m "main-0"
+
+			# topic-a
+			git checkout -b topic-a
+			touch a
+			git add a
+			git commit -m "topic-a-0"
+
+			# Update main (causes need for restack)
+			git checkout main
+			echo 1 > main
+			git add main
+			git commit -m "main-1"
+
+			git checkout topic-a
+		`)
+
+		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
+		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
+
+		// Capture the list output
+		output := captureStdout(func() {
+			assert.Equal(t, yascli.Run("list"), 0)
+		})
+
+		// topic-a should show both warnings
+		assert.Assert(t, strings.Contains(output, "topic-a") &&
+			strings.Contains(output, "needs restack") &&
+			strings.Contains(output, "not submitted"),
+			"topic-a should show '(needs restack, not submitted)' but got: %s", output)
 	})
 }

@@ -33,6 +33,7 @@ func (yas *YAS) addNodesFromGraph(treeNode treeprint.Tree, graph *dag.DAG, paren
 
 	for childID := range children {
 		branchLabel := formatBranchName(childID)
+		branchMetadata := yas.data.Branches.Get(childID)
 
 		// Check if this branch needs rebasing or submitting
 		var statusParts []string
@@ -45,11 +46,18 @@ func (yas *YAS) addNodesFromGraph(treeNode treeprint.Tree, graph *dag.DAG, paren
 			statusParts = append(statusParts, "needs restack")
 		}
 
-		needsSubmit, err := yas.needsSubmit(childID)
-		if err != nil {
-			// If we can't determine submit status, ignore
-		} else if needsSubmit {
-			statusParts = append(statusParts, "needs submit")
+		// Check submit status
+		if branchMetadata.GitHubPullRequest.ID == "" {
+			// No PR exists
+			statusParts = append(statusParts, "not submitted")
+		} else {
+			// PR exists, check if it needs updating
+			needsSubmit, err := yas.needsSubmit(childID)
+			if err != nil {
+				// If we can't determine submit status, ignore
+			} else if needsSubmit {
+				statusParts = append(statusParts, "needs submit")
+			}
 		}
 
 		// Add combined status if any
@@ -58,7 +66,6 @@ func (yas *YAS) addNodesFromGraph(treeNode treeprint.Tree, graph *dag.DAG, paren
 		}
 
 		// Add PR information if available
-		branchMetadata := yas.data.Branches.Get(childID)
 		if branchMetadata.GitHubPullRequest.ID != "" {
 			pr := branchMetadata.GitHubPullRequest
 			cyan := color.New(color.FgCyan).SprintFunc()
