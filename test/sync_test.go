@@ -208,3 +208,60 @@ func TestSync_HandlesMultipleChildrenWhenParentMerged(t *testing.T) {
 		`)
 	})
 }
+
+func TestSync_ErrorsWhenMergedBranchHasNoParent(t *testing.T) {
+	_, cleanup := setupMockCommandsWithPR(t, mockPROptions{
+		ID:    "PR_kwDOTest123",
+		State: "MERGED",
+		URL:   "https://github.com/test/test/pull/42",
+	})
+	defer cleanup()
+
+	testutil.WithTempWorkingDir(t, func() {
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+			git remote add origin https://github.com/test/test.git
+
+			# main
+			touch main
+			git add main
+			git commit -m "main-0"
+
+			# topic-a (but we won't set a parent)
+			git checkout -b topic-a
+			touch a
+			git add a
+			git commit -m "topic-a-0"
+
+			# back to main
+			git checkout main
+		`)
+
+		// Initialize yas config
+		cfg := yas.Config{
+			RepoDirectory: ".",
+			TrunkBranch:   "main",
+		}
+		_, err := yas.WriteConfig(cfg)
+		assert.NilError(t, err)
+
+		// Create YAS instance but DON'T set parent for topic-a
+		y, err := yas.NewFromRepository(".")
+		assert.NilError(t, err)
+
+		// Manually add topic-a to tracked branches without a parent
+		branchMetadata := y.TrackedBranches()
+		topicA, _ := branchMetadata.Get("topic-a")
+		topicA.Name = "topic-a"
+		topicA.Parent = "" // No parent set
+
+		// Simulate merged PR metadata
+		err = y.RefreshRemoteStatus("topic-a")
+		assert.NilError(t, err)
+
+		// Try to delete merged branch without parent - should error
+		err = y.DeleteMergedBranch("topic-a")
+		assert.ErrorContains(t, err, "has no parent branch set")
+		assert.ErrorContains(t, err, "cannot safely delete merged branch")
+	})
+}

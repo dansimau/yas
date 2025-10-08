@@ -148,9 +148,9 @@ func (yas *YAS) DeleteMergedBranch(name string) error {
 	branchMetadata := yas.data.Branches.Get(name)
 	parentBranch := branchMetadata.Parent
 
-	// If no parent, just delete normally
+	// Require a parent branch for proper restacking
 	if parentBranch == "" {
-		return yas.DeleteBranch(name)
+		return fmt.Errorf("branch %s has no parent branch set; cannot safely delete merged branch", name)
 	}
 
 	// Get the graph to find children
