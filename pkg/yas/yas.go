@@ -251,8 +251,11 @@ func (yas *YAS) Restack() error {
 		return err
 	}
 
+	// Track which branches were rebased
+	rebasedBranches := []string{}
+
 	// Start from trunk and rebase all descendants recursively
-	if err := yas.rebaseDescendants(graph, yas.cfg.TrunkBranch); err != nil {
+	if err := yas.rebaseDescendants(graph, yas.cfg.TrunkBranch, &rebasedBranches); err != nil {
 		return err
 	}
 
@@ -261,23 +264,53 @@ func (yas *YAS) Restack() error {
 		return fmt.Errorf("restack succeeded but failed to return to branch %s: %w", startingBranch, err)
 	}
 
+	// Check if any rebased branches have PRs
+	if len(rebasedBranches) > 0 {
+		branchesWithPRs := []string{}
+		for _, branchName := range rebasedBranches {
+			metadata := yas.data.Branches.Get(branchName)
+			if metadata.GitHubPullRequest.ID != "" {
+				branchesWithPRs = append(branchesWithPRs, branchName)
+			}
+		}
+
+		if len(branchesWithPRs) > 0 {
+			fmt.Printf("\nReminder: The following branches have PRs and were restacked:\n")
+			for _, branchName := range branchesWithPRs {
+				fmt.Printf("  - %s\n", branchName)
+			}
+			fmt.Printf("\nRun 'yas submit --stack' to update the PRs with the rebased commits.\n")
+		}
+	}
+
 	return nil
 }
 
-func (yas *YAS) rebaseDescendants(graph *dag.DAG, branchName string) error {
+func (yas *YAS) rebaseDescendants(graph *dag.DAG, branchName string, rebasedBranches *[]string) error {
 	children, err := graph.GetChildren(branchName)
 	if err != nil {
 		return err
 	}
 
 	for childID := range children {
-		// Rebase child onto parent (branchName)
-		if err := yas.git.Rebase(branchName, childID); err != nil {
+		// Check if this branch needs rebasing
+		needsRebase, err := yas.needsRebase(childID, branchName)
+		if err != nil {
 			return err
 		}
 
+		if needsRebase {
+			// Rebase child onto parent (branchName)
+			if err := yas.git.Rebase(branchName, childID); err != nil {
+				return err
+			}
+
+			// Track that this branch was rebased
+			*rebasedBranches = append(*rebasedBranches, childID)
+		}
+
 		// Recursively rebase this child's descendants
-		if err := yas.rebaseDescendants(graph, childID); err != nil {
+		if err := yas.rebaseDescendants(graph, childID, rebasedBranches); err != nil {
 			return err
 		}
 	}
