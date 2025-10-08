@@ -15,11 +15,13 @@ import (
 
 // mockPROptions holds options for mocking a PR
 type mockPROptions struct {
-	ID         string
-	State      string
-	URL        string
-	IsDraft    bool
-	BaseRefName string
+	ID                string
+	State             string
+	URL               string
+	IsDraft           bool
+	BaseRefName       string
+	ReviewDecision    string
+	StatusCheckRollup string
 }
 
 // setupMockCommands creates mock git and gh commands that log to a file
@@ -64,6 +66,8 @@ func setupMockCommandsWithPR(t *testing.T, pr mockPROptions) (cmdLogFile string,
 	oldPRURL := os.Getenv("YAS_TEST_PR_URL")
 	oldPRIsDraft := os.Getenv("YAS_TEST_PR_IS_DRAFT")
 	oldPRBaseRef := os.Getenv("YAS_TEST_PR_BASE_REF")
+	oldReviewDecision := os.Getenv("YAS_TEST_PR_REVIEW_DECISION")
+	oldStatusCheckRollup := os.Getenv("YAS_TEST_PR_STATUS_CHECK_ROLLUP")
 
 	os.Setenv("PATH", tmpDir+":"+oldPath)
 	os.Setenv("YAS_TEST_REAL_GIT", realGit)
@@ -83,6 +87,12 @@ func setupMockCommandsWithPR(t *testing.T, pr mockPROptions) (cmdLogFile string,
 	if pr.BaseRefName != "" {
 		os.Setenv("YAS_TEST_PR_BASE_REF", pr.BaseRefName)
 	}
+	if pr.ReviewDecision != "" {
+		os.Setenv("YAS_TEST_PR_REVIEW_DECISION", pr.ReviewDecision)
+	}
+	if pr.StatusCheckRollup != "" {
+		os.Setenv("YAS_TEST_PR_STATUS_CHECK_ROLLUP", pr.StatusCheckRollup)
+	}
 
 	// Clean up any temp files from previous test runs
 	files, _ := filepath.Glob("/tmp/yas-test-pr-created-*")
@@ -99,6 +109,8 @@ func setupMockCommandsWithPR(t *testing.T, pr mockPROptions) (cmdLogFile string,
 		os.Setenv("YAS_TEST_PR_URL", oldPRURL)
 		os.Setenv("YAS_TEST_PR_IS_DRAFT", oldPRIsDraft)
 		os.Setenv("YAS_TEST_PR_BASE_REF", oldPRBaseRef)
+		os.Setenv("YAS_TEST_PR_REVIEW_DECISION", oldReviewDecision)
+		os.Setenv("YAS_TEST_PR_STATUS_CHECK_ROLLUP", oldStatusCheckRollup)
 		os.RemoveAll(tmpDir)
 
 		// Clean up temp PR files

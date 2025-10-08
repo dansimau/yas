@@ -56,12 +56,26 @@ case "$CMD_NAME" in
                 url="${YAS_TEST_PR_URL:-https://github.com/test/test/pull/1}"
                 isDraft="${YAS_TEST_PR_IS_DRAFT:-false}"
                 baseRefName="${YAS_TEST_PR_BASE_REF:-main}"
-                echo "[{\"id\":\"$YAS_TEST_EXISTING_PR_ID\",\"state\":\"$state\",\"url\":\"$url\",\"isDraft\":$isDraft,\"baseRefName\":\"$baseRefName\"}]"
+                reviewDecision="${YAS_TEST_PR_REVIEW_DECISION:-}"
+                statusCheckRollup="${YAS_TEST_PR_STATUS_CHECK_ROLLUP:-}"
+
+                # Build JSON with optional fields
+                json="{\"id\":\"$YAS_TEST_EXISTING_PR_ID\",\"state\":\"$state\",\"url\":\"$url\",\"isDraft\":$isDraft,\"baseRefName\":\"$baseRefName\""
+                if [ -n "$reviewDecision" ]; then
+                    json="$json,\"reviewDecision\":\"$reviewDecision\""
+                fi
+                if [ -n "$statusCheckRollup" ]; then
+                    json="$json,\"statusCheckRollup\":$statusCheckRollup"
+                else
+                    json="$json,\"statusCheckRollup\":[]"
+                fi
+                json="$json}"
+                echo "[$json]"
             elif [ -f "/tmp/yas-test-pr-created-$head_branch" ]; then
                 # PR was created in this test session
                 pr_url=$(cat "/tmp/yas-test-pr-created-$head_branch")
                 base_ref=$(cat "/tmp/yas-test-pr-base-$head_branch" 2>/dev/null || echo "main")
-                echo "[{\"id\":\"PR_CREATED\",\"state\":\"OPEN\",\"url\":\"$pr_url\",\"isDraft\":true,\"baseRefName\":\"$base_ref\"}]"
+                echo "[{\"id\":\"PR_CREATED\",\"state\":\"OPEN\",\"url\":\"$pr_url\",\"isDraft\":true,\"baseRefName\":\"$base_ref\",\"statusCheckRollup\":[]}]"
             else
                 echo "[]"
             fi

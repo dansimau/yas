@@ -13,12 +13,49 @@ type BranchMetadata struct {
 	BranchPoint       string `json:",omitempty"` // Commit SHA where this branch diverged from parent
 }
 
+type StatusCheck struct {
+	State      string
+	Conclusion string
+}
+
 type PullRequestMetadata struct {
-	ID          string
-	State       string
-	URL         string
-	IsDraft     bool
-	BaseRefName string
+	ID                string
+	State             string
+	URL               string
+	IsDraft           bool
+	BaseRefName       string
+	ReviewDecision    string         // APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED, etc.
+	StatusCheckRollup []StatusCheck  // Array of status checks
+}
+
+// GetOverallCIStatus computes the overall CI status from status checks
+func (pr *PullRequestMetadata) GetOverallCIStatus() string {
+	if len(pr.StatusCheckRollup) == 0 {
+		return "" // No checks configured
+	}
+
+	hasFailure := false
+	hasPending := false
+
+	for _, check := range pr.StatusCheckRollup {
+		// Check state (PENDING, SUCCESS, FAILURE, etc.)
+		if check.State == "PENDING" || check.State == "QUEUED" || check.State == "IN_PROGRESS" {
+			hasPending = true
+		}
+
+		// Check conclusion (SUCCESS, FAILURE, CANCELLED, etc.)
+		if check.Conclusion == "FAILURE" || check.Conclusion == "CANCELLED" || check.Conclusion == "TIMED_OUT" {
+			hasFailure = true
+		}
+	}
+
+	if hasFailure {
+		return "FAILURE"
+	}
+	if hasPending {
+		return "PENDING"
+	}
+	return "SUCCESS"
 }
 
 type Branches []BranchMetadata

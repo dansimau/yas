@@ -235,14 +235,35 @@ func (yas *YAS) fetchGitHubPullRequestStatus(branchName string) (*PullRequestMet
 	return &data[0], nil
 }
 
+// fetchPRStatusWithChecks fetches PR status including review decision and CI checks
+func (yas *YAS) fetchPRStatusWithChecks(branchName string) (*PullRequestMetadata, error) {
+	log.Info("Fetching PR status with checks for branch", branchName)
+
+	b, err := xexec.Command("gh", "pr", "list", "--head", branchName, "--state", "all", "--json", "id,state,url,isDraft,baseRefName,reviewDecision,statusCheckRollup").WithStdout(nil).Output()
+	if err != nil {
+		return nil, err
+	}
+
+	data := []PullRequestMetadata{}
+	if err := json.Unmarshal(b, &data); err != nil {
+		return nil, err
+	}
+
+	if len(data) == 0 {
+		return nil, nil
+	}
+
+	return &data[0], nil
+}
+
 func (yas *YAS) graph() (*dag.DAG, error) {
 	graph := dag.NewDAG()
 
-	trunkBranch := yas.data.Branches.Get(yas.cfg.TrunkBranch)
-	graph.AddVertexByID(yas.cfg.TrunkBranch, trunkBranch)
+	// Use branch name string as vertex value (must be hashable and unique)
+	graph.AddVertexByID(yas.cfg.TrunkBranch, yas.cfg.TrunkBranch)
 
 	for _, branch := range yas.data.Branches.ToSlice().WithParents() {
-		graph.AddVertexByID(branch.Name, branch) // TODO handle errors
+		graph.AddVertexByID(branch.Name, branch.Name) // TODO handle errors
 	}
 
 	for _, branch := range yas.data.Branches.ToSlice().WithParents() {
@@ -414,7 +435,7 @@ func (yas *YAS) rebaseDescendants(graph *dag.DAG, branchName string, rebasedBran
 	return nil
 }
 
-func (yas *YAS) toTree(graph *dag.DAG, rootNode string, currentBranch string) (treeprint.Tree, error) {
+func (yas *YAS) toTree(graph *dag.DAG, rootNode string, currentBranch string, showStatus bool) (treeprint.Tree, error) {
 	rootLabel := formatBranchName(rootNode)
 
 	// Add star at the end if trunk is the current branch
@@ -425,7 +446,7 @@ func (yas *YAS) toTree(graph *dag.DAG, rootNode string, currentBranch string) (t
 
 	tree := treeprint.NewWithRoot(rootLabel)
 
-	if err := yas.addNodesFromGraph(tree, graph, rootNode, currentBranch); err != nil {
+	if err := yas.addNodesFromGraph(tree, graph, rootNode, currentBranch, showStatus); err != nil {
 		return nil, err
 	}
 
@@ -495,7 +516,7 @@ func (yas *YAS) needsSubmit(branchName string) (bool, error) {
 	return false, nil
 }
 
-func (yas *YAS) List(currentStackOnly bool) error {
+func (yas *YAS) List(currentStackOnly bool, showStatus bool) error {
 	graph, err := yas.graph()
 	if err != nil {
 		return fmt.Errorf("failed to get graph: %w", err)
@@ -506,6 +527,16 @@ func (yas *YAS) List(currentStackOnly bool) error {
 		return err
 	}
 
+	// If status flag is set, fetch PR status for all branches with PRs
+	if showStatus {
+		branchesWithPRs := yas.data.Branches.ToSlice().WithPRs()
+		if len(branchesWithPRs) > 0 {
+			if err := yas.RefreshPRStatus(branchesWithPRs.BranchNames()...); err != nil {
+				return fmt.Errorf("failed to refresh PR status: %w", err)
+			}
+		}
+	}
+
 	// Filter to current stack if requested
 	if currentStackOnly {
 		graph, err = yas.currentStackGraph(graph, currentBranch)
@@ -514,7 +545,7 @@ func (yas *YAS) List(currentStackOnly bool) error {
 		}
 	}
 
-	tree, err := yas.toTree(graph, yas.cfg.TrunkBranch, currentBranch)
+	tree, err := yas.toTree(graph, yas.cfg.TrunkBranch, currentBranch, showStatus)
 	if err != nil {
 		return err
 	}
@@ -1014,6 +1045,48 @@ func (yas *YAS) RefreshRemoteStatus(branchNames ...string) error {
 	for _, name := range branchNames {
 		p.Go(func() error {
 			return yas.refreshRemoteStatus(name)
+		})
+	}
+
+	if err := p.Wait(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// refreshPRStatus refreshes PR status including review decision and CI checks
+func (yas *YAS) refreshPRStatus(name string) error {
+	if strings.TrimSpace(name) == "" {
+		panic("branch name cannot be empty")
+	}
+
+	pullRequestMetadata, err := yas.fetchPRStatusWithChecks(name)
+	if err != nil {
+		return err
+	}
+
+	if pullRequestMetadata == nil {
+		pullRequestMetadata = &PullRequestMetadata{}
+	}
+
+	branchMetadata := yas.data.Branches.Get(name)
+	branchMetadata.GitHubPullRequest = *pullRequestMetadata
+	yas.data.Branches.Set(name, branchMetadata)
+
+	if err := yas.data.Save(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// RefreshPRStatus refreshes PR status for multiple branches including review and CI status
+func (yas *YAS) RefreshPRStatus(branchNames ...string) error {
+	p := pool.New().WithMaxGoroutines(5).WithErrors().WithFirstError()
+	for _, name := range branchNames {
+		p.Go(func() error {
+			return yas.refreshPRStatus(name)
 		})
 	}
 
