@@ -469,16 +469,26 @@ func (yas *YAS) SubmitStack() error {
 		return fmt.Errorf("failed to get current stack: %w", err)
 	}
 
-	// Submit all branches in the stack starting from trunk
-	if err := yas.submitDescendants(stackGraph, yas.cfg.TrunkBranch); err != nil {
+	// First pass: Submit all branches in the stack starting from trunk
+	var submittedBranches []string
+	if err := yas.submitDescendants(stackGraph, yas.cfg.TrunkBranch, &submittedBranches); err != nil {
 		return err
+	}
+
+	// Second pass: Annotate all submitted branches now that all PRs exist
+	fmt.Printf("\n=== Annotating PRs ===\n")
+	for _, branch := range submittedBranches {
+		if err := yas.annotateBranch(branch); err != nil {
+			// Don't fail the submit if annotation fails
+			fmt.Printf("Warning: failed to annotate PR for %s: %v\n", branch, err)
+		}
 	}
 
 	fmt.Printf("\nSuccessfully submitted all branches in stack\n")
 	return nil
 }
 
-func (yas *YAS) submitDescendants(graph *dag.DAG, branchName string) error {
+func (yas *YAS) submitDescendants(graph *dag.DAG, branchName string, submittedBranches *[]string) error {
 	children, err := graph.GetChildren(branchName)
 	if err != nil {
 		return err
@@ -490,14 +500,11 @@ func (yas *YAS) submitDescendants(graph *dag.DAG, branchName string) error {
 			return fmt.Errorf("failed to submit %s: %w", childID, err)
 		}
 
-		// Annotate the PR with stack information
-		if err := yas.annotateBranch(childID); err != nil {
-			// Don't fail the submit if annotation fails
-			fmt.Printf("Warning: failed to annotate PR for %s: %v\n", childID, err)
-		}
+		// Track that we submitted this branch
+		*submittedBranches = append(*submittedBranches, childID)
 
 		// Recursively submit this branch's descendants
-		if err := yas.submitDescendants(graph, childID); err != nil {
+		if err := yas.submitDescendants(graph, childID, submittedBranches); err != nil {
 			return err
 		}
 	}
