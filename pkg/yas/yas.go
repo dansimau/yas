@@ -830,10 +830,10 @@ func (yas *YAS) annotateBranch(branchName string) error {
 		return fmt.Errorf("branch '%s' does not have a PR", branchName)
 	}
 
-	// Build the stack visualization
-	stackVisualization, err := yas.buildStackVisualization(branchName)
+	// Count PRs in the stack
+	prCount, err := yas.countPRsInStack(branchName)
 	if err != nil {
-		return fmt.Errorf("failed to build stack visualization: %w", err)
+		return fmt.Errorf("failed to count PRs in stack: %w", err)
 	}
 
 	// Get the current PR body
@@ -843,8 +843,19 @@ func (yas *YAS) annotateBranch(branchName string) error {
 		return fmt.Errorf("failed to get PR body: %w", err)
 	}
 
-	// Update the body with the stack section
-	newBody := updatePRBodyWithStack(currentBody, stackVisualization)
+	var newBody string
+	if prCount <= 1 {
+		// Remove stack section if it exists
+		newBody = removeStackSection(currentBody)
+	} else {
+		// Build the stack visualization
+		stackVisualization, err := yas.buildStackVisualization(branchName)
+		if err != nil {
+			return fmt.Errorf("failed to build stack visualization: %w", err)
+		}
+		// Update the body with the stack section
+		newBody = updatePRBodyWithStack(currentBody, stackVisualization)
+	}
 
 	// Update the PR
 	if err := yas.updatePRBody(prNumber, newBody); err != nil {
@@ -853,6 +864,43 @@ func (yas *YAS) annotateBranch(branchName string) error {
 
 	fmt.Printf("Updated PR #%s with stack information\n", prNumber)
 	return nil
+}
+
+func (yas *YAS) countPRsInStack(currentBranch string) (int, error) {
+	// Get the graph
+	graph, err := yas.graph()
+	if err != nil {
+		return 0, err
+	}
+
+	count := 0
+
+	// Count ancestors (walking up to trunk)
+	branch := currentBranch
+	for {
+		metadata := yas.data.Branches.Get(branch)
+		if metadata.GitHubPullRequest.ID != "" {
+			count++
+		}
+		if metadata.Parent == "" || metadata.Parent == yas.cfg.TrunkBranch {
+			break
+		}
+		branch = metadata.Parent
+	}
+
+	// Count descendants (walking down from current)
+	descendants := []string{}
+	if err := yas.collectDescendants(graph, currentBranch, &descendants); err != nil {
+		return 0, err
+	}
+	for _, descendantBranch := range descendants {
+		metadata := yas.data.Branches.Get(descendantBranch)
+		if metadata.GitHubPullRequest.ID != "" {
+			count++
+		}
+	}
+
+	return count, nil
 }
 
 func (yas *YAS) buildStackVisualization(currentBranch string) (string, error) {
@@ -959,6 +1007,23 @@ func (yas *YAS) getPRBody(prNumber string) (string, error) {
 
 func (yas *YAS) updatePRBody(prNumber, newBody string) error {
 	return xexec.Command("gh", "pr", "edit", prNumber, "--body", newBody).Run()
+}
+
+func removeStackSection(currentBody string) string {
+	stackMarkerAlt := "Stacked PRs:"
+
+	// Check if there's already a stack section
+	if idx := strings.Index(currentBody, stackMarkerAlt); idx != -1 {
+		// Find the start of the stack section (look for --- before it)
+		startIdx := idx
+		if sepIdx := strings.LastIndex(currentBody[:idx], "---\n"); sepIdx != -1 {
+			startIdx = sepIdx
+		}
+		// Remove the stack section
+		currentBody = strings.TrimSpace(currentBody[:startIdx])
+	}
+
+	return currentBody
 }
 
 func updatePRBodyWithStack(currentBody, stackVisualization string) string {
