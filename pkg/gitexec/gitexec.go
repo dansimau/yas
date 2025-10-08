@@ -180,13 +180,6 @@ func (r *Repo) Push() error {
 		Run()
 }
 
-func (r *Repo) PushBranch(branchName string) error {
-	return xexec.Command("git", "push", "origin", branchName).
-		WithEnvVars(CleanedGitEnv()).
-		WithWorkingDir(r.path).
-		Run()
-}
-
 func (r *Repo) ForcePushBranch(branchName string) error {
 	return xexec.Command("git", "push", "--force-with-lease", "origin", branchName).
 		WithEnvVars(CleanedGitEnv()).
