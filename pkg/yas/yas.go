@@ -666,7 +666,7 @@ func extractPRNumber(prURL string) string {
 }
 
 func (yas *YAS) getPRBody(prNumber string) (string, error) {
-	output, err := xexec.Command("gh", "pr", "view", prNumber, "--json", "body", "-q", ".body").Output()
+	output, err := xexec.Command("gh", "pr", "view", prNumber, "--json", "body", "-q", ".body").WithStdout(nil).Output()
 	if err != nil {
 		return "", err
 	}
