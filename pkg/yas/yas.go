@@ -174,7 +174,7 @@ func (yas *YAS) DeleteMergedBranch(name string) error {
 			// git rebase --onto <newbase> <oldbase> <branch>
 			// This takes all commits in childID that are not in name, and rebases them onto parentBranch
 			fmt.Printf("  Rebasing %s onto %s...\n", childID, parentBranch)
-			if err := yas.git.RebaseOnto(parentBranch, childID); err != nil {
+			if err := yas.git.Rebase(parentBranch, childID); err != nil {
 				return fmt.Errorf("failed to rebase %s onto %s: %w", childID, parentBranch, err)
 			}
 
