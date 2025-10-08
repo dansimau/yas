@@ -1,0 +1,58 @@
+#!/bin/bash
+# Mock script for git and gh commands
+# Logs commands to a file specified by YAS_TEST_CMD_LOG env var
+
+# Get the command name (git or gh)
+CMD_NAME=$(basename "$0")
+
+# Log the command and all arguments (one per line)
+if [ -n "$YAS_TEST_CMD_LOG" ]; then
+    echo "$CMD_NAME" >> "$YAS_TEST_CMD_LOG"
+    for arg in "$@"; do
+        echo "  $arg" >> "$YAS_TEST_CMD_LOG"
+    done
+    echo "" >> "$YAS_TEST_CMD_LOG"
+fi
+
+# Simulate specific command behaviors
+case "$CMD_NAME" in
+    git)
+        # Handle git commands
+        case "$1" in
+            push)
+                # Simulate successful push
+                exit 0
+                ;;
+            --version)
+                echo "git version 2.40.0"
+                exit 0
+                ;;
+            *)
+                # For other git commands, call real git
+                if [ -n "$YAS_TEST_REAL_GIT" ]; then
+                    exec "$YAS_TEST_REAL_GIT" "$@"
+                else
+                    exec /usr/bin/git "$@"
+                fi
+                ;;
+        esac
+        ;;
+    gh)
+        # Handle gh commands
+        if [[ "$1" == "pr" && "$2" == "list" ]]; then
+            # Check if we should return an existing PR
+            if [ -n "$YAS_TEST_EXISTING_PR_ID" ]; then
+                echo "[{\"id\":\"$YAS_TEST_EXISTING_PR_ID\",\"state\":\"OPEN\"}]"
+            else
+                echo "[]"
+            fi
+            exit 0
+        elif [[ "$1" == "pr" && "$2" == "create" ]]; then
+            # Simulate successful PR creation
+            echo "https://github.com/test/test/pull/1"
+            exit 0
+        fi
+        ;;
+esac
+
+exit 0
