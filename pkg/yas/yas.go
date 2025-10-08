@@ -455,6 +455,46 @@ func (yas *YAS) needsRebase(branchName, parentBranch string) (bool, error) {
 	return metadata.BranchPoint != parentCommit, nil
 }
 
+// needsSubmit checks if a branch needs to be submitted
+// A branch needs submitting when:
+// 1. Local commit doesn't match remote commit, OR
+// 2. Local parent doesn't match PR base branch
+func (yas *YAS) needsSubmit(branchName string) (bool, error) {
+	metadata := yas.data.Branches.Get(branchName)
+
+	// If no PR exists, doesn't need submit (needs creation instead)
+	if metadata.GitHubPullRequest.ID == "" {
+		return false, nil
+	}
+
+	// Check if local commit matches remote
+	localHash, err := yas.git.GetCommitHash(branchName)
+	if err != nil {
+		return false, err
+	}
+
+	// Try to get remote hash
+	remoteHash, err := yas.git.GetRemoteCommitHash(branchName)
+	if err != nil {
+		// If we can't get remote hash, assume it needs submit
+		return true, nil
+	}
+
+	// If commits differ, needs submit
+	if localHash != remoteHash {
+		return true, nil
+	}
+
+	// Check if parent matches PR base
+	if metadata.Parent != "" && metadata.GitHubPullRequest.BaseRefName != "" {
+		if metadata.Parent != metadata.GitHubPullRequest.BaseRefName {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
 func (yas *YAS) List(currentStackOnly bool) error {
 	graph, err := yas.graph()
 	if err != nil {

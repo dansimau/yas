@@ -33,18 +33,39 @@ func (yas *YAS) addNodesFromGraph(treeNode treeprint.Tree, graph *dag.DAG, paren
 
 	for childID := range children {
 		branchLabel := formatBranchName(childID)
+		branchMetadata := yas.data.Branches.Get(childID)
 
-		// Check if this branch needs rebasing
+		// Check if this branch needs rebasing or submitting
+		var statusParts []string
+		yellow := color.New(color.FgYellow).SprintFunc()
+
 		needsRebase, err := yas.needsRebase(childID, parentID)
 		if err != nil {
 			// If we can't determine rebase status, just show the branch name
 		} else if needsRebase {
-			yellow := color.New(color.FgYellow).SprintFunc()
-			branchLabel = fmt.Sprintf("%s %s", branchLabel, yellow("(needs restack)"))
+			statusParts = append(statusParts, "needs restack")
+		}
+
+		// Check submit status
+		if branchMetadata.GitHubPullRequest.ID == "" {
+			// No PR exists
+			statusParts = append(statusParts, "not submitted")
+		} else {
+			// PR exists, check if it needs updating
+			needsSubmit, err := yas.needsSubmit(childID)
+			if err != nil {
+				// If we can't determine submit status, ignore
+			} else if needsSubmit {
+				statusParts = append(statusParts, "needs submit")
+			}
+		}
+
+		// Add combined status if any
+		if len(statusParts) > 0 {
+			branchLabel = fmt.Sprintf("%s %s", branchLabel, yellow(fmt.Sprintf("(%s)", strings.Join(statusParts, ", "))))
 		}
 
 		// Add PR information if available
-		branchMetadata := yas.data.Branches.Get(childID)
 		if branchMetadata.GitHubPullRequest.ID != "" {
 			pr := branchMetadata.GitHubPullRequest
 			cyan := color.New(color.FgCyan).SprintFunc()
