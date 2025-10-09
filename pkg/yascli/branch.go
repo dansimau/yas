@@ -68,7 +68,7 @@ func (c *branchCmd) Execute(args []string) error {
 	}
 
 	// Checkout the new branch
-	if err := git.Checkout(fullBranchName); err != nil {
+	if err := git.QuietCheckout(fullBranchName); err != nil {
 		return NewError(fmt.Sprintf("failed to checkout branch: %v", err))
 	}
 

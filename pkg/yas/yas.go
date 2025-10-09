@@ -126,7 +126,7 @@ func (yas *YAS) DeleteBranch(name string) error {
 
 	// Can't delete the branch while we're on it; switch to trunk
 	if currentBranchName == name {
-		if err := yas.git.Checkout(yas.cfg.TrunkBranch); err != nil {
+		if err := yas.git.QuietCheckout(yas.cfg.TrunkBranch); err != nil {
 			return fmt.Errorf("can't delete branch while on it; failed to checkout trunk: %w", err)
 		}
 	}
@@ -354,7 +354,7 @@ func (yas *YAS) Restack() error {
 	}
 
 	// Return to the starting branch
-	if err := yas.git.Checkout(startingBranch); err != nil {
+	if err := yas.git.QuietCheckout(startingBranch); err != nil {
 		return fmt.Errorf("restack succeeded but failed to return to branch %s: %w", startingBranch, err)
 	}
 
@@ -747,7 +747,6 @@ func (yas *YAS) SwitchBranchInteractive() error {
 		return fmt.Errorf("failed to checkout branch: %w", err)
 	}
 
-	fmt.Printf("Switched to branch: %s\n", selected.ID)
 	return nil
 }
 
@@ -1359,12 +1358,12 @@ func (yas *YAS) RefreshPRStatus(branchNames ...string) error {
 }
 
 func (yas *YAS) UpdateTrunk() error {
-	if err := yas.git.Checkout(yas.cfg.TrunkBranch); err != nil {
+	if err := yas.git.QuietCheckout(yas.cfg.TrunkBranch); err != nil {
 		return err
 	}
 
 	// Switch back to original branch
-	defer yas.git.Checkout("-")
+	defer yas.git.QuietCheckout("-")
 
 	return yas.git.Pull()
 }

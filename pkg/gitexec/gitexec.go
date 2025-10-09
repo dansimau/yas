@@ -122,6 +122,10 @@ func (r *Repo) DetectMainBranch() (string, error) {
 }
 
 func (r *Repo) Checkout(ref string) error {
+	return r.run("git", "checkout", ref)
+}
+
+func (r *Repo) QuietCheckout(ref string) error {
 	return r.run("git", "-c", "core.hooksPath=/dev/null", "checkout", "-q", ref)
 }
 
