@@ -5,7 +5,7 @@ import (
 )
 
 type submitCmd struct {
-	Stack bool `long:"stack" description:"Submit all branches in the current stack"`
+	Stack bool `description:"Submit all branches in the current stack" long:"stack"`
 }
 
 func (c *submitCmd) Execute(args []string) error {

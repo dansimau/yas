@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path"
 	"strings"
 
@@ -69,6 +70,7 @@ func NewFromRepository(repoDirectory string) (*YAS, error) {
 
 func (yas *YAS) cleanupBranch(name string) error {
 	yas.data.Branches.Remove(name)
+
 	return yas.data.Save()
 }
 
@@ -90,6 +92,7 @@ func (yas *YAS) pruneMissingBranches() error {
 		}
 
 		yas.data.Branches.Remove(branch.Name)
+
 		removed = true
 	}
 
@@ -141,7 +144,7 @@ func (yas *YAS) DeleteBranch(name string) error {
 	return nil
 }
 
-// DeleteMergedBranch deletes a merged branch after restacking its children onto its parent
+// DeleteMergedBranch deletes a merged branch after restacking its children onto its parent.
 func (yas *YAS) DeleteMergedBranch(name string) error {
 	// Get the metadata of the branch being deleted
 	branchMetadata := yas.data.Branches.Get(name)
@@ -199,6 +202,7 @@ func (yas *YAS) DeleteMergedBranch(name string) error {
 			if err != nil {
 				return fmt.Errorf("failed to get grandparent commit: %w", err)
 			}
+
 			childMetadata.BranchPoint = grandparentCommit
 
 			yas.data.Branches.Set(childID, childMetadata)
@@ -234,7 +238,7 @@ func (yas *YAS) fetchGitHubPullRequestStatus(branchName string) (*PullRequestMet
 	return &data[0], nil
 }
 
-// fetchPRStatusWithChecks fetches PR status including review decision and CI checks
+// fetchPRStatusWithChecks fetches PR status including review decision and CI checks.
 func (yas *YAS) fetchPRStatusWithChecks(branchName string) (*PullRequestMetadata, error) {
 	log.Info("Fetching PR status with checks for branch", branchName)
 
@@ -259,14 +263,20 @@ func (yas *YAS) graph() (*dag.DAG, error) {
 	graph := dag.NewDAG()
 
 	// Use branch name string as vertex value (must be hashable and unique)
-	graph.AddVertexByID(yas.cfg.TrunkBranch, yas.cfg.TrunkBranch)
-
-	for _, branch := range yas.data.Branches.ToSlice().WithParents() {
-		graph.AddVertexByID(branch.Name, branch.Name) // TODO handle errors
+	if err := graph.AddVertexByID(yas.cfg.TrunkBranch, yas.cfg.TrunkBranch); err != nil {
+		return nil, err
 	}
 
 	for _, branch := range yas.data.Branches.ToSlice().WithParents() {
-		graph.AddEdge(branch.Parent, branch.Name) // TODO handle errors
+		if err := graph.AddVertexByID(branch.Name, branch.Name); err != nil {
+			return nil, err
+		}
+	}
+
+	for _, branch := range yas.data.Branches.ToSlice().WithParents() {
+		if err := graph.AddEdge(branch.Parent, branch.Name); err != nil {
+			return nil, err
+		}
 	}
 
 	return graph, nil
@@ -274,7 +284,7 @@ func (yas *YAS) graph() (*dag.DAG, error) {
 
 // currentStackGraph returns a subgraph containing only the current stack:
 // - Upwards: only parents in the current lineage to the trunk branch
-// - Downwards: all descendants, including those with multiple children
+// - Downwards: all descendants, including those with multiple children.
 func (yas *YAS) currentStackGraph(fullGraph *dag.DAG, currentBranch string) (*dag.DAG, error) {
 	stackGraph := dag.NewDAG()
 
@@ -300,6 +310,7 @@ func (yas *YAS) currentStackGraph(fullGraph *dag.DAG, currentBranch string) (*da
 	for id := range ancestors {
 		stackVertices[id] = true
 	}
+
 	stackVertices[currentBranch] = true
 	for id := range descendants {
 		stackVertices[id] = true
@@ -311,7 +322,10 @@ func (yas *YAS) currentStackGraph(fullGraph *dag.DAG, currentBranch string) (*da
 		if err != nil {
 			return nil, err
 		}
-		stackGraph.AddVertexByID(id, vertex)
+
+		if err := stackGraph.AddVertexByID(id, vertex); err != nil {
+			return nil, err
+		}
 	}
 
 	// Add edges between vertices that are both in the stack
@@ -320,9 +334,12 @@ func (yas *YAS) currentStackGraph(fullGraph *dag.DAG, currentBranch string) (*da
 		if err != nil {
 			return nil, err
 		}
+
 		for childID := range children {
 			if stackVertices[childID] {
-				stackGraph.AddEdge(id, childID)
+				if err := stackGraph.AddEdge(id, childID); err != nil {
+					return nil, err
+				}
 			}
 		}
 	}
@@ -360,6 +377,7 @@ func (yas *YAS) Restack() error {
 	// Check if any rebased branches have PRs
 	if len(rebasedBranches) > 0 {
 		branchesWithPRs := []string{}
+
 		for _, branchName := range rebasedBranches {
 			metadata := yas.data.Branches.Get(branchName)
 			if metadata.GitHubPullRequest.ID != "" {
@@ -369,9 +387,11 @@ func (yas *YAS) Restack() error {
 
 		if len(branchesWithPRs) > 0 {
 			fmt.Printf("\nReminder: The following branches have PRs and were restacked:\n")
+
 			for _, branchName := range branchesWithPRs {
 				fmt.Printf("  - %s\n", branchName)
 			}
+
 			fmt.Printf("\nRun 'yas submit --stack' to update the PRs with the rebased commits.\n")
 		}
 	}
@@ -413,6 +433,7 @@ func (yas *YAS) rebaseDescendants(graph *dag.DAG, branchName string, rebasedBran
 			if err != nil {
 				return fmt.Errorf("failed to get parent commit after rebase: %w", err)
 			}
+
 			childMetadata.BranchPoint = parentCommit
 			yas.data.Branches.Set(childID, childMetadata)
 
@@ -450,6 +471,7 @@ func (yas *YAS) needsRebase(branchName, parentBranch string) (bool, error) {
 		if err != nil {
 			return false, err
 		}
+
 		return mergeBase != parentCommit, nil
 	}
 
@@ -460,7 +482,7 @@ func (yas *YAS) needsRebase(branchName, parentBranch string) (bool, error) {
 // needsSubmit checks if a branch needs to be submitted
 // A branch needs submitting when:
 // 1. Local commit doesn't match remote commit, OR
-// 2. Local parent doesn't match PR base branch
+// 2. Local parent doesn't match PR base branch.
 func (yas *YAS) needsSubmit(branchName string) (bool, error) {
 	metadata := yas.data.Branches.Get(branchName)
 
@@ -511,7 +533,7 @@ func (yas *YAS) List(currentStackOnly bool, showStatus bool) error {
 }
 
 // GetBranchList returns a list of SelectionItems representing all branches
-// Each item contains the branch name (ID) and the formatted display line
+// Each item contains the branch name (ID) and the formatted display line.
 func (yas *YAS) GetBranchList(currentStackOnly bool, showStatus bool) ([]SelectionItem, error) {
 	graph, err := yas.graph()
 	if err != nil {
@@ -550,6 +572,7 @@ func (yas *YAS) GetBranchList(currentStackOnly bool, showStatus bool) ([]Selecti
 		darkGray := color.New(color.FgHiBlack).SprintFunc()
 		rootLabel = fmt.Sprintf("%s %s", rootLabel, darkGray("*"))
 	}
+
 	items = append(items, SelectionItem{
 		ID:   yas.cfg.TrunkBranch,
 		Line: rootLabel,
@@ -563,7 +586,7 @@ func (yas *YAS) GetBranchList(currentStackOnly bool, showStatus bool) ([]Selecti
 	return items, nil
 }
 
-// collectBranchItems recursively collects branch items with tree formatting
+// collectBranchItems recursively collects branch items with tree formatting.
 func (yas *YAS) collectBranchItems(items *[]SelectionItem, graph *dag.DAG, parentID string, currentBranch string, showStatus bool, prefix string) error {
 	children, err := graph.GetChildren(parentID)
 	if err != nil {
@@ -585,6 +608,7 @@ func (yas *YAS) collectBranchItems(items *[]SelectionItem, graph *dag.DAG, paren
 
 		// Check if this branch needs rebasing or submitting
 		var statusParts []string
+
 		yellow := color.New(color.FgYellow).SprintFunc()
 
 		needsRebase, err := yas.needsRebase(childID, parentID)
@@ -659,7 +683,7 @@ func (yas *YAS) collectBranchItems(items *[]SelectionItem, graph *dag.DAG, paren
 	return nil
 }
 
-// SwitchBranchInteractive shows an interactive selector and switches to the chosen branch
+// SwitchBranchInteractive shows an interactive selector and switches to the chosen branch.
 func (yas *YAS) SwitchBranchInteractive() error {
 	// Get current branch to pre-select it
 	currentBranch, err := yas.git.GetCurrentBranchName()
@@ -674,14 +698,16 @@ func (yas *YAS) SwitchBranchInteractive() error {
 	}
 
 	if len(items) == 0 {
-		return fmt.Errorf("no branches found")
+		return errors.New("no branches found")
 	}
 
 	// Find the index of the current branch
 	initialCursor := 0
+
 	for i, item := range items {
 		if item.ID == currentBranch {
 			initialCursor = i
+
 			break
 		}
 	}
@@ -744,15 +770,22 @@ func (yas *YAS) SetParent(branchName, parentBranchName, branchPoint string) erro
 	if branchPoint == "" {
 		// Autodetect: Use merge-base to find the common ancestor, which is the true branch point
 		var err error
+
 		branchPoint, err = yas.git.GetMergeBase(branchName, parentBranchName)
 		if err != nil {
 			return fmt.Errorf("failed to get branch point: %w", err)
 		}
 	}
+
 	branchMetdata.BranchPoint = branchPoint
 
 	yas.data.Branches.Set(branchName, branchMetdata)
-	yas.data.Save()
+
+	if err := yas.data.Save(); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to save data: %v\n", err)
+
+		return fmt.Errorf("failed to save data: %w", err)
+	}
 
 	fmt.Printf("Set '%s' as parent of '%s'\n", parentBranchName, branchName)
 
@@ -812,6 +845,7 @@ func (yas *YAS) SubmitStack() error {
 
 	// Second pass: Annotate all submitted branches now that all PRs exist
 	fmt.Printf("\n=== Annotating PRs ===\n")
+
 	for _, branch := range submittedBranches {
 		if err := yas.annotateBranch(branch); err != nil {
 			// Don't fail the submit if annotation fails
@@ -820,6 +854,7 @@ func (yas *YAS) SubmitStack() error {
 	}
 
 	fmt.Printf("\nSuccessfully submitted all branches in stack\n")
+
 	return nil
 }
 
@@ -831,6 +866,7 @@ func (yas *YAS) submitDescendants(graph *dag.DAG, branchName string, submittedBr
 
 	for childID := range children {
 		fmt.Printf("\n=== Submitting %s ===\n", childID)
+
 		if err := yas.submitBranch(childID); err != nil {
 			return fmt.Errorf("failed to submit %s: %w", childID, err)
 		}
@@ -861,8 +897,11 @@ func (yas *YAS) submitBranch(branchName string) error {
 	}
 
 	// Get old remote hash before pushing (for showing in output)
-	var oldRemoteHash string
-	var remoteExists bool
+	var (
+		oldRemoteHash string
+		remoteExists  bool
+	)
+
 	if metadata.GitHubPullRequest.ID != "" {
 		// Fetch the latest remote ref
 		if err := yas.git.FetchBranch(branchName); err != nil {
@@ -920,20 +959,22 @@ func (yas *YAS) submitBranch(branchName string) error {
 		}
 
 		// Show appropriate message based on what happened
-		if !needsPush && !needsBaseUpdate {
+		switch {
+		case !needsPush && !needsBaseUpdate:
 			fmt.Printf("PR exists: %s (state: %s), up to date\n",
 				metadata.GitHubPullRequest.URL,
 				state)
-		} else if oldRemoteHash != "" && oldRemoteHash != currentLocalHash {
+		case oldRemoteHash != "" && oldRemoteHash != currentLocalHash:
 			fmt.Printf("PR exists: %s (state: %s), force pushed (was: %s)\n",
 				metadata.GitHubPullRequest.URL,
 				state,
 				oldRemoteHash)
-		} else {
+		default:
 			fmt.Printf("PR exists: %s (state: %s), pushed new commits\n",
 				metadata.GitHubPullRequest.URL,
 				state)
 		}
+
 		return nil
 	}
 
@@ -988,6 +1029,7 @@ func (yas *YAS) annotateBranch(branchName string) error {
 
 	// Get the current PR body
 	prNumber := extractPRNumber(metadata.GitHubPullRequest.URL)
+
 	currentBody, err := yas.getPRBody(prNumber)
 	if err != nil {
 		return fmt.Errorf("failed to get PR body: %w", err)
@@ -1013,6 +1055,7 @@ func (yas *YAS) annotateBranch(branchName string) error {
 	}
 
 	fmt.Printf("Updated PR #%s with stack information\n", prNumber)
+
 	return nil
 }
 
@@ -1032,9 +1075,11 @@ func (yas *YAS) countPRsInStack(currentBranch string) (int, error) {
 		if metadata.GitHubPullRequest.ID != "" {
 			count++
 		}
+
 		if metadata.Parent == "" || metadata.Parent == yas.cfg.TrunkBranch {
 			break
 		}
+
 		branch = metadata.Parent
 	}
 
@@ -1043,6 +1088,7 @@ func (yas *YAS) countPRsInStack(currentBranch string) (int, error) {
 	if err := yas.collectDescendants(graph, currentBranch, &descendants); err != nil {
 		return 0, err
 	}
+
 	for _, descendantBranch := range descendants {
 		metadata := yas.data.Branches.Get(descendantBranch)
 		if metadata.GitHubPullRequest.ID != "" {
@@ -1062,12 +1108,14 @@ func (yas *YAS) buildStackVisualization(currentBranch string) (string, error) {
 
 	// Get ancestors (walking up to trunk)
 	ancestors := []string{}
+
 	branch := currentBranch
 	for {
 		metadata := yas.data.Branches.Get(branch)
 		if metadata.Parent == "" || metadata.Parent == yas.cfg.TrunkBranch {
 			break
 		}
+
 		ancestors = append([]string{metadata.Parent}, ancestors...)
 		branch = metadata.Parent
 	}
@@ -1080,6 +1128,7 @@ func (yas *YAS) buildStackVisualization(currentBranch string) (string, error) {
 
 	// Build the visualization
 	var lines []string
+
 	indent := 0
 
 	// Add ancestors
@@ -1144,6 +1193,7 @@ func extractPRNumber(prURL string) string {
 	if len(parts) > 0 {
 		return parts[len(parts)-1]
 	}
+
 	return ""
 }
 
@@ -1152,6 +1202,7 @@ func (yas *YAS) getPRBody(prNumber string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	return strings.TrimSpace(string(output)), nil
 }
 
@@ -1195,6 +1246,7 @@ func updatePRBodyWithStack(currentBody, stackVisualization string) string {
 	if currentBody != "" {
 		currentBody += "\n\n"
 	}
+
 	currentBody += stackMarker + stackVisualization
 
 	return currentBody
@@ -1207,6 +1259,7 @@ func (yas *YAS) TrackedBranches() Branches {
 // UpdateConfig sets the new config and writes it to the configuration file.
 func (yas *YAS) UpdateConfig(cfg Config) (string, error) {
 	yas.cfg = cfg
+
 	return WriteConfig(cfg)
 }
 
@@ -1217,13 +1270,17 @@ func (yas *YAS) UntrackedBranches() ([]string, error) {
 	}
 
 	branches := []string{}
-	iter.ForEach(func(r *plumbing.Reference) error {
-		name := string(r.Name().Short())
+
+	if err := iter.ForEach(func(r *plumbing.Reference) error {
+		name := r.Name().Short()
 		if !yas.data.Branches.Exists(name) {
 			branches = append(branches, name)
 		}
+
 		return nil
-	})
+	}); err != nil {
+		return nil, err
+	}
 
 	return branches, nil
 }
@@ -1270,7 +1327,7 @@ func (yas *YAS) RefreshRemoteStatus(branchNames ...string) error {
 	return nil
 }
 
-// refreshPRStatus refreshes PR status including review decision and CI checks
+// refreshPRStatus refreshes PR status including review decision and CI checks.
 func (yas *YAS) refreshPRStatus(name string) error {
 	if strings.TrimSpace(name) == "" {
 		panic("branch name cannot be empty")
@@ -1296,7 +1353,7 @@ func (yas *YAS) refreshPRStatus(name string) error {
 	return nil
 }
 
-// RefreshPRStatus refreshes PR status for multiple branches including review and CI status
+// RefreshPRStatus refreshes PR status for multiple branches including review and CI status.
 func (yas *YAS) RefreshPRStatus(branchNames ...string) error {
 	p := pool.New().WithMaxGoroutines(5).WithErrors().WithFirstError()
 	for _, name := range branchNames {
@@ -1318,7 +1375,11 @@ func (yas *YAS) UpdateTrunk() error {
 	}
 
 	// Switch back to original branch
-	defer yas.git.QuietCheckout("-")
+	defer func() {
+		if err := yas.git.QuietCheckout("-"); err != nil {
+			fmt.Fprintf(os.Stderr, "failed to checkout original branch: %v\n", err)
+		}
+	}()
 
 	return yas.git.Pull()
 }
@@ -1331,6 +1392,7 @@ func (yas *YAS) validate() error {
 
 	if gitVersion.LessThan(minimumRequiredGitVersion) {
 		path, _ := yas.git.GitPath()
+
 		return fmt.Errorf("git version %s (%s) is less than the required version %s", gitVersion.String(), path, minimumRequiredGitVersion.String())
 	}
 

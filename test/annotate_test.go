@@ -69,6 +69,7 @@ func TestAnnotate_UpdatesPRWithStackInfo(t *testing.T) {
 
 		// Submit topic-b to create a PR
 		testutil.ExecOrFail(t, "git checkout topic-b")
+
 		err = y.Submit()
 		assert.NilError(t, err)
 
@@ -105,6 +106,7 @@ func TestAnnotate_ErrorWhenNoPR(t *testing.T) {
 
 func TestAnnotate_SinglePRInStack_DoesNotAddStackSection(t *testing.T) {
 	prBody := "This is my PR description."
+
 	_, cleanup := setupMockCommandsWithPRBody(t, mockPROptions{
 		ID:    "PR_kwDOTest123",
 		State: "OPEN",
@@ -145,6 +147,7 @@ func TestAnnotate_SinglePRInStack_DoesNotAddStackSection(t *testing.T) {
 
 		// Submit to create a PR
 		testutil.ExecOrFail(t, "git checkout topic-a")
+
 		err = y.Submit()
 		assert.NilError(t, err)
 
@@ -165,6 +168,7 @@ func TestAnnotate_SinglePRInStack_RemovesExistingStackSection(t *testing.T) {
 Stacked PRs:
 
 * https://github.com/test/test/pull/42 👈 (this PR)`
+
 	bodyFile, cleanup := setupMockCommandsWithPRBody(t, mockPROptions{
 		ID:    "PR_kwDOTest123",
 		State: "OPEN",
@@ -205,12 +209,14 @@ Stacked PRs:
 
 		// Submit to create a PR - this calls annotate internally
 		testutil.ExecOrFail(t, "git checkout topic-a")
+
 		err = y.Submit()
 		assert.NilError(t, err)
 
 		// Read the body file to get the result from submit's annotate call
 		bodyBytes, err := os.ReadFile(bodyFile)
 		assert.NilError(t, err)
+
 		finalBody := string(bodyBytes)
 
 		// Verify stack section was removed
@@ -220,13 +226,12 @@ Stacked PRs:
 	})
 }
 
-// setupMockCommandsWithPRBody is like setupMockCommandsWithPR but also tracks PR body updates
+// setupMockCommandsWithPRBody is like setupMockCommandsWithPR but also tracks PR body updates.
 func setupMockCommandsWithPRBody(t *testing.T, pr mockPROptions, prBody *string) (prBodyFile string, cleanup func()) {
 	t.Helper()
 
 	// Create temp directory for mock commands
-	tmpDir, err := os.MkdirTemp("", "yas-test-mock-*")
-	assert.NilError(t, err)
+	tmpDir := t.TempDir()
 
 	// Create command log file (not returned but needed for the mocks)
 	_ = filepath.Join(tmpDir, "commands.log")
@@ -266,7 +271,7 @@ elif [[ "$1" == "pr" && "$2" == "create" ]]; then
 fi
 exit 0
 `
-	err = os.WriteFile(mockGH, []byte(mockGHScript), 0755)
+	err := os.WriteFile(mockGH, []byte(mockGHScript), 0o755)
 	assert.NilError(t, err)
 
 	// Get path to existing mock script for git
@@ -284,34 +289,30 @@ exit 0
 
 	// Create PR body file
 	prBodyFile = filepath.Join(tmpDir, "pr-body.txt")
-	err = os.WriteFile(prBodyFile, []byte(*prBody), 0644)
+	err = os.WriteFile(prBodyFile, []byte(*prBody), 0o644)
 	assert.NilError(t, err)
 
 	// Set up environment
-	oldPath := os.Getenv("PATH")
-	oldRealGit := os.Getenv("YAS_TEST_REAL_GIT")
-	oldExistingPR := os.Getenv("YAS_TEST_EXISTING_PR_ID")
-	oldPRState := os.Getenv("YAS_TEST_PR_STATE")
-	oldPRURL := os.Getenv("YAS_TEST_PR_URL")
-	oldPRBodyFile := os.Getenv("YAS_TEST_PR_BODY_FILE")
+	t.Setenv("PATH", tmpDir+":"+os.Getenv("PATH"))
+	t.Setenv("YAS_TEST_REAL_GIT", realGit)
+	t.Setenv("YAS_TEST_PR_BODY_FILE", prBodyFile)
 
-	os.Setenv("PATH", tmpDir+":"+oldPath)
-	os.Setenv("YAS_TEST_REAL_GIT", realGit)
-	os.Setenv("YAS_TEST_PR_BODY_FILE", prBodyFile)
 	if pr.ID != "" {
-		os.Setenv("YAS_TEST_EXISTING_PR_ID", pr.ID)
+		t.Setenv("YAS_TEST_EXISTING_PR_ID", pr.ID)
 	}
+
 	if pr.State != "" {
-		os.Setenv("YAS_TEST_PR_STATE", pr.State)
+		t.Setenv("YAS_TEST_PR_STATE", pr.State)
 	}
+
 	if pr.URL != "" {
-		os.Setenv("YAS_TEST_PR_URL", pr.URL)
+		t.Setenv("YAS_TEST_PR_URL", pr.URL)
 	}
 
 	// Clean up any temp files from previous test runs
 	files, _ := filepath.Glob("/tmp/yas-test-pr-created-*")
 	for _, f := range files {
-		os.Remove(f)
+		assert.NilError(t, os.Remove(f))
 	}
 
 	cleanup = func() {
@@ -321,15 +322,10 @@ exit 0
 			*prBody = string(bodyBytes)
 		}
 
-		os.Setenv("PATH", oldPath)
-		os.Setenv("YAS_TEST_REAL_GIT", oldRealGit)
-		os.Setenv("YAS_TEST_EXISTING_PR_ID", oldExistingPR)
-		os.Setenv("YAS_TEST_PR_STATE", oldPRState)
-		os.Setenv("YAS_TEST_PR_URL", oldPRURL)
-		os.Setenv("YAS_TEST_PR_BODY_FILE", oldPRBodyFile)
-		os.RemoveAll(tmpDir)
+		// Note: t.Setenv() automatically handles environment variable cleanup
+		// Only need to clean up temp directory
+		assert.NilError(t, os.RemoveAll(tmpDir))
 	}
 
 	return prBodyFile, cleanup
 }
-

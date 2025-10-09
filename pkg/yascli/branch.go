@@ -10,7 +10,7 @@ import (
 )
 
 type branchCmd struct {
-	Parent string `long:"parent" description:"Parent branch name (default: current branch)" required:"false"`
+	Parent string `description:"Parent branch name (default: current branch)" long:"parent" required:"false"`
 }
 
 func (c *branchCmd) Execute(args []string) error {
@@ -33,9 +33,11 @@ func (c *branchCmd) Execute(args []string) error {
 	// Get git email to determine prefix
 	// Check GIT_AUTHOR_EMAIL env var first, then fall back to git config
 	git := gitexec.WithRepo(cmd.RepoDirectory)
+
 	email := os.Getenv("GIT_AUTHOR_EMAIL")
 	if email == "" {
 		var err error
+
 		email, err = git.GetConfig("user.email")
 		if err != nil {
 			return NewError(fmt.Sprintf("failed to get git user.email: %v", err))
@@ -59,6 +61,7 @@ func (c *branchCmd) Execute(args []string) error {
 		if err != nil {
 			return NewError(fmt.Sprintf("failed to get current branch: %v", err))
 		}
+
 		parentBranch = currentBranch
 	}
 

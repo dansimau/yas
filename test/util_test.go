@@ -7,6 +7,8 @@ import (
 )
 
 func TestLineBasedLeadingTrailingWhitespaceRegexp(t *testing.T) {
+	t.Parallel()
+
 	for _, test := range []struct {
 		input    string
 		expected string
@@ -25,6 +27,7 @@ func TestLineBasedLeadingTrailingWhitespaceRegexp(t *testing.T) {
 }
 
 func TestEqualLines(t *testing.T) {
+	t.Parallel()
 	equalLines(t, `
 		one
 		  two

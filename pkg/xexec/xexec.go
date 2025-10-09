@@ -3,6 +3,7 @@ package xexec
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,7 +14,7 @@ import (
 	"gopkg.in/alessio/shellescape.v1"
 )
 
-// xexec.Cmd is a wrapper for exec.Cmd
+// xexec.Cmd is a wrapper for exec.Cmd.
 type Cmd struct {
 	*exec.Cmd
 
@@ -41,14 +42,14 @@ func cmdConstructor(c *Cmd) *Cmd {
 	return c
 }
 
-// Command creates a new wrapped exec.Cmd
+// Command creates a new wrapped exec.Cmd.
 func Command(args ...string) *Cmd {
 	return cmdConstructor(&Cmd{
 		Cmd: exec.Command(args[0], args[1:]...),
 	})
 }
 
-// Command creates a new wrapped exec.Cmd with context
+// Command creates a new wrapped exec.Cmd with context.
 func CommandContext(ctx context.Context, args ...string) *Cmd {
 	return cmdConstructor(&Cmd{
 		Cmd: exec.CommandContext(ctx, args[0], args[1:]...),
@@ -79,25 +80,31 @@ func (c *Cmd) Run() error {
 		c.debugPrintCmd()
 	}
 
-	var w io.Writer
-	var stderr bytes.Buffer
+	var (
+		w      io.Writer
+		stderr bytes.Buffer
+	)
 
 	// If a c.Stderr has already been provided, create a multiwriter to write
 	// to both the existing c.Stderr as well as our own buffer (for storing on
 	// the error).
+
 	if c.Stderr != nil {
 		w = io.MultiWriter(&stderr, c.Stderr)
 	} else {
 		w = &stderr
 	}
+
 	c.Stderr = w
 
 	if err := c.Cmd.Run(); err != nil {
 		// Store stderr onto the exec error itself so users can access this
 		// if needed.
-		if ee, ok := err.(*exec.ExitError); ok {
+		ee := &exec.ExitError{}
+		if errors.As(err, &ee) {
 			ee.Stderr = stderr.Bytes()
 		}
+
 		return err
 	}
 
@@ -125,6 +132,7 @@ func (c *Cmd) CombinedOutput() ([]byte, error) {
 	}
 
 	var buf bytes.Buffer
+
 	c.Stdout = createMultiWriter(&buf, c.Stdout)
 	c.Stderr = createMultiWriter(&buf, c.Stderr)
 

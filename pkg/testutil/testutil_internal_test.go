@@ -9,6 +9,8 @@ import (
 )
 
 func TestParseEnvVar(t *testing.T) {
+	t.Parallel()
+
 	envVar := "TEST_ENV_VAR=foo"
 	slicedEnvVar := strings.Split(envVar, "=")
 

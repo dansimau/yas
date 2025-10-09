@@ -6,6 +6,7 @@ import "io"
 // are nil before adding them to the output.
 func createMultiWriter(writers ...io.Writer) io.Writer {
 	allWriters := []io.Writer{}
+
 	for _, w := range writers {
 		if w == nil {
 			continue

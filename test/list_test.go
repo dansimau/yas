@@ -48,7 +48,7 @@ func TestList_NeedsRestack(t *testing.T) {
 		assert.Equal(t, yascli.Run("add", "--branch=topic-b", "--parent=topic-a"), 0)
 
 		// Capture the list output
-		output := captureStdout(func() {
+		output := captureStdout(t, func() {
 			assert.Equal(t, yascli.Run("list"), 0)
 		})
 
@@ -99,7 +99,7 @@ func TestList_AfterRestack_NoWarning(t *testing.T) {
 		assert.Equal(t, yascli.Run("restack"), 0)
 
 		// Now list should not show "(needs restack)"
-		output := captureStdout(func() {
+		output := captureStdout(t, func() {
 			assert.Equal(t, yascli.Run("list"), 0)
 		})
 
@@ -136,7 +136,7 @@ func TestList_ShowsCurrentBranch(t *testing.T) {
 		assert.Equal(t, yascli.Run("add", "--branch=topic-b", "--parent=topic-a"), 0)
 
 		// Should show star on topic-b (current branch)
-		output := captureStdout(func() {
+		output := captureStdout(t, func() {
 			assert.Equal(t, yascli.Run("list"), 0)
 		})
 
@@ -174,18 +174,21 @@ func TestList_ShowsCurrentBranch_OnTrunk(t *testing.T) {
 		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
 
 		// Should show star on main (current branch)
-		output := captureStdout(func() {
+		output := captureStdout(t, func() {
 			assert.Equal(t, yascli.Run("list"), 0)
 		})
 
 		lines := strings.Split(output, "\n")
 		foundMainWithStar := false
+
 		for _, line := range lines {
 			if strings.Contains(line, "main") && strings.Contains(line, "*") {
 				foundMainWithStar = true
+
 				break
 			}
 		}
+
 		assert.Assert(t, foundMainWithStar,
 			"main should show '*' (current branch) but got: %s", output)
 	})
@@ -236,7 +239,7 @@ func TestList_ShowsPRInfo(t *testing.T) {
 		assert.NilError(t, err)
 
 		// Capture the list output
-		output := captureStdout(func() {
+		output := captureStdout(t, func() {
 			assert.Equal(t, yascli.Run("list"), 0)
 		})
 
@@ -292,7 +295,7 @@ func TestList_ShowsDraftPR(t *testing.T) {
 		assert.NilError(t, err)
 
 		// Capture the list output
-		output := captureStdout(func() {
+		output := captureStdout(t, func() {
 			assert.Equal(t, yascli.Run("list"), 0)
 		})
 
@@ -355,7 +358,7 @@ func TestList_CurrentStack(t *testing.T) {
 		assert.Equal(t, yascli.Run("add", "--branch=topic-d", "--parent=topic-b"), 0)
 
 		// Full list should show all branches
-		fullOutput := captureStdout(func() {
+		fullOutput := captureStdout(t, func() {
 			assert.Equal(t, yascli.Run("list"), 0)
 		})
 
@@ -370,7 +373,7 @@ func TestList_CurrentStack(t *testing.T) {
 		// - Current: topic-b
 		// - Descendants: topic-c, topic-d (both children)
 		// - Should NOT include: topic-x
-		stackOutput := captureStdout(func() {
+		stackOutput := captureStdout(t, func() {
 			assert.Equal(t, yascli.Run("list", "--current-stack"), 0)
 		})
 
@@ -405,9 +408,10 @@ func TestList_GreysOutBranchPrefix(t *testing.T) {
 
 		previousNoColor := color.NoColor
 		color.NoColor = false
+
 		defer func() { color.NoColor = previousNoColor }()
 
-		output := captureStdout(func() {
+		output := captureStdout(t, func() {
 			assert.Equal(t, yascli.Run("list"), 0)
 		})
 
@@ -482,7 +486,7 @@ func TestList_ShowsNeedsSubmit_WhenBaseRefDiffers(t *testing.T) {
 		assert.NilError(t, err)
 
 		// Capture the list output
-		output := captureStdout(func() {
+		output := captureStdout(t, func() {
 			assert.Equal(t, yascli.Run("list"), 0)
 		})
 
@@ -556,7 +560,7 @@ func TestList_ShowsBothNeedsRestackAndNeedsSubmit(t *testing.T) {
 		assert.NilError(t, err)
 
 		// Capture the list output
-		output := captureStdout(func() {
+		output := captureStdout(t, func() {
 			assert.Equal(t, yascli.Run("list"), 0)
 		})
 
@@ -591,7 +595,7 @@ func TestList_ShowsNotSubmitted_WhenNoPRExists(t *testing.T) {
 		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
 
 		// Capture the list output
-		output := captureStdout(func() {
+		output := captureStdout(t, func() {
 			assert.Equal(t, yascli.Run("list"), 0)
 		})
 
@@ -630,7 +634,7 @@ func TestList_ShowsNeedsRestackAndNotSubmitted(t *testing.T) {
 		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
 
 		// Capture the list output
-		output := captureStdout(func() {
+		output := captureStdout(t, func() {
 			assert.Equal(t, yascli.Run("list"), 0)
 		})
 

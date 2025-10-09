@@ -38,6 +38,7 @@ func WithRepo(path string) *Repo {
 
 func (r *Repo) run(args ...string) error {
 	_, err := r.output(args...)
+
 	return err
 }
 
@@ -55,8 +56,10 @@ func (r *Repo) output(args ...string) (string, error) {
 }
 
 func (r *Repo) BranchExists(ref string) (bool, error) {
-	if err := r.run("git", "show-ref", fmt.Sprintf("refs/heads/%s", ref)); err != nil {
-		exitErr, isExitError := err.(*exec.ExitError)
+	if err := r.run("git", "show-ref", "refs/heads/"+ref); err != nil {
+		exitErr := &exec.ExitError{}
+
+		isExitError := errors.As(err, &exitErr)
 		if !isExitError {
 			return false, err
 		}
@@ -104,6 +107,7 @@ func (r *Repo) DetectMainBranch() (string, error) {
 		if err != nil {
 			return "", err
 		}
+
 		if exists {
 			return candidate, nil
 		}
@@ -113,6 +117,7 @@ func (r *Repo) DetectMainBranch() (string, error) {
 		if err != nil {
 			return "", err
 		}
+
 		if exists {
 			return candidate, nil
 		}
@@ -196,11 +201,11 @@ func (r *Repo) FetchBranch(branchName string) error {
 }
 
 func (r *Repo) GetRemoteCommitHash(branchName string) (string, error) {
-	return r.output("git", "rev-parse", fmt.Sprintf("origin/%s", branchName))
+	return r.output("git", "rev-parse", "origin/"+branchName)
 }
 
 func (r *Repo) GetRemoteShortHash(branchName string) (string, error) {
-	return r.output("git", "rev-parse", "--short", fmt.Sprintf("origin/%s", branchName))
+	return r.output("git", "rev-parse", "--short", "origin/"+branchName)
 }
 
 func (r *Repo) Rebase(upstream, branchName string) error {
@@ -211,7 +216,7 @@ func (r *Repo) Rebase(upstream, branchName string) error {
 }
 
 // RebaseOntoWithBranchPoint rebases branch onto newBase, replaying commits after oldBranchPoint
-// This is equivalent to: git rebase --onto <newBase> <oldBranchPoint> <branch>
+// This is equivalent to: git rebase --onto <newBase> <oldBranchPoint> <branch>.
 func (r *Repo) RebaseOntoWithBranchPoint(newBase, oldBranchPoint, branch string) error {
 	return xexec.Command("git", "-c", "core.hooksPath=/dev/null", "rebase", "--onto", newBase, oldBranchPoint, branch, "--update-refs").
 		WithEnvVars(CleanedGitEnv()).
@@ -256,7 +261,7 @@ func (r *Repo) GitVersion() (*version.Version, error) {
 	return version, nil
 }
 
-// HasStagedChanges checks if there are any staged changes in the index
+// HasStagedChanges checks if there are any staged changes in the index.
 func (r *Repo) HasStagedChanges() (bool, error) {
 	output, err := r.output("git", "diff", "--cached", "--quiet")
 	if err != nil {
@@ -278,7 +283,7 @@ func (r *Repo) HasStagedChanges() (bool, error) {
 	return output != "", nil
 }
 
-// Commit creates an interactive commit, opening an editor for the user to write the commit message
+// Commit creates an interactive commit, opening an editor for the user to write the commit message.
 func (r *Repo) Commit() error {
 	return xexec.Command("git", "commit").
 		WithEnvVars(CleanedGitEnv()).

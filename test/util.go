@@ -12,33 +12,6 @@ import (
 	"gotest.tools/v3/assert"
 )
 
-func mustGetShortHash(ref string) string {
-	if ref == "" {
-		panic("ref is empty")
-	}
-
-	hash, err := gitexec.WithRepo(".").GetShortHash(ref)
-	if err != nil {
-		panic(err)
-	}
-
-	if hash == "" {
-		panic("hash is empty")
-	}
-
-	return hash
-}
-
-func mustGetShortHashes(refs ...string) map[string]string {
-	m := map[string]string{}
-
-	for _, ref := range refs {
-		m[ref] = mustGetShortHash(ref)
-	}
-
-	return m
-}
-
 // mustExecOutput executes the specified command/args and returns the output
 // from stdout. Panics if there is an error.
 func mustExecOutput(args ...string) (output string) {
@@ -67,21 +40,30 @@ func stripWhiteSpaceFromLines(s string) string {
 	for _, line := range strings.Split(strings.TrimSpace(s), "\n") {
 		lines = append(lines, strings.TrimSpace(line))
 	}
+
 	return strings.Join(lines, "\n")
 }
 
-// captureStdout captures stdout while executing the given function
-func captureStdout(f func()) string {
+// captureStdout captures stdout while executing the given function.
+func captureStdout(t *testing.T, f func()) string {
+	t.Helper()
+
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
 	f()
 
-	w.Close()
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
 	os.Stdout = oldStdout
 
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+
 	return buf.String()
 }

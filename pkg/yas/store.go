@@ -62,6 +62,7 @@ func (m *branchMap) Exists(name string) bool {
 	defer m.RUnlock()
 
 	_, exists := m.data[name]
+
 	return exists
 }
 

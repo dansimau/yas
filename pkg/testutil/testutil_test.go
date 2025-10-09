@@ -11,7 +11,7 @@ import (
 func TestWithEnv(t *testing.T) {
 	// Set test environment value
 	testEnvName := "TEST_ENV_VAR"
-	os.Setenv(testEnvName, "foo")
+	t.Setenv(testEnvName, "foo")
 
 	_, exists := os.LookupEnv(testEnvName)
 	// Check if environment variable exists

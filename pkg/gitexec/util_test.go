@@ -12,9 +12,10 @@ func TestCleanGitEnvVars(t *testing.T) {
 	testEnvName := "GIT_TEST_VAR"
 	testEnvValue := "foo"
 
-	_ = os.Setenv(testEnvName, testEnvValue)
+	t.Setenv(testEnvName, testEnvValue)
 
 	envVars := os.Environ()
+
 	var containsGitVar bool
 
 	for _, envVar := range envVars {

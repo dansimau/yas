@@ -14,12 +14,14 @@ func formatBranchName(branchName string) string {
 	}
 
 	prefix := branchName[:lastSlash]
+
 	suffix := branchName[lastSlash+1:]
 	if suffix == "" {
 		return branchName
 	}
 
 	darkGray := color.New(color.FgHiBlack).SprintFunc()
+
 	return fmt.Sprintf("%s%s", darkGray(prefix+"/"), suffix)
 }
 

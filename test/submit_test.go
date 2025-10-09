@@ -13,7 +13,7 @@ import (
 	"gotest.tools/v3/assert"
 )
 
-// mockPROptions holds options for mocking a PR
+// mockPROptions holds options for mocking a PR.
 type mockPROptions struct {
 	ID                string
 	State             string
@@ -24,19 +24,19 @@ type mockPROptions struct {
 	StatusCheckRollup string
 }
 
-// setupMockCommands creates mock git and gh commands that log to a file
+// setupMockCommands creates mock git and gh commands that log to a file.
 func setupMockCommands(t *testing.T, existingPRID string) (cmdLogFile string, cleanup func()) {
 	t.Helper()
+
 	return setupMockCommandsWithPR(t, mockPROptions{ID: existingPRID})
 }
 
-// setupMockCommandsWithPR creates mock git and gh commands with full PR options
+// setupMockCommandsWithPR creates mock git and gh commands with full PR options.
 func setupMockCommandsWithPR(t *testing.T, pr mockPROptions) (cmdLogFile string, cleanup func()) {
 	t.Helper()
 
 	// Create temp directory for mock commands
-	tmpDir, err := os.MkdirTemp("", "yas-test-mock-*")
-	assert.NilError(t, err)
+	tmpDir := t.TempDir()
 
 	// Create command log file
 	cmdLogFile = filepath.Join(tmpDir, "commands.log")
@@ -58,93 +58,84 @@ func setupMockCommandsWithPR(t *testing.T, pr mockPROptions) (cmdLogFile string,
 	realGit := strings.TrimSpace(whichGitCmd)
 
 	// Set up environment
-	oldPath := os.Getenv("PATH")
-	oldRealGit := os.Getenv("YAS_TEST_REAL_GIT")
-	oldCmdLog := os.Getenv("YAS_TEST_CMD_LOG")
-	oldExistingPR := os.Getenv("YAS_TEST_EXISTING_PR_ID")
-	oldPRState := os.Getenv("YAS_TEST_PR_STATE")
-	oldPRURL := os.Getenv("YAS_TEST_PR_URL")
-	oldPRIsDraft := os.Getenv("YAS_TEST_PR_IS_DRAFT")
-	oldPRBaseRef := os.Getenv("YAS_TEST_PR_BASE_REF")
-	oldReviewDecision := os.Getenv("YAS_TEST_PR_REVIEW_DECISION")
-	oldStatusCheckRollup := os.Getenv("YAS_TEST_PR_STATUS_CHECK_ROLLUP")
+	t.Setenv("PATH", tmpDir+":"+os.Getenv("PATH"))
+	t.Setenv("YAS_TEST_REAL_GIT", realGit)
+	t.Setenv("YAS_TEST_CMD_LOG", cmdLogFile)
 
-	os.Setenv("PATH", tmpDir+":"+oldPath)
-	os.Setenv("YAS_TEST_REAL_GIT", realGit)
-	os.Setenv("YAS_TEST_CMD_LOG", cmdLogFile)
 	if pr.ID != "" {
-		os.Setenv("YAS_TEST_EXISTING_PR_ID", pr.ID)
+		t.Setenv("YAS_TEST_EXISTING_PR_ID", pr.ID)
 	}
+
 	if pr.State != "" {
-		os.Setenv("YAS_TEST_PR_STATE", pr.State)
+		t.Setenv("YAS_TEST_PR_STATE", pr.State)
 	}
+
 	if pr.URL != "" {
-		os.Setenv("YAS_TEST_PR_URL", pr.URL)
+		t.Setenv("YAS_TEST_PR_URL", pr.URL)
 	}
+
 	if pr.IsDraft {
-		os.Setenv("YAS_TEST_PR_IS_DRAFT", "true")
+		t.Setenv("YAS_TEST_PR_IS_DRAFT", "true")
 	}
+
 	if pr.BaseRefName != "" {
-		os.Setenv("YAS_TEST_PR_BASE_REF", pr.BaseRefName)
+		t.Setenv("YAS_TEST_PR_BASE_REF", pr.BaseRefName)
 	}
+
 	if pr.ReviewDecision != "" {
-		os.Setenv("YAS_TEST_PR_REVIEW_DECISION", pr.ReviewDecision)
+		t.Setenv("YAS_TEST_PR_REVIEW_DECISION", pr.ReviewDecision)
 	}
+
 	if pr.StatusCheckRollup != "" {
-		os.Setenv("YAS_TEST_PR_STATUS_CHECK_ROLLUP", pr.StatusCheckRollup)
+		t.Setenv("YAS_TEST_PR_STATUS_CHECK_ROLLUP", pr.StatusCheckRollup)
 	}
 
 	// Clean up any temp files from previous test runs
 	files, _ := filepath.Glob("/tmp/yas-test-pr-created-*")
 	for _, f := range files {
-		os.Remove(f)
+		assert.NilError(t, os.Remove(f))
 	}
 
 	cleanup = func() {
-		os.Setenv("PATH", oldPath)
-		os.Setenv("YAS_TEST_REAL_GIT", oldRealGit)
-		os.Setenv("YAS_TEST_CMD_LOG", oldCmdLog)
-		os.Setenv("YAS_TEST_EXISTING_PR_ID", oldExistingPR)
-		os.Setenv("YAS_TEST_PR_STATE", oldPRState)
-		os.Setenv("YAS_TEST_PR_URL", oldPRURL)
-		os.Setenv("YAS_TEST_PR_IS_DRAFT", oldPRIsDraft)
-		os.Setenv("YAS_TEST_PR_BASE_REF", oldPRBaseRef)
-		os.Setenv("YAS_TEST_PR_REVIEW_DECISION", oldReviewDecision)
-		os.Setenv("YAS_TEST_PR_STATUS_CHECK_ROLLUP", oldStatusCheckRollup)
-		os.RemoveAll(tmpDir)
+		// Note: t.Setenv() automatically handles environment variable cleanup
+		// Only need to clean up temp directory and files
+		assert.NilError(t, os.RemoveAll(tmpDir))
 
 		// Clean up temp PR files
 		files, _ := filepath.Glob("/tmp/yas-test-pr-created-*")
 		for _, f := range files {
-			os.Remove(f)
+			assert.NilError(t, os.Remove(f))
 		}
 	}
 
 	return cmdLogFile, cleanup
 }
 
-// parseCmdLog parses the command log file and returns a list of commands
+// parseCmdLog parses the command log file and returns a list of commands.
 func parseCmdLog(logFile string) ([][]string, error) {
 	data, err := os.ReadFile(logFile)
 	if err != nil {
 		return nil, err
 	}
 
-	var commands [][]string
-	var currentCmd []string
+	var (
+		commands   [][]string
+		currentCmd []string
+	)
 
 	scanner := bufio.NewScanner(strings.NewReader(string(data)))
 	for scanner.Scan() {
 		line := scanner.Text()
-		if line == "" {
+		switch {
+		case line == "":
 			if len(currentCmd) > 0 {
 				commands = append(commands, currentCmd)
 				currentCmd = nil
 			}
-		} else if strings.HasPrefix(line, "  ") {
+		case strings.HasPrefix(line, "  "):
 			// Argument
 			currentCmd = append(currentCmd, strings.TrimPrefix(line, "  "))
-		} else {
+		default:
 			// Command name
 			currentCmd = []string{line}
 		}
@@ -157,12 +148,13 @@ func parseCmdLog(logFile string) ([][]string, error) {
 	return commands, scanner.Err()
 }
 
-// findCommand finds a command in the log and returns it
+// findCommand finds a command in the log and returns it.
 func findCommand(commands [][]string, commandName string, subcommand ...string) []string {
 	for _, cmd := range commands {
 		if len(cmd) == 0 {
 			continue
 		}
+
 		if cmd[0] != commandName {
 			continue
 		}
@@ -171,23 +163,29 @@ func findCommand(commands [][]string, commandName string, subcommand ...string) 
 			if len(cmd) < len(subcommand)+1 {
 				continue
 			}
+
 			match := true
+
 			for i, sub := range subcommand {
 				if cmd[i+1] != sub {
 					match = false
+
 					break
 				}
 			}
+
 			if !match {
 				continue
 			}
 		}
+
 		return cmd
 	}
+
 	return nil
 }
 
-// wasCalled checks if a command exists in the log
+// wasCalled checks if a command exists in the log.
 func wasCalled(commands [][]string, commandName string, subcommand ...string) bool {
 	return findCommand(commands, commandName, subcommand...) != nil
 }
@@ -316,11 +314,13 @@ func TestSubmit_StackSubmitsAllBranches(t *testing.T) {
 
 		// Count how many PR creates happened
 		prCreateCount := 0
+
 		for _, cmd := range commands {
 			if len(cmd) >= 3 && cmd[0] == "gh" && cmd[1] == "pr" && cmd[2] == "create" {
 				prCreateCount++
 			}
 		}
+
 		assert.Equal(t, prCreateCount, 3, "Should create 3 PRs (one for each branch)")
 	})
 }
@@ -436,6 +436,7 @@ func TestSubmit_UpdatesPRBaseWhenLocalParentChanges(t *testing.T) {
 
 		// Submit topic-b - should detect base mismatch and update
 		testutil.ExecOrFail(t, "git checkout topic-b")
+
 		err = y.Submit()
 		assert.NilError(t, err)
 
@@ -461,5 +462,6 @@ func contains(slice []string, str string) bool {
 			return true
 		}
 	}
+
 	return false
 }

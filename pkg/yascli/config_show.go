@@ -14,5 +14,6 @@ func (c *configShowCmd) Execute(args []string) error {
 	}
 
 	spew.Dump(yasInstance.Config())
+
 	return nil
 }

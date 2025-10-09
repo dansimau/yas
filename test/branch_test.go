@@ -1,7 +1,6 @@
 package test
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 
@@ -10,32 +9,6 @@ import (
 	"github.com/dansimau/yas/pkg/yascli"
 	"gotest.tools/v3/assert"
 )
-
-// createBranchStack creates a test branch structure
-func createBranchStack(t *testing.T, branches []string) {
-	if len(branches) == 0 {
-		return
-	}
-
-	// Create trunk branch first
-	testutil.ExecOrFail(t, `
-		git init --initial-branch=main
-		touch main
-		git add main
-		git commit -m "main-0"
-	`)
-
-	// Create branch hierarchy
-	for i, branch := range branches {
-		_ = i // parent not used in this implementation
-		testutil.ExecOrFail(t, fmt.Sprintf(`
-			git checkout -b %s
-			touch %s
-			git add %s
-			git commit -m "%s-0"
-		`, branch, branch, branch, branch))
-	}
-}
 
 func TestBranch_GetBranchList_ForInteractiveSwitcher(t *testing.T) {
 	testutil.WithTempWorkingDir(t, func() {
@@ -68,10 +41,12 @@ func TestBranch_GetBranchList_ForInteractiveSwitcher(t *testing.T) {
 		// Find main and topic-a in the items
 		foundMain := false
 		foundTopicA := false
+
 		for _, item := range items {
 			if strings.Contains(item.ID, "main") {
 				foundMain = true
 			}
+
 			if strings.Contains(item.ID, "topic-a") {
 				foundTopicA = true
 			}
@@ -124,12 +99,15 @@ func TestBranch_GetBranchList_MultiLevelStack(t *testing.T) {
 
 		// Verify tree structure is displayed with proper indentation
 		foundTreeChars := false
+
 		for _, item := range items {
 			if strings.Contains(item.Line, "├──") || strings.Contains(item.Line, "└──") {
 				foundTreeChars = true
+
 				break
 			}
 		}
+
 		assert.Assert(t, foundTreeChars, "Should display tree characters")
 	})
 }
@@ -178,14 +156,17 @@ func TestBranch_GetBranchList_ForkedBranches(t *testing.T) {
 		// Verify both branches are displayed
 		foundTopicB := false
 		foundTopicC := false
+
 		for _, item := range items {
 			if strings.Contains(item.ID, "topic-b") {
 				foundTopicB = true
 			}
+
 			if strings.Contains(item.ID, "topic-c") {
 				foundTopicC = true
 			}
 		}
+
 		assert.Assert(t, foundTopicB, "Should display topic-b branch")
 		assert.Assert(t, foundTopicC, "Should display topic-c branch")
 	})
@@ -218,12 +199,15 @@ func TestBranch_GetBranchList_CurrentBranchHighlight(t *testing.T) {
 
 		// Verify current branch is highlighted with *
 		foundCurrentBranch := false
+
 		for _, item := range items {
 			if strings.Contains(item.ID, "topic-a") && strings.Contains(item.Line, "*") {
 				foundCurrentBranch = true
+
 				break
 			}
 		}
+
 		assert.Assert(t, foundCurrentBranch, "Should highlight current branch with *")
 	})
 }
@@ -305,12 +289,15 @@ func TestBranch_GetBranchList_BranchNameFormatting(t *testing.T) {
 
 		// Should display formatted branch name with greyed prefix
 		foundFormattedBranch := false
+
 		for _, item := range items {
 			if strings.Contains(item.ID, "user/feature-branch") {
 				foundFormattedBranch = true
+
 				break
 			}
 		}
+
 		assert.Assert(t, foundFormattedBranch, "Should display formatted branch name")
 	})
 }
@@ -363,12 +350,15 @@ func TestBranch_GetBranchList_WithPRInfo(t *testing.T) {
 
 		// Should display PR URL
 		foundPRInfo := false
+
 		for _, item := range items {
 			if strings.Contains(item.Line, "[https://github.com/test/test/pull/42]") {
 				foundPRInfo = true
+
 				break
 			}
 		}
+
 		assert.Assert(t, foundPRInfo, "Should display PR URL")
 	})
 }

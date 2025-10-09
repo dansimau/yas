@@ -29,6 +29,7 @@ Prompt:
 	}
 
 	scanner.Scan()
+
 	if err := scanner.Err(); err != nil {
 		panic(err)
 	}
@@ -43,6 +44,7 @@ Prompt:
 	if opts.Validator != nil {
 		if err := opts.Validator(input); err != nil {
 			fmt.Fprintln(os.Stderr, err)
+
 			goto Prompt
 		}
 	}
@@ -69,12 +71,14 @@ Prompt:
 // ReadSecretInputFromTerminal disables echoing and reads input interactively.
 func ReadSecretInputFromTerminal(in *os.File) (string, error) {
 	b, err := term.ReadPassword(int(in.Fd()))
+
 	return string(b), err
 }
 
 // StdinIsPipe returns whether or not stdin is a pipe.
 func StdinIsPipe() bool {
 	fi, _ := os.Stdin.Stat() // get the FileInfo struct describing the standard input.
+
 	return (fi.Mode() & os.ModeCharDevice) == 0
 }
 
@@ -105,6 +109,7 @@ func parseConfirmationInput(input string, defaultIfEmpty bool) (bool, error) {
 // determine if the confirmation input is valid.
 func confirmationValidator(input string) error {
 	_, err := parseConfirmationInput(input, false)
+
 	return err
 }
 
@@ -116,5 +121,6 @@ func Confirm(message string, defaultIfEmpty bool) bool {
 		Validator: confirmationValidator,
 	})
 	result, _ := parseConfirmationInput(input, defaultIfEmpty)
+
 	return result
 }

@@ -5,9 +5,9 @@ import (
 )
 
 type addCmd struct {
-	Branch      string `long:"branch" description:"The name of the branch to add to stack (default: current)" required:"false"`
-	Parent      string `long:"parent" description:"Parent branch name (default: autodetect)" required:"false"`
-	BranchPoint string `long:"branch-point" description:"Commit SHA where branch diverged from parent (default: autodetect)" required:"false"`
+	Branch      string `description:"The name of the branch to add to stack (default: current)"          long:"branch"       required:"false"`
+	Parent      string `description:"Parent branch name (default: autodetect)"                           long:"parent"       required:"false"`
+	BranchPoint string `description:"Commit SHA where branch diverged from parent (default: autodetect)" long:"branch-point" required:"false"`
 }
 
 func (c *addCmd) Execute(args []string) error {

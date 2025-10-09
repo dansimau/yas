@@ -50,6 +50,7 @@ func (c *syncCmd) Execute(args []string) error {
 	if err != nil {
 		return NewError(err.Error())
 	}
+
 	c.yasInstance = yasInstance
 
 	// TODO: Remove - this is for debugging
@@ -62,6 +63,7 @@ func (c *syncCmd) Execute(args []string) error {
 	}
 
 	fmt.Printf("🔄 Pulling %s...\n", yasInstance.Config().TrunkBranch)
+
 	if err := yasInstance.UpdateTrunk(); err != nil {
 		return NewError(err.Error())
 	}
@@ -71,6 +73,7 @@ func (c *syncCmd) Execute(args []string) error {
 	}
 
 	fmt.Println("🔄 Restacking branches...")
+
 	if err := yasInstance.Restack(); err != nil {
 		return NewError(err.Error())
 	}

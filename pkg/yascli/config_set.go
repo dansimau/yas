@@ -7,7 +7,7 @@ import (
 )
 
 type configSetCmd struct {
-	TrunkBranch *string `long:"trunk-branch" description:"The name of your trunk branch, e.g. main, develop" required:"true"`
+	TrunkBranch *string `description:"The name of your trunk branch, e.g. main, develop" long:"trunk-branch" required:"true"`
 }
 
 func (c *configSetCmd) Execute(args []string) error {

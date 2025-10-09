@@ -17,6 +17,10 @@ jobs:
         with:
           go-version: "1.25"
 
+      - name: Run lint
+        run: make lint
+        shell: bash
+
       - name: Run tests
         run: |
           set -o pipefail

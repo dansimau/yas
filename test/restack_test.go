@@ -180,6 +180,7 @@ func TestRestackReturnsToBranch(t *testing.T) {
 		`)
 	})
 }
+
 func TestRestack_ShowsReminderWhenBranchesWithPRsAreRestacked(t *testing.T) {
 	_, cleanup := setupMockCommandsWithPR(t, mockPROptions{
 		ID:    "PR_kwDOTest123",
@@ -238,12 +239,13 @@ func TestRestack_ShowsReminderWhenBranchesWithPRsAreRestacked(t *testing.T) {
 
 		// Submit topic-a to create a PR and populate metadata
 		testutil.ExecOrFail(t, "git checkout topic-a")
+
 		err = y.Submit()
 		assert.NilError(t, err)
 
 		// Go back to topic-b and restack
 		testutil.ExecOrFail(t, "git checkout topic-b")
-		output := captureStdout(func() {
+		output := captureStdout(t, func() {
 			assert.Equal(t, yascli.Run("restack"), 0)
 		})
 
@@ -326,6 +328,7 @@ func TestRestack_OnlyRebasesWhenNeeded(t *testing.T) {
 
 		// Count how many rebase commands were called
 		rebaseCount := 0
+
 		for _, cmd := range commands {
 			// git -c core.hooksPath=/dev/null rebase ...
 			if len(cmd) >= 5 && cmd[0] == "git" && cmd[3] == "rebase" {
@@ -402,6 +405,7 @@ func TestRestack_SkipsRebasingWhenNotNeeded(t *testing.T) {
 
 		// Count how many rebase commands were called
 		rebaseCount := 0
+
 		for _, cmd := range commands {
 			// git -c core.hooksPath=/dev/null rebase ...
 			if len(cmd) >= 5 && cmd[0] == "git" && cmd[3] == "rebase" {
@@ -443,7 +447,7 @@ func TestRestack_NoReminderWhenNoBranchesHavePRs(t *testing.T) {
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
 		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
 
-		output := captureStdout(func() {
+		output := captureStdout(t, func() {
 			assert.Equal(t, yascli.Run("restack"), 0)
 		})
 

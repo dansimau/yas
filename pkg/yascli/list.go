@@ -5,8 +5,8 @@ import (
 )
 
 type listCmd struct {
-	CurrentStack bool `long:"current-stack" description:"Show only the current stack (ancestors and descendants of current branch)"`
-	Status       bool `long:"status" description:"Show PR review and CI status"`
+	CurrentStack bool `description:"Show only the current stack (ancestors and descendants of current branch)" long:"current-stack"`
+	Status       bool `description:"Show PR review and CI status"                                              long:"status"`
 }
 
 func (c *listCmd) Execute(args []string) error {

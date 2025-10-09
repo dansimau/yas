@@ -24,11 +24,11 @@ type PullRequestMetadata struct {
 	URL               string
 	IsDraft           bool
 	BaseRefName       string
-	ReviewDecision    string         // APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED, etc.
-	StatusCheckRollup []StatusCheck  // Array of status checks
+	ReviewDecision    string        // APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED, etc.
+	StatusCheckRollup []StatusCheck // Array of status checks
 }
 
-// GetOverallCIStatus computes the overall CI status from status checks
+// GetOverallCIStatus computes the overall CI status from status checks.
 func (pr *PullRequestMetadata) GetOverallCIStatus() string {
 	if len(pr.StatusCheckRollup) == 0 {
 		return "" // No checks configured
@@ -52,9 +52,11 @@ func (pr *PullRequestMetadata) GetOverallCIStatus() string {
 	if hasFailure {
 		return "FAILURE"
 	}
+
 	if hasPending {
 		return "PENDING"
 	}
+
 	return "SUCCESS"
 }
 
@@ -69,6 +71,7 @@ func (b Branches) BranchNames() []string {
 	for _, branch := range b {
 		result = append(result, branch.Name)
 	}
+
 	return result
 }
 

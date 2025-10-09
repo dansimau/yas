@@ -13,15 +13,16 @@ import (
 var cmd *Cmd
 
 type Cmd struct {
-	DryRun        bool   `long:"dry-run" description:"Don't make any changes, just show what will happen"`
-	RepoDirectory string `long:"repo" short:"r" description:"Repo directory"`
-	Verbose       bool   `long:"verbose" short:"v" description:"Verbose output"`
+	DryRun        bool   `description:"Don't make any changes, just show what will happen" long:"dry-run"`
+	RepoDirectory string `description:"Repo directory"                                     long:"repo"    short:"r"`
+	Verbose       bool   `description:"Verbose output"                                     long:"verbose" short:"v"`
 }
 
 func mustAddCommand(f *flags.Command, err error) *flags.Command {
 	if err != nil {
 		panic(err)
 	}
+
 	return f
 }
 
@@ -47,8 +48,13 @@ func Run(args ...string) (exitCode int) {
 		}
 
 		if cmd.Verbose {
-			os.Setenv("YAS_VERBOSE", "1")
-			os.Setenv("XEXEC_VERBOSE", "1")
+			if err := os.Setenv("YAS_VERBOSE", "1"); err != nil {
+				return NewError("failed to set YAS_VERBOSE environment variable")
+			}
+
+			if err := os.Setenv("XEXEC_VERBOSE", "1"); err != nil {
+				return NewError("failed to set XEXEC_VERBOSE environment variable")
+			}
 		}
 
 		// Run command
@@ -68,8 +74,10 @@ func Run(args ...string) (exitCode int) {
 	_, err := parser.ParseArgs(args)
 	if err != nil {
 		// Handle --help, which is represented as an error by the flags package
-		if flagsErr, ok := err.(*flags.Error); ok && flagsErr.Type == flags.ErrHelp {
+		flagsErr := &flags.Error{}
+		if errors.As(err, &flagsErr) {
 			fmt.Fprintf(os.Stderr, "%s\n", err)
+
 			return 0
 		}
 

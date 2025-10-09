@@ -11,6 +11,7 @@ func TestMain(m *testing.M) {
 	cleanup := testutil.WithEnv(append(os.Environ(), "XEXEC_VERBOSE=1")...)
 
 	exitCode := m.Run()
+
 	cleanup()
 
 	os.Exit(exitCode)

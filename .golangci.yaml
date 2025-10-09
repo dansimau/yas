@@ -1,0 +1,44 @@
+version: "2"
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+
+linters:
+  enable:
+    - bodyclose
+    - copyloopvar
+    - dupword
+    - govet
+    - staticcheck
+    - canonicalheader
+    # - err113
+    - errorlint
+    - exptostd
+    - fatcontext
+    - ginkgolinter
+    - gocritic
+    - godot
+    - goheader
+    - iface
+    - importas
+    - intrange
+    - mirror
+    - misspell
+    - nakedret
+    - nlreturn
+    - nolintlint
+    - perfsprint
+    - protogetter
+    # - revive
+    - sloglint
+    - tagalign
+    - testifylint
+    - tparallel
+    - unconvert
+    - unparam
+    - usestdlibvars
+    - usetesting
+    - whitespace
+    - wsl_v5
