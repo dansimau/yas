@@ -10,7 +10,6 @@ require (
 	github.com/heimdalr/dag v1.5.0
 	github.com/jessevdk/go-flags v1.6.1
 	github.com/sourcegraph/conc v0.3.0
-	github.com/xlab/treeprint v1.2.0
 	golang.org/x/term v0.35.0
 	gopkg.in/alessio/shellescape.v1 v1.0.0-20170105083845-52074bc9df61
 	gopkg.in/yaml.v2 v2.4.0

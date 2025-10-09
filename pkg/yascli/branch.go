@@ -14,8 +14,18 @@ type branchCmd struct {
 }
 
 func (c *branchCmd) Execute(args []string) error {
+	// If no args provided, show interactive branch switcher
 	if len(args) == 0 {
-		return NewError("branch name is required")
+		yasInstance, err := yas.NewFromRepository(cmd.RepoDirectory)
+		if err != nil {
+			return NewError(err.Error())
+		}
+
+		if err := yasInstance.SwitchBranchInteractive(); err != nil {
+			return NewError(err.Error())
+		}
+
+		return nil
 	}
 
 	branchName := args[0]
@@ -58,7 +68,7 @@ func (c *branchCmd) Execute(args []string) error {
 	}
 
 	// Checkout the new branch
-	if err := git.Checkout(fullBranchName); err != nil {
+	if err := git.QuietCheckout(fullBranchName); err != nil {
 		return NewError(fmt.Sprintf("failed to checkout branch: %v", err))
 	}
 

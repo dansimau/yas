@@ -16,7 +16,6 @@ import (
 	"github.com/hashicorp/go-version"
 	"github.com/heimdalr/dag"
 	"github.com/sourcegraph/conc/pool"
-	"github.com/xlab/treeprint"
 )
 
 var minimumRequiredGitVersion = version.Must(version.NewVersion("2.38"))
@@ -126,7 +125,7 @@ func (yas *YAS) DeleteBranch(name string) error {
 
 	// Can't delete the branch while we're on it; switch to trunk
 	if currentBranchName == name {
-		if err := yas.git.Checkout(yas.cfg.TrunkBranch); err != nil {
+		if err := yas.git.QuietCheckout(yas.cfg.TrunkBranch); err != nil {
 			return fmt.Errorf("can't delete branch while on it; failed to checkout trunk: %w", err)
 		}
 	}
@@ -354,7 +353,7 @@ func (yas *YAS) Restack() error {
 	}
 
 	// Return to the starting branch
-	if err := yas.git.Checkout(startingBranch); err != nil {
+	if err := yas.git.QuietCheckout(startingBranch); err != nil {
 		return fmt.Errorf("restack succeeded but failed to return to branch %s: %w", startingBranch, err)
 	}
 
@@ -435,24 +434,6 @@ func (yas *YAS) rebaseDescendants(graph *dag.DAG, branchName string, rebasedBran
 	return nil
 }
 
-func (yas *YAS) toTree(graph *dag.DAG, rootNode string, currentBranch string, showStatus bool) (treeprint.Tree, error) {
-	rootLabel := formatBranchName(rootNode)
-
-	// Add star at the end if trunk is the current branch
-	if rootNode == currentBranch {
-		darkGray := color.New(color.FgHiBlack).SprintFunc()
-		rootLabel = fmt.Sprintf("%s %s", rootLabel, darkGray("*"))
-	}
-
-	tree := treeprint.NewWithRoot(rootLabel)
-
-	if err := yas.addNodesFromGraph(tree, graph, rootNode, currentBranch, showStatus); err != nil {
-		return nil, err
-	}
-
-	return tree, nil
-}
-
 func (yas *YAS) needsRebase(branchName, parentBranch string) (bool, error) {
 	// Get the branch metadata to access the stored branch point
 	metadata := yas.data.Branches.Get(branchName)
@@ -517,14 +498,29 @@ func (yas *YAS) needsSubmit(branchName string) (bool, error) {
 }
 
 func (yas *YAS) List(currentStackOnly bool, showStatus bool) error {
+	items, err := yas.GetBranchList(currentStackOnly, showStatus)
+	if err != nil {
+		return err
+	}
+
+	for _, item := range items {
+		fmt.Println(item.Line)
+	}
+
+	return nil
+}
+
+// GetBranchList returns a list of SelectionItems representing all branches
+// Each item contains the branch name (ID) and the formatted display line
+func (yas *YAS) GetBranchList(currentStackOnly bool, showStatus bool) ([]SelectionItem, error) {
 	graph, err := yas.graph()
 	if err != nil {
-		return fmt.Errorf("failed to get graph: %w", err)
+		return nil, fmt.Errorf("failed to get graph: %w", err)
 	}
 
 	currentBranch, err := yas.git.GetCurrentBranchName()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// If status flag is set, fetch PR status for all branches with PRs
@@ -532,7 +528,7 @@ func (yas *YAS) List(currentStackOnly bool, showStatus bool) error {
 		branchesWithPRs := yas.data.Branches.ToSlice().WithPRs()
 		if len(branchesWithPRs) > 0 {
 			if err := yas.RefreshPRStatus(branchesWithPRs.BranchNames()...); err != nil {
-				return fmt.Errorf("failed to refresh PR status: %w", err)
+				return nil, fmt.Errorf("failed to refresh PR status: %w", err)
 			}
 		}
 	}
@@ -541,16 +537,170 @@ func (yas *YAS) List(currentStackOnly bool, showStatus bool) error {
 	if currentStackOnly {
 		graph, err = yas.currentStackGraph(graph, currentBranch)
 		if err != nil {
-			return fmt.Errorf("failed to get current stack: %w", err)
+			return nil, fmt.Errorf("failed to get current stack: %w", err)
 		}
 	}
 
-	tree, err := yas.toTree(graph, yas.cfg.TrunkBranch, currentBranch, showStatus)
+	// Build list of SelectionItems
+	var items []SelectionItem
+
+	// Add trunk branch first
+	rootLabel := formatBranchName(yas.cfg.TrunkBranch)
+	if yas.cfg.TrunkBranch == currentBranch {
+		darkGray := color.New(color.FgHiBlack).SprintFunc()
+		rootLabel = fmt.Sprintf("%s %s", rootLabel, darkGray("*"))
+	}
+	items = append(items, SelectionItem{
+		ID:   yas.cfg.TrunkBranch,
+		Line: rootLabel,
+	})
+
+	// Collect child branches recursively
+	if err := yas.collectBranchItems(&items, graph, yas.cfg.TrunkBranch, currentBranch, showStatus, ""); err != nil {
+		return nil, err
+	}
+
+	return items, nil
+}
+
+// collectBranchItems recursively collects branch items with tree formatting
+func (yas *YAS) collectBranchItems(items *[]SelectionItem, graph *dag.DAG, parentID string, currentBranch string, showStatus bool, prefix string) error {
+	children, err := graph.GetChildren(parentID)
 	if err != nil {
 		return err
 	}
 
-	fmt.Print(tree.String())
+	// Convert to slice for ordering
+	childIDs := make([]string, 0, len(children))
+	for childID := range children {
+		childIDs = append(childIDs, childID)
+	}
+
+	for i, childID := range childIDs {
+		isLastChild := i == len(childIDs)-1
+
+		// Build branch label (same as addNodesFromGraph)
+		branchLabel := formatBranchName(childID)
+		branchMetadata := yas.data.Branches.Get(childID)
+
+		// Check if this branch needs rebasing or submitting
+		var statusParts []string
+		yellow := color.New(color.FgYellow).SprintFunc()
+
+		needsRebase, err := yas.needsRebase(childID, parentID)
+		if err == nil && needsRebase {
+			statusParts = append(statusParts, "needs restack")
+		}
+
+		// Check submit status
+		if branchMetadata.GitHubPullRequest.ID == "" {
+			statusParts = append(statusParts, "not submitted")
+		} else {
+			needsSubmit, err := yas.needsSubmit(childID)
+			if err == nil && needsSubmit {
+				statusParts = append(statusParts, "needs submit")
+			}
+		}
+
+		// Add combined status if any
+		if len(statusParts) > 0 {
+			branchLabel = fmt.Sprintf("%s %s", branchLabel, yellow(fmt.Sprintf("(%s)", strings.Join(statusParts, ", "))))
+		}
+
+		// Add PR information if available
+		if branchMetadata.GitHubPullRequest.ID != "" {
+			pr := branchMetadata.GitHubPullRequest
+			cyan := color.New(color.FgCyan).SprintFunc()
+			branchLabel = fmt.Sprintf("%s %s", branchLabel, cyan(fmt.Sprintf("[%s]", pr.URL)))
+
+			// Add review and CI status if requested
+			if showStatus {
+				reviewStatus := getReviewStatusIcon(pr.ReviewDecision)
+				ciStatus := getCIStatusIcon(pr.GetOverallCIStatus())
+				darkGray := color.New(color.FgHiBlack).SprintFunc()
+				branchLabel = fmt.Sprintf("%s %s", branchLabel, darkGray(fmt.Sprintf("(review: %s, CI: %s)", reviewStatus, ciStatus)))
+			}
+		}
+
+		// Add star if this is the current branch
+		if childID == currentBranch {
+			darkGray := color.New(color.FgHiBlack).SprintFunc()
+			branchLabel = fmt.Sprintf("%s %s", branchLabel, darkGray("*"))
+		}
+
+		// Build tree prefix
+		var treeChar string
+		if isLastChild {
+			treeChar = "└── "
+		} else {
+			treeChar = "├── "
+		}
+
+		line := prefix + treeChar + branchLabel
+
+		*items = append(*items, SelectionItem{
+			ID:   childID,
+			Line: line,
+		})
+
+		// Recurse for children
+		var newPrefix string
+		if isLastChild {
+			newPrefix = prefix + "    "
+		} else {
+			newPrefix = prefix + "│   "
+		}
+
+		if err := yas.collectBranchItems(items, graph, childID, currentBranch, showStatus, newPrefix); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// SwitchBranchInteractive shows an interactive selector and switches to the chosen branch
+func (yas *YAS) SwitchBranchInteractive() error {
+	// Get current branch to pre-select it
+	currentBranch, err := yas.git.GetCurrentBranchName()
+	if err != nil {
+		return fmt.Errorf("failed to get current branch: %w", err)
+	}
+
+	// Get the list of branches
+	items, err := yas.GetBranchList(false, false)
+	if err != nil {
+		return fmt.Errorf("failed to get branch list: %w", err)
+	}
+
+	if len(items) == 0 {
+		return fmt.Errorf("no branches found")
+	}
+
+	// Find the index of the current branch
+	initialCursor := 0
+	for i, item := range items {
+		if item.ID == currentBranch {
+			initialCursor = i
+			break
+		}
+	}
+
+	// Show interactive selector
+	selected, err := InteractiveSelect(items, initialCursor, "Choose branch to switch to:")
+	if err != nil {
+		return fmt.Errorf("selection failed: %w", err)
+	}
+
+	// User cancelled
+	if selected == nil {
+		return nil
+	}
+
+	// Check out the selected branch
+	if err := yas.git.Checkout(selected.ID); err != nil {
+		return fmt.Errorf("failed to checkout branch: %w", err)
+	}
 
 	return nil
 }
@@ -1163,12 +1313,12 @@ func (yas *YAS) RefreshPRStatus(branchNames ...string) error {
 }
 
 func (yas *YAS) UpdateTrunk() error {
-	if err := yas.git.Checkout(yas.cfg.TrunkBranch); err != nil {
+	if err := yas.git.QuietCheckout(yas.cfg.TrunkBranch); err != nil {
 		return err
 	}
 
 	// Switch back to original branch
-	defer yas.git.Checkout("-")
+	defer yas.git.QuietCheckout("-")
 
 	return yas.git.Pull()
 }
