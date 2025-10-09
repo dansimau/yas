@@ -255,3 +255,33 @@ func (r *Repo) GitVersion() (*version.Version, error) {
 
 	return version, nil
 }
+
+// HasStagedChanges checks if there are any staged changes in the index
+func (r *Repo) HasStagedChanges() (bool, error) {
+	output, err := r.output("git", "diff", "--cached", "--quiet")
+	if err != nil {
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
+			return false, err
+		}
+
+		// Exit code 1 means there are differences (staged changes exist)
+		if exitErr.ExitCode() == 1 {
+			return true, nil
+		}
+
+		// Unrecognized exit code
+		return false, err
+	}
+
+	// Exit code 0 means no differences (no staged changes)
+	return output != "", nil
+}
+
+// Commit creates an interactive commit, opening an editor for the user to write the commit message
+func (r *Repo) Commit() error {
+	return xexec.Command("git", "commit").
+		WithEnvVars(CleanedGitEnv()).
+		WithWorkingDir(r.path).
+		Run()
+}

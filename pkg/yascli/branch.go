@@ -84,5 +84,17 @@ func (c *branchCmd) Execute(args []string) error {
 		return NewError(err.Error())
 	}
 
+	// Check for staged changes and commit automatically
+	hasStagedChanges, err := git.HasStagedChanges()
+	if err != nil {
+		return NewError(fmt.Sprintf("failed to check for staged changes: %v", err))
+	}
+
+	if hasStagedChanges {
+		if err := git.Commit(); err != nil {
+			return NewError(fmt.Sprintf("failed to commit staged changes: %v", err))
+		}
+	}
+
 	return nil
 }
