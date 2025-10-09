@@ -185,7 +185,13 @@ func (r *Repo) Push() error {
 }
 
 func (r *Repo) ForcePushBranch(branchName string) error {
-	return xexec.Command("git", "push", "--force-with-lease", "origin", branchName).
+	// Get remote for this branch
+	remote, err := r.GetRemoteForBranch(branchName)
+	if err != nil {
+		return err
+	}
+
+	return xexec.Command("git", "push", "--force-with-lease", remote, branchName).
 		WithEnvVars(CleanedGitEnv()).
 		WithWorkingDir(r.path).
 		Run()
@@ -284,4 +290,27 @@ func (r *Repo) Commit() error {
 		WithEnvVars(CleanedGitEnv()).
 		WithWorkingDir(r.path).
 		Run()
+}
+
+// GetRemoteForBranch returns the configured remote for the first branch in branchNames
+// that has a remote configured. It checks each branch name in order and returns the remote name
+// (e.g., "origin") as soon as it finds one, or an error if none of the provided branches has a remote.
+// If no branch names are provided, it returns an error.
+func (r *Repo) GetRemoteForBranch(branchNames ...string) (string, error) {
+	var lastErr error
+
+	for _, branchName := range branchNames {
+		remote, err := r.output("git", "config", fmt.Sprintf("branch.%s.remote", branchName))
+		if err == nil && remote != "" {
+			return remote, nil
+		}
+
+		lastErr = fmt.Errorf("no remote configured for branch %s", branchName)
+	}
+
+	if lastErr != nil {
+		return "", lastErr
+	}
+
+	return "", fmt.Errorf("no branch names provided")
 }
