@@ -16,7 +16,6 @@ import (
 	"github.com/hashicorp/go-version"
 	"github.com/heimdalr/dag"
 	"github.com/sourcegraph/conc/pool"
-	"github.com/xlab/treeprint"
 )
 
 var minimumRequiredGitVersion = version.Must(version.NewVersion("2.38"))
@@ -435,24 +434,6 @@ func (yas *YAS) rebaseDescendants(graph *dag.DAG, branchName string, rebasedBran
 	return nil
 }
 
-func (yas *YAS) toTree(graph *dag.DAG, rootNode string, currentBranch string, showStatus bool) (treeprint.Tree, error) {
-	rootLabel := formatBranchName(rootNode)
-
-	// Add star at the end if trunk is the current branch
-	if rootNode == currentBranch {
-		darkGray := color.New(color.FgHiBlack).SprintFunc()
-		rootLabel = fmt.Sprintf("%s %s", rootLabel, darkGray("*"))
-	}
-
-	tree := treeprint.NewWithRoot(rootLabel)
-
-	if err := yas.addNodesFromGraph(tree, graph, rootNode, currentBranch, showStatus); err != nil {
-		return nil, err
-	}
-
-	return tree, nil
-}
-
 func (yas *YAS) needsRebase(branchName, parentBranch string) (bool, error) {
 	// Get the branch metadata to access the stored branch point
 	metadata := yas.data.Branches.Get(branchName)
@@ -517,40 +498,14 @@ func (yas *YAS) needsSubmit(branchName string) (bool, error) {
 }
 
 func (yas *YAS) List(currentStackOnly bool, showStatus bool) error {
-	graph, err := yas.graph()
-	if err != nil {
-		return fmt.Errorf("failed to get graph: %w", err)
-	}
-
-	currentBranch, err := yas.git.GetCurrentBranchName()
+	items, err := yas.GetBranchList(currentStackOnly, showStatus)
 	if err != nil {
 		return err
 	}
 
-	// If status flag is set, fetch PR status for all branches with PRs
-	if showStatus {
-		branchesWithPRs := yas.data.Branches.ToSlice().WithPRs()
-		if len(branchesWithPRs) > 0 {
-			if err := yas.RefreshPRStatus(branchesWithPRs.BranchNames()...); err != nil {
-				return fmt.Errorf("failed to refresh PR status: %w", err)
-			}
-		}
+	for _, item := range items {
+		fmt.Println(item.Line)
 	}
-
-	// Filter to current stack if requested
-	if currentStackOnly {
-		graph, err = yas.currentStackGraph(graph, currentBranch)
-		if err != nil {
-			return fmt.Errorf("failed to get current stack: %w", err)
-		}
-	}
-
-	tree, err := yas.toTree(graph, yas.cfg.TrunkBranch, currentBranch, showStatus)
-	if err != nil {
-		return err
-	}
-
-	fmt.Print(tree.String())
 
 	return nil
 }
