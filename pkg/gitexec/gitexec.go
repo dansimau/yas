@@ -190,8 +190,27 @@ func (r *Repo) Push() error {
 		Run()
 }
 
-func (r *Repo) ForcePushBranch(branchName string) error {
-	return xexec.Command("git", "push", "--force-with-lease", "origin", branchName).
+func (r *Repo) GetRemoteForBranch(branchNames ...string) (string, error) {
+	var lastErr error
+
+	for _, branchName := range branchNames {
+		remote, err := r.output("git", "config", fmt.Sprintf("branch.%s.remote", branchName))
+		if err == nil && remote != "" {
+			return remote, nil
+		}
+
+		lastErr = fmt.Errorf("no remote configured for branch %s", branchName)
+	}
+
+	if lastErr != nil {
+		return "", lastErr
+	}
+
+	return "", fmt.Errorf("no branch names provided")
+}
+
+func (r *Repo) ForcePushBranch(origin string, branchName string) error {
+	return xexec.Command("git", "push", "--force-with-lease", origin, branchName).
 		WithEnvVars(CleanedGitEnv()).
 		WithWorkingDir(r.path).
 		Run()

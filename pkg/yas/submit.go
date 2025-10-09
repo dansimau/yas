@@ -228,8 +228,15 @@ func (yas *YAS) submitBranch(branchName string) error {
 	needsPush := !remoteExists || oldRemoteHash != currentLocalHash
 
 	if needsPush {
+		// Get remote for this branch (default to "origin" if not configured)
+		remote, err := yas.git.GetRemoteForBranch(branchName)
+		if err != nil {
+			// If no remote is configured, default to "origin"
+			remote = "origin"
+		}
+
 		// Force push with lease (we expect the branch may have been rebased)
-		if err := yas.git.ForcePushBranch(branchName); err != nil {
+		if err := yas.git.ForcePushBranch(remote, branchName); err != nil {
 			return fmt.Errorf("failed to push: %w", err)
 		}
 	}
