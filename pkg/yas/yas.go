@@ -555,6 +555,202 @@ func (yas *YAS) List(currentStackOnly bool, showStatus bool) error {
 	return nil
 }
 
+// GetBranchList returns a list of SelectionItems representing all branches
+// Each item contains the branch name (ID) and the formatted display line
+func (yas *YAS) GetBranchList(currentStackOnly bool, showStatus bool) ([]SelectionItem, error) {
+	graph, err := yas.graph()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get graph: %w", err)
+	}
+
+	currentBranch, err := yas.git.GetCurrentBranchName()
+	if err != nil {
+		return nil, err
+	}
+
+	// If status flag is set, fetch PR status for all branches with PRs
+	if showStatus {
+		branchesWithPRs := yas.data.Branches.ToSlice().WithPRs()
+		if len(branchesWithPRs) > 0 {
+			if err := yas.RefreshPRStatus(branchesWithPRs.BranchNames()...); err != nil {
+				return nil, fmt.Errorf("failed to refresh PR status: %w", err)
+			}
+		}
+	}
+
+	// Filter to current stack if requested
+	if currentStackOnly {
+		graph, err = yas.currentStackGraph(graph, currentBranch)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get current stack: %w", err)
+		}
+	}
+
+	// Build list of SelectionItems
+	var items []SelectionItem
+
+	// Add trunk branch first
+	rootLabel := formatBranchName(yas.cfg.TrunkBranch)
+	if yas.cfg.TrunkBranch == currentBranch {
+		darkGray := color.New(color.FgHiBlack).SprintFunc()
+		rootLabel = fmt.Sprintf("%s %s", rootLabel, darkGray("*"))
+	}
+	items = append(items, SelectionItem{
+		ID:   yas.cfg.TrunkBranch,
+		Line: rootLabel,
+	})
+
+	// Collect child branches recursively
+	if err := yas.collectBranchItems(&items, graph, yas.cfg.TrunkBranch, currentBranch, showStatus, ""); err != nil {
+		return nil, err
+	}
+
+	return items, nil
+}
+
+// collectBranchItems recursively collects branch items with tree formatting
+func (yas *YAS) collectBranchItems(items *[]SelectionItem, graph *dag.DAG, parentID string, currentBranch string, showStatus bool, prefix string) error {
+	children, err := graph.GetChildren(parentID)
+	if err != nil {
+		return err
+	}
+
+	// Convert to slice for ordering
+	childIDs := make([]string, 0, len(children))
+	for childID := range children {
+		childIDs = append(childIDs, childID)
+	}
+
+	for i, childID := range childIDs {
+		isLastChild := i == len(childIDs)-1
+
+		// Build branch label (same as addNodesFromGraph)
+		branchLabel := formatBranchName(childID)
+		branchMetadata := yas.data.Branches.Get(childID)
+
+		// Check if this branch needs rebasing or submitting
+		var statusParts []string
+		yellow := color.New(color.FgYellow).SprintFunc()
+
+		needsRebase, err := yas.needsRebase(childID, parentID)
+		if err == nil && needsRebase {
+			statusParts = append(statusParts, "needs restack")
+		}
+
+		// Check submit status
+		if branchMetadata.GitHubPullRequest.ID == "" {
+			statusParts = append(statusParts, "not submitted")
+		} else {
+			needsSubmit, err := yas.needsSubmit(childID)
+			if err == nil && needsSubmit {
+				statusParts = append(statusParts, "needs submit")
+			}
+		}
+
+		// Add combined status if any
+		if len(statusParts) > 0 {
+			branchLabel = fmt.Sprintf("%s %s", branchLabel, yellow(fmt.Sprintf("(%s)", strings.Join(statusParts, ", "))))
+		}
+
+		// Add PR information if available
+		if branchMetadata.GitHubPullRequest.ID != "" {
+			pr := branchMetadata.GitHubPullRequest
+			cyan := color.New(color.FgCyan).SprintFunc()
+			branchLabel = fmt.Sprintf("%s %s", branchLabel, cyan(fmt.Sprintf("[%s]", pr.URL)))
+
+			// Add review and CI status if requested
+			if showStatus {
+				reviewStatus := getReviewStatusIcon(pr.ReviewDecision)
+				ciStatus := getCIStatusIcon(pr.GetOverallCIStatus())
+				darkGray := color.New(color.FgHiBlack).SprintFunc()
+				branchLabel = fmt.Sprintf("%s %s", branchLabel, darkGray(fmt.Sprintf("(review: %s, CI: %s)", reviewStatus, ciStatus)))
+			}
+		}
+
+		// Add star if this is the current branch
+		if childID == currentBranch {
+			darkGray := color.New(color.FgHiBlack).SprintFunc()
+			branchLabel = fmt.Sprintf("%s %s", branchLabel, darkGray("*"))
+		}
+
+		// Build tree prefix
+		var treeChar string
+		if isLastChild {
+			treeChar = "└── "
+		} else {
+			treeChar = "├── "
+		}
+
+		line := prefix + treeChar + branchLabel
+
+		*items = append(*items, SelectionItem{
+			ID:   childID,
+			Line: line,
+		})
+
+		// Recurse for children
+		var newPrefix string
+		if isLastChild {
+			newPrefix = prefix + "    "
+		} else {
+			newPrefix = prefix + "│   "
+		}
+
+		if err := yas.collectBranchItems(items, graph, childID, currentBranch, showStatus, newPrefix); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// SwitchBranchInteractive shows an interactive selector and switches to the chosen branch
+func (yas *YAS) SwitchBranchInteractive() error {
+	// Get current branch to pre-select it
+	currentBranch, err := yas.git.GetCurrentBranchName()
+	if err != nil {
+		return fmt.Errorf("failed to get current branch: %w", err)
+	}
+
+	// Get the list of branches
+	items, err := yas.GetBranchList(false, false)
+	if err != nil {
+		return fmt.Errorf("failed to get branch list: %w", err)
+	}
+
+	if len(items) == 0 {
+		return fmt.Errorf("no branches found")
+	}
+
+	// Find the index of the current branch
+	initialCursor := 0
+	for i, item := range items {
+		if item.ID == currentBranch {
+			initialCursor = i
+			break
+		}
+	}
+
+	// Show interactive selector
+	selected, err := InteractiveSelect(items, initialCursor, "Choose branch to switch to:")
+	if err != nil {
+		return fmt.Errorf("selection failed: %w", err)
+	}
+
+	// User cancelled
+	if selected == nil {
+		return nil
+	}
+
+	// Check out the selected branch
+	if err := yas.git.Checkout(selected.ID); err != nil {
+		return fmt.Errorf("failed to checkout branch: %w", err)
+	}
+
+	fmt.Printf("Switched to branch: %s\n", selected.ID)
+	return nil
+}
+
 func (yas *YAS) SetParent(branchName, parentBranchName, branchPoint string) error {
 	if branchName == "" {
 		currentBranch, err := yas.git.GetCurrentBranchName()
