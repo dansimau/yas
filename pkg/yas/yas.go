@@ -1412,8 +1412,13 @@ func (yas *YAS) submitBranch(branchName string) error {
 	needsPush := !remoteExists || oldRemoteHash != currentLocalHash
 
 	if needsPush {
+		remote, err := yas.git.GetRemoteForBranch(branchName, yas.cfg.TrunkBranch)
+		if err != nil {
+			return fmt.Errorf("failed to get remote for branch: %w", err)
+		}
+
 		// Force push with lease (we expect the branch may have been rebased)
-		if err := yas.git.ForcePushBranch(branchName); err != nil {
+		if err := yas.git.ForcePushBranch(remote, branchName); err != nil {
 			return fmt.Errorf("failed to push: %w", err)
 		}
 	}

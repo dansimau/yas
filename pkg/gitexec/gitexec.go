@@ -190,14 +190,8 @@ func (r *Repo) Push() error {
 		Run()
 }
 
-func (r *Repo) ForcePushBranch(branchName string) error {
-	// Get remote for this branch
-	remote, err := r.GetRemoteForBranch(branchName)
-	if err != nil {
-		return err
-	}
-
-	return xexec.Command("git", "push", "--force-with-lease", remote, branchName).
+func (r *Repo) ForcePushBranch(origin string, branchName string) error {
+	return xexec.Command("git", "push", "--force-with-lease", origin, branchName).
 		WithEnvVars(CleanedGitEnv()).
 		WithWorkingDir(r.path).
 		Run()
