@@ -110,6 +110,10 @@ func ExecOrFail(t *testing.T, lines string) {
 		// ignore error as file may already be closed from below
 		_ = f.Close()
 
+		if err := f.Close(); err != nil {
+			t.Fatal("failed to close temp file", f.Name(), err)
+		}
+
 		if !t.Failed() {
 			if err := os.Remove(f.Name()); err != nil {
 				t.Fatal("failed to remove temp file", f.Name(), err)
@@ -125,6 +129,10 @@ func ExecOrFail(t *testing.T, lines string) {
 	}
 
 	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := xexec.Command("chmod", "+x", f.Name()).Run(); err != nil {
 		t.Fatal(err)
 	}
 
