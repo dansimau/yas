@@ -107,9 +107,8 @@ func ExecOrFail(t *testing.T, lines string) {
 	}
 
 	defer func() {
-		if err := f.Close(); err != nil {
-			t.Fatal("failed to close temp file", f.Name(), err)
-		}
+		// ignore error as file may already be closed from below
+		_ = f.Close()
 
 		if !t.Failed() {
 			if err := os.Remove(f.Name()); err != nil {
@@ -122,6 +121,10 @@ func ExecOrFail(t *testing.T, lines string) {
 
 	_, err = f.WriteString(lines)
 	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}
 
