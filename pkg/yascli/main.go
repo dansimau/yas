@@ -61,6 +61,7 @@ func Run(args ...string) (exitCode int) {
 		return command.Execute(args)
 	}
 
+	mustAddCommand(parser.AddCommand("abort", "Abort a restack operation in progress", "", &abortCmd{}))
 	mustAddCommand(parser.AddCommand("add", "Add/set parent of branch", "", &addCmd{}))
 	mustAddCommand(parser.AddCommand("annotate", "Annotate PR with stack information", "", &annotateCmd{})).Hidden = true
 	mustAddCommand(parser.AddCommand("branch", "Work with branches", "", &branchCmd{})).Aliases = []string{"nb", "br"}

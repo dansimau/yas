@@ -469,11 +469,18 @@ func (yas *YAS) processRebaseWorkQueue(startingBranch string, workQueue [][2]str
 		}
 
 		if rebaseErr != nil {
+			// Get the original commit hash before the rebase for potential abort
+			originalCommit, err := yas.git.GetCommitHash(childBranch)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to get original commit: %v\n", err)
+			}
+
 			// Save state for resuming later
 			state := &RestackState{
 				StartingBranch:  startingBranch,
 				CurrentBranch:   childBranch,
 				CurrentParent:   parentBranch,
+				OriginalCommit:  originalCommit,
 				RemainingWork:   workQueue[i+1:],
 				RebasedBranches: *rebasedBranches,
 			}
@@ -647,6 +654,77 @@ func (yas *YAS) Continue() error {
 	}
 
 	fmt.Printf("\nRestack completed successfully!\n")
+
+	return nil
+}
+
+// Abort aborts an in-progress restack operation, resetting the current branch
+// to its state before the rebase started.
+func (yas *YAS) Abort() error {
+	// Check if there's a saved restack state
+	if !RestackStateExists(yas.cfg.RepoDirectory) {
+		return errors.New("no restack operation in progress (no saved state found)")
+	}
+
+	// Load the saved state
+	state, err := LoadRestackState(yas.cfg.RepoDirectory)
+	if err != nil {
+		return fmt.Errorf("failed to load restack state: %w", err)
+	}
+
+	fmt.Printf("Aborting restack operation...\n")
+
+	// Check if a rebase is currently in progress
+	rebaseInProgress, err := yas.git.IsRebaseInProgress()
+	if err != nil {
+		return fmt.Errorf("failed to check if rebase is in progress: %w", err)
+	}
+
+	// If rebase is in progress, abort it
+	if rebaseInProgress {
+		fmt.Printf("Aborting in-progress rebase for %s...\n", state.CurrentBranch)
+
+		if err := yas.git.RebaseAbort(); err != nil {
+			return fmt.Errorf("failed to abort rebase: %w", err)
+		}
+	}
+
+	// Hard reset the current branch to its original commit if we have it
+	if state.OriginalCommit != "" {
+		fmt.Printf("Resetting %s to original state (%s)...\n", state.CurrentBranch, state.OriginalCommit[:8])
+
+		if err := yas.git.HardReset(state.OriginalCommit); err != nil {
+			return fmt.Errorf("failed to reset branch to original state: %w", err)
+		}
+	} else {
+		fmt.Printf("Warning: original commit not found in state, branch may not be fully restored\n")
+	}
+
+	// Delete the restack state
+	if err := DeleteRestackState(yas.cfg.RepoDirectory); err != nil {
+		return fmt.Errorf("failed to delete restack state: %w", err)
+	}
+
+	// Return to the starting branch
+	if state.StartingBranch != "" && state.StartingBranch != state.CurrentBranch {
+		fmt.Printf("Returning to %s...\n", state.StartingBranch)
+
+		if err := yas.git.QuietCheckout(state.StartingBranch); err != nil {
+			return fmt.Errorf("failed to return to starting branch %s: %w", state.StartingBranch, err)
+		}
+	}
+
+	fmt.Printf("\nRestack aborted successfully.\n")
+
+	if len(state.RebasedBranches) > 0 {
+		fmt.Printf("Note: %d branch(es) were successfully rebased before the abort:\n", len(state.RebasedBranches))
+
+		for _, branchName := range state.RebasedBranches {
+			fmt.Printf("  - %s\n", branchName)
+		}
+
+		fmt.Printf("These branches remain in their rebased state.\n")
+	}
 
 	return nil
 }

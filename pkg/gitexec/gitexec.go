@@ -313,3 +313,19 @@ func (r *Repo) RebaseContinue() error {
 		WithWorkingDir(r.path).
 		Run()
 }
+
+// RebaseAbort aborts an in-progress rebase operation.
+func (r *Repo) RebaseAbort() error {
+	return xexec.Command("git", "rebase", "--abort").
+		WithEnvVars(CleanedGitEnv()).
+		WithWorkingDir(r.path).
+		Run()
+}
+
+// HardReset performs a hard reset to the specified commit.
+func (r *Repo) HardReset(commit string) error {
+	return xexec.Command("git", "reset", "--hard", commit).
+		WithEnvVars(CleanedGitEnv()).
+		WithWorkingDir(r.path).
+		Run()
+}
