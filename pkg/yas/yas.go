@@ -21,7 +21,10 @@ import (
 
 var minimumRequiredGitVersion = version.Must(version.NewVersion("2.38"))
 
-const yasStateFile = ".git/.yasstate"
+const (
+	yasStateFile     = ".git/.yasstate"
+	restackStateFile = ".git/.yasrestack"
+)
 
 type YAS struct {
 	cfg  Config
@@ -356,17 +359,37 @@ func (yas *YAS) Restack() error {
 		return err
 	}
 
-	graph, err := yas.graph()
-	if err != nil {
-		return err
-	}
-
 	// Track which branches were rebased
 	rebasedBranches := []string{}
 
-	// Start from trunk and rebase all descendants recursively
-	if err := yas.rebaseDescendants(graph, yas.cfg.TrunkBranch, &rebasedBranches); err != nil {
-		return err
+	// Keep rebuilding and processing the work queue until no more work remains
+	// This loop is necessary because completing one rebase may cause descendant branches to need rebasing
+	for {
+		graph, err := yas.graph()
+		if err != nil {
+			return err
+		}
+
+		// Build the work queue: a list of [child, parent] pairs to rebase
+		var workQueue [][2]string
+		if err := yas.buildRebaseWorkQueue(graph, yas.cfg.TrunkBranch, &workQueue); err != nil {
+			return err
+		}
+
+		// No more work to do
+		if len(workQueue) == 0 {
+			break
+		}
+
+		// Process the work queue
+		if err := yas.processRebaseWorkQueue(startingBranch, workQueue, &rebasedBranches); err != nil {
+			return err
+		}
+	}
+
+	// Clean up any restack state file (in case it exists)
+	if err := DeleteRestackState(yas.cfg.RepoDirectory); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to delete restack state: %v\n", err)
 	}
 
 	// Return to the starting branch
@@ -399,7 +422,9 @@ func (yas *YAS) Restack() error {
 	return nil
 }
 
-func (yas *YAS) rebaseDescendants(graph *dag.DAG, branchName string, rebasedBranches *[]string) error {
+// buildRebaseWorkQueue builds a queue of [child, parent] pairs representing
+// the rebase operations that need to be performed.
+func (yas *YAS) buildRebaseWorkQueue(graph *dag.DAG, branchName string, workQueue *[][2]string) error {
 	children, err := graph.GetChildren(branchName)
 	if err != nil {
 		return err
@@ -413,44 +438,198 @@ func (yas *YAS) rebaseDescendants(graph *dag.DAG, branchName string, rebasedBran
 		}
 
 		if needsRebase {
-			// Get child metadata for branch point
-			childMetadata := yas.data.Branches.Get(childID)
-
-			// If branch point is not set (legacy), fall back to regular rebase
-			if childMetadata.BranchPoint == "" {
-				if err := yas.git.Rebase(branchName, childID); err != nil {
-					return err
-				}
-			} else {
-				// Use the new branch-point-based rebase
-				if err := yas.git.RebaseOntoWithBranchPoint(branchName, childMetadata.BranchPoint, childID); err != nil {
-					return err
-				}
-			}
-
-			// Update the branch point to the new parent commit
-			parentCommit, err := yas.git.GetCommitHash(branchName)
-			if err != nil {
-				return fmt.Errorf("failed to get parent commit after rebase: %w", err)
-			}
-
-			childMetadata.BranchPoint = parentCommit
-			yas.data.Branches.Set(childID, childMetadata)
-
-			// Save updated metadata
-			if err := yas.data.Save(); err != nil {
-				return fmt.Errorf("failed to save metadata after rebase: %w", err)
-			}
-
-			// Track that this branch was rebased
-			*rebasedBranches = append(*rebasedBranches, childID)
+			// Add to work queue
+			*workQueue = append(*workQueue, [2]string{childID, branchName})
 		}
 
-		// Recursively rebase this child's descendants
-		if err := yas.rebaseDescendants(graph, childID, rebasedBranches); err != nil {
+		// Recursively add descendants to the work queue
+		if err := yas.buildRebaseWorkQueue(graph, childID, workQueue); err != nil {
 			return err
 		}
 	}
+
+	return nil
+}
+
+// processRebaseWorkQueue processes a queue of rebase operations, saving state on error.
+func (yas *YAS) processRebaseWorkQueue(startingBranch string, workQueue [][2]string, rebasedBranches *[]string) error {
+	for i, work := range workQueue {
+		childBranch := work[0]
+		parentBranch := work[1]
+
+		// Get child metadata for branch point
+		childMetadata := yas.data.Branches.Get(childBranch)
+
+		// Perform the rebase
+		var rebaseErr error
+		if childMetadata.BranchPoint == "" {
+			rebaseErr = yas.git.Rebase(parentBranch, childBranch)
+		} else {
+			rebaseErr = yas.git.RebaseOntoWithBranchPoint(parentBranch, childMetadata.BranchPoint, childBranch)
+		}
+
+		if rebaseErr != nil {
+			// Save state for resuming later
+			state := &RestackState{
+				StartingBranch:  startingBranch,
+				CurrentBranch:   childBranch,
+				CurrentParent:   parentBranch,
+				RemainingWork:   workQueue[i+1:],
+				RebasedBranches: *rebasedBranches,
+			}
+
+			if err := SaveRestackState(yas.cfg.RepoDirectory, state); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to save restack state: %v\n", err)
+			}
+
+			return fmt.Errorf("rebase failed for %s onto %s: %w\n\nFix conflicts and run 'yas continue' to resume", childBranch, parentBranch, rebaseErr)
+		}
+
+		// Update the branch point to the new parent commit
+		parentCommit, err := yas.git.GetCommitHash(parentBranch)
+		if err != nil {
+			return fmt.Errorf("failed to get parent commit after rebase: %w", err)
+		}
+
+		childMetadata.BranchPoint = parentCommit
+		yas.data.Branches.Set(childBranch, childMetadata)
+
+		// Save updated metadata
+		if err := yas.data.Save(); err != nil {
+			return fmt.Errorf("failed to save metadata after rebase: %w", err)
+		}
+
+		// Track that this branch was rebased
+		*rebasedBranches = append(*rebasedBranches, childBranch)
+	}
+
+	return nil
+}
+
+// Continue resumes a restack operation that was interrupted by conflicts.
+func (yas *YAS) Continue() error {
+	// Check if there's a saved restack state
+	if !RestackStateExists(yas.cfg.RepoDirectory) {
+		return errors.New("no restack operation in progress (no saved state found)")
+	}
+
+	// Load the saved state
+	state, err := LoadRestackState(yas.cfg.RepoDirectory)
+	if err != nil {
+		return fmt.Errorf("failed to load restack state: %w", err)
+	}
+
+	// Check if a rebase is currently in progress
+	rebaseInProgress, err := yas.git.IsRebaseInProgress()
+	if err != nil {
+		return fmt.Errorf("failed to check if rebase is in progress: %w", err)
+	}
+
+	// If rebase is in progress, continue it until it completes
+	if rebaseInProgress {
+		fmt.Printf("Continuing rebase for %s...\n", state.CurrentBranch)
+
+		for {
+			if err := yas.git.RebaseContinue(); err != nil {
+				return fmt.Errorf("rebase continue failed: %w\n\nFix conflicts and run 'yas continue' again", err)
+			}
+
+			// Check if rebase is still in progress
+			stillInProgress, err := yas.git.IsRebaseInProgress()
+			if err != nil {
+				return fmt.Errorf("failed to check if rebase is in progress: %w", err)
+			}
+
+			if !stillInProgress {
+				break
+			}
+
+			fmt.Printf("Continuing rebase...\n")
+		}
+
+		fmt.Printf("Rebase completed for %s\n", state.CurrentBranch)
+	} else {
+		fmt.Printf("Rebase already completed for %s\n", state.CurrentBranch)
+	}
+
+	// Update the branch point for the just-completed rebase
+	childMetadata := yas.data.Branches.Get(state.CurrentBranch)
+
+	parentCommit, err := yas.git.GetCommitHash(state.CurrentParent)
+	if err != nil {
+		return fmt.Errorf("failed to get parent commit after rebase: %w", err)
+	}
+
+	childMetadata.BranchPoint = parentCommit
+	yas.data.Branches.Set(state.CurrentBranch, childMetadata)
+
+	// Save updated metadata
+	if err := yas.data.Save(); err != nil {
+		return fmt.Errorf("failed to save metadata after rebase: %w", err)
+	}
+
+	// Track that this branch was rebased
+	state.RebasedBranches = append(state.RebasedBranches, state.CurrentBranch)
+	rebasedBranches := state.RebasedBranches
+
+	// Keep rebuilding and processing until no more work remains
+	// This loop is necessary because completing one rebase may cause descendant branches to need rebasing
+	for {
+		graph, err := yas.graph()
+		if err != nil {
+			return fmt.Errorf("failed to build graph: %w", err)
+		}
+
+		var newWorkQueue [][2]string
+		if err := yas.buildRebaseWorkQueue(graph, yas.cfg.TrunkBranch, &newWorkQueue); err != nil {
+			return fmt.Errorf("failed to build work queue: %w", err)
+		}
+
+		// No more work to do
+		if len(newWorkQueue) == 0 {
+			break
+		}
+
+		fmt.Printf("\nContinuing restack with %d remaining branch(es)...\n", len(newWorkQueue))
+
+		if err := yas.processRebaseWorkQueue(state.StartingBranch, newWorkQueue, &rebasedBranches); err != nil {
+			return err
+		}
+	}
+
+	// Clean up the restack state file
+	if err := DeleteRestackState(yas.cfg.RepoDirectory); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to delete restack state: %v\n", err)
+	}
+
+	// Return to the starting branch
+	if err := yas.git.QuietCheckout(state.StartingBranch); err != nil {
+		return fmt.Errorf("restack succeeded but failed to return to branch %s: %w", state.StartingBranch, err)
+	}
+
+	// Check if any rebased branches have PRs
+	if len(rebasedBranches) > 0 {
+		branchesWithPRs := []string{}
+
+		for _, branchName := range rebasedBranches {
+			metadata := yas.data.Branches.Get(branchName)
+			if metadata.GitHubPullRequest.ID != "" {
+				branchesWithPRs = append(branchesWithPRs, branchName)
+			}
+		}
+
+		if len(branchesWithPRs) > 0 {
+			fmt.Printf("\nReminder: The following branches have PRs and were restacked:\n")
+
+			for _, branchName := range branchesWithPRs {
+				fmt.Printf("  - %s\n", branchName)
+			}
+
+			fmt.Printf("\nRun 'yas submit --stack' to update the PRs with the rebased commits.\n")
+		}
+	}
+
+	fmt.Printf("\nRestack completed successfully!\n")
 
 	return nil
 }
