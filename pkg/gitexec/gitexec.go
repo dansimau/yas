@@ -290,3 +290,42 @@ func (r *Repo) Commit() error {
 		WithWorkingDir(r.path).
 		Run()
 }
+
+// IsRebaseInProgress checks if a rebase operation is currently in progress.
+func (r *Repo) IsRebaseInProgress() (bool, error) {
+	// Check for rebase-merge directory (interactive rebase)
+	if err := r.run("test", "-d", r.path+"/.git/rebase-merge"); err == nil {
+		return true, nil
+	}
+
+	// Check for rebase-apply directory (non-interactive rebase)
+	if err := r.run("test", "-d", r.path+"/.git/rebase-apply"); err == nil {
+		return true, nil
+	}
+
+	return false, nil
+}
+
+// RebaseContinue continues a rebase operation that was paused due to conflicts.
+func (r *Repo) RebaseContinue() error {
+	return xexec.Command("git", "-c", "core.hooksPath=/dev/null", "-c", "core.editor=true", "rebase", "--continue").
+		WithEnvVars(CleanedGitEnv()).
+		WithWorkingDir(r.path).
+		Run()
+}
+
+// RebaseAbort aborts an in-progress rebase operation.
+func (r *Repo) RebaseAbort() error {
+	return xexec.Command("git", "rebase", "--abort").
+		WithEnvVars(CleanedGitEnv()).
+		WithWorkingDir(r.path).
+		Run()
+}
+
+// HardReset performs a hard reset to the specified commit.
+func (r *Repo) HardReset(commit string) error {
+	return xexec.Command("git", "reset", "--hard", commit).
+		WithEnvVars(CleanedGitEnv()).
+		WithWorkingDir(r.path).
+		Run()
+}

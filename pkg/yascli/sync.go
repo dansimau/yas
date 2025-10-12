@@ -53,6 +53,11 @@ func (c *syncCmd) Execute(args []string) error {
 
 	c.yasInstance = yasInstance
 
+	// Check if a restack is in progress
+	if yas.RestackStateExists(cmd.RepoDirectory) {
+		return NewError("a restack operation is already in progress\n\nRun 'yas continue' to resume or 'yas abort' to cancel")
+	}
+
 	// TODO: Remove - this is for debugging
 	if len(args) > 0 {
 		return yasInstance.RefreshRemoteStatus(args...)
