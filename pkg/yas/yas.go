@@ -350,9 +350,23 @@ func (yas *YAS) currentStackGraph(fullGraph *dag.DAG, currentBranch string) (*da
 	return stackGraph, nil
 }
 
+// checkRestackInProgress returns an error if a restack operation is in progress.
+func (yas *YAS) checkRestackInProgress() error {
+	if RestackStateExists(yas.cfg.RepoDirectory) {
+		return errors.New("a restack operation is already in progress\n\nRun 'yas continue' to resume or 'yas abort' to cancel")
+	}
+
+	return nil
+}
+
 // Restack rebases all branches starting from trunk, including all descendants
 // and forks.
 func (yas *YAS) Restack() error {
+	// Check if a restack is already in progress
+	if err := yas.checkRestackInProgress(); err != nil {
+		return err
+	}
+
 	// Remember the starting branch
 	startingBranch, err := yas.git.GetCurrentBranchName()
 	if err != nil {
@@ -472,7 +486,7 @@ func (yas *YAS) processRebaseWorkQueue(startingBranch string, workQueue [][2]str
 			// Get the original commit hash before the rebase for potential abort
 			originalCommit, err := yas.git.GetCommitHash(childBranch)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to get original commit: %v\n", err)
+				return fmt.Errorf("failed to get original commit for %s: %w", childBranch, err)
 			}
 
 			// Save state for resuming later
@@ -486,7 +500,7 @@ func (yas *YAS) processRebaseWorkQueue(startingBranch string, workQueue [][2]str
 			}
 
 			if err := SaveRestackState(yas.cfg.RepoDirectory, state); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to save restack state: %v\n", err)
+				return fmt.Errorf("rebase failed and unable to save restack state: %w", err)
 			}
 
 			return fmt.Errorf("rebase failed for %s onto %s: %w\n\nFix conflicts and run 'yas continue' to resume", childBranch, parentBranch, rebaseErr)
@@ -1067,6 +1081,12 @@ func (yas *YAS) SetParent(branchName, parentBranchName, branchPoint string) erro
 }
 
 func (yas *YAS) Submit() error {
+	// Check if a restack is in progress (do this before getting branch name
+	// which would fail in detached HEAD state during rebase)
+	if err := yas.checkRestackInProgress(); err != nil {
+		return err
+	}
+
 	currentBranch, err := yas.git.GetCurrentBranchName()
 	if err != nil {
 		return err
@@ -1090,6 +1110,12 @@ func (yas *YAS) Submit() error {
 }
 
 func (yas *YAS) SubmitStack() error {
+	// Check if a restack is in progress (do this before getting branch name
+	// which would fail in detached HEAD state during rebase)
+	if err := yas.checkRestackInProgress(); err != nil {
+		return err
+	}
+
 	currentBranch, err := yas.git.GetCurrentBranchName()
 	if err != nil {
 		return err
