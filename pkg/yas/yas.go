@@ -549,6 +549,23 @@ func (yas *YAS) Continue() error {
 
 		fmt.Printf("Rebase completed for %s\n", state.CurrentBranch)
 	} else {
+		// No rebase in progress - check if it was aborted or already completed
+		// Verify the rebase actually happened by checking if the branch's merge-base with parent equals parent's current commit
+		mergeBase, err := yas.git.GetMergeBase(state.CurrentBranch, state.CurrentParent)
+		if err != nil {
+			return fmt.Errorf("failed to get merge-base: %w", err)
+		}
+
+		parentCommit, err := yas.git.GetCommitHash(state.CurrentParent)
+		if err != nil {
+			return fmt.Errorf("failed to get parent commit: %w", err)
+		}
+
+		if mergeBase != parentCommit {
+			// The rebase was likely aborted - the branch still diverges from parent
+			return fmt.Errorf("rebase appears to have been aborted for %s (branch still diverges from parent)\n\nRun 'yas restack' to start over or manually rebase the branch", state.CurrentBranch)
+		}
+
 		fmt.Printf("Rebase already completed for %s\n", state.CurrentBranch)
 	}
 

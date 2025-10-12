@@ -175,6 +175,64 @@ func TestContinue_UserAlreadyCompletedRebase(t *testing.T) {
 	})
 }
 
+func TestContinue_ErrorsWhenRebaseAborted(t *testing.T) {
+	testutil.WithTempWorkingDir(t, func() {
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+
+			# main
+			echo "line1" > file.txt
+			git add file.txt
+			git commit -m "main-0"
+
+			# topic-a: modify file
+			git checkout -b topic-a
+			echo "line2-from-a" >> file.txt
+			git add file.txt
+			git commit -m "topic-a-0"
+
+			# update main: modify the same file differently
+			git checkout main
+			echo "line2-from-main" >> file.txt
+			git add file.txt
+			git commit -m "main-1"
+
+			# on branch topic-a
+			git checkout topic-a
+		`)
+
+		// Initialize yas config
+		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
+		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
+
+		// Run restack - it should fail due to conflict
+		exitCode := yascli.Run("restack")
+		assert.Equal(t, exitCode, 1, "restack should fail due to conflict")
+
+		// Verify that restack state was saved
+		assert.Assert(t, yas.RestackStateExists("."), "restack state should be saved")
+
+		// User aborts the rebase
+		testutil.ExecOrFail(t, `git rebase --abort`)
+
+		// Run continue - should detect that rebase was aborted and error
+		exitCode = yascli.Run("continue")
+		assert.Equal(t, exitCode, 1, "continue should fail when rebase was aborted")
+
+		// Verify that restack state still exists (wasn't cleaned up on error)
+		assert.Assert(t, yas.RestackStateExists("."), "restack state should still exist after abort detection")
+
+		// Verify we're still on topic-a
+		equalLines(t, mustExecOutput("git", "branch", "--show-current"), "topic-a")
+
+		// Verify topic-a was NOT rebased (still has old commits)
+		output := mustExecOutput("git", "log", "--pretty=%s")
+		assert.Assert(t, strings.Contains(output, "topic-a-0"), "topic-a commit should exist")
+		assert.Assert(t, strings.Contains(output, "main-0"), "main-0 commit should exist")
+		assert.Assert(t, !strings.Contains(output, "main-1"), "main-1 should NOT be in history (rebase was aborted)")
+	})
+}
+
 func TestContinue_MultipleConflicts(t *testing.T) {
 	testutil.WithTempWorkingDir(t, func() {
 		testutil.ExecOrFail(t, `
