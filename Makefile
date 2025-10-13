@@ -6,4 +6,5 @@ lint:
 .PHONY: test
 test:
 	go test -json ./... -coverprofile=./cover.out -covermode=atomic -coverpkg=./... | tee test-results.json | python3 bin/colourise-go-test-output.py
+	go tool cover -html=cover.out -o=cover.html
 	go run github.com/vladopajic/go-test-coverage/v2@latest --config=./.testcoverage.yaml
