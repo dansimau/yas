@@ -12,11 +12,13 @@ import (
 type initCmd struct{}
 
 func (c *initCmd) Execute(args []string) error {
+	isNewConfig := !yas.IsConfigured(cmd.RepoDirectory)
+
 	cfg := &yas.Config{
 		RepoDirectory: cmd.RepoDirectory,
 	}
 
-	if yas.IsConfigured(cmd.RepoDirectory) {
+	if !isNewConfig {
 		_cfg, err := yas.ReadConfig(cmd.RepoDirectory)
 		if err != nil {
 			return NewError(err.Error())
@@ -31,6 +33,11 @@ func (c *initCmd) Execute(args []string) error {
 		if detectedBranch, err := repo.DetectMainBranch(); err == nil && detectedBranch != "" {
 			cfg.TrunkBranch = detectedBranch
 		}
+	}
+
+	// Set default for AutoPrefixBranch for new repos (maintain backward compatibility)
+	if isNewConfig {
+		cfg.AutoPrefixBranch = true
 	}
 
 	cfg.TrunkBranch = cliutil.Prompt(cliutil.PromptOptions{
