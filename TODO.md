@@ -10,4 +10,4 @@
 * [ ] Parallel operations where possible:
     -> Annotation
     -> Submit? Can we do a git push in parallel?
-* Add commit command that summarises the PR using AI
+* [ ] Add commit command that summarises the PR using AI

@@ -1,3 +1,4 @@
+// Package test contains all integration tests for the yas tool.
 package test
 
 import (

@@ -1,3 +1,4 @@
+// Package yascli provides the command-line interface for the yas tool.
 package yascli
 
 import (

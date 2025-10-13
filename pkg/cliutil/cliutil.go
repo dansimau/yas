@@ -1,3 +1,4 @@
+// Package cliutil provides utilities for the command-line interface.
 package cliutil
 
 import (
