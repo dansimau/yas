@@ -58,7 +58,6 @@ func (c *syncCmd) Execute(args []string) error {
 		return NewError("a restack operation is already in progress\n\nRun 'yas continue' to resume or 'yas abort' to cancel")
 	}
 
-	// TODO: Remove - this is for debugging
 	if len(args) > 0 {
 		return yasInstance.RefreshRemoteStatus(args...)
 	}
