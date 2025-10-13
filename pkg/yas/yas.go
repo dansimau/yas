@@ -184,17 +184,7 @@ func (yas *YAS) DeleteMergedBranch(name string) error {
 			// This replays only the child's commits (after its branch point) onto the grandparent
 			fmt.Printf("  Rebasing %s onto %s...\n", childID, parentBranch)
 
-			// If branch point is not set (legacy), we need to calculate it
-			var branchPoint string
-			if childMetadata.BranchPoint == "" {
-				// For legacy branches, use the merged branch name as the old base
-				// This is not as robust but provides backwards compatibility
-				branchPoint = name
-			} else {
-				branchPoint = childMetadata.BranchPoint
-			}
-
-			if err := yas.git.RebaseOntoWithBranchPoint(parentBranch, branchPoint, childID); err != nil {
+			if err := yas.git.RebaseOntoWithBranchPoint(parentBranch, childMetadata.BranchPoint, childID); err != nil {
 				return fmt.Errorf("failed to rebase %s onto %s: %w", childID, parentBranch, err)
 			}
 
@@ -497,13 +487,11 @@ func (yas *YAS) processRebaseWorkQueue(startingBranch string, workQueue [][2]str
 		childMetadata := yas.data.Branches.Get(childBranch)
 
 		// Perform the rebase
-		var rebaseErr error
 		if childMetadata.BranchPoint == "" {
-			rebaseErr = yas.git.Rebase(parentBranch, childBranch)
-		} else {
-			rebaseErr = yas.git.RebaseOntoWithBranchPoint(parentBranch, childMetadata.BranchPoint, childBranch)
+			return fmt.Errorf("branch point is not set for %s", childBranch)
 		}
 
+		rebaseErr := yas.git.RebaseOntoWithBranchPoint(parentBranch, childMetadata.BranchPoint, childBranch)
 		if rebaseErr != nil {
 			// Check if a rebase is actually in progress
 			rebaseInProgress, err := yas.git.IsRebaseInProgress()
@@ -899,16 +887,6 @@ func (yas *YAS) needsRebase(branchName, parentBranch string) (bool, error) {
 	parentCommit, err := yas.git.GetCommitHash(parentBranch)
 	if err != nil {
 		return false, err
-	}
-
-	// If branch point is not set (legacy branch), fall back to merge-base
-	if metadata.BranchPoint == "" {
-		mergeBase, err := yas.git.GetMergeBase(branchName, parentBranch)
-		if err != nil {
-			return false, err
-		}
-
-		return mergeBase != parentCommit, nil
 	}
 
 	// If branch point differs from parent's current commit, rebase is needed
