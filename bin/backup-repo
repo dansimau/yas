@@ -1,0 +1,16 @@
+#!/bin/bash
+set -e
+
+# Create backups directory if it doesn't exist
+mkdir -p backups
+
+# Get the current timestamp
+timestamp=$(date +"%Y%m%d_%H%M%S")
+
+# Set the backup file name
+archive="backups/repo_backup_$timestamp.tar.gz"
+
+# Create the tar.gz archive of the repository root, excluding the backups directory itself and the archive file
+tar --exclude="./backups" --exclude="$archive" -czf "$archive" .
+
+echo "Backup completed: $archive"
