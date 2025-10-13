@@ -1804,6 +1804,16 @@ func (yas *YAS) Merge(force bool) error {
 	// Parse title and body
 	finalTitle, finalBody := yas.parseMergeMessage(string(finalMsg))
 
+	// Check if merge message is empty
+	if strings.TrimSpace(finalTitle) == "" {
+		// Clean up merge message file
+		if err := os.Remove(mergeFilePath); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to delete merge message file: %v\n", err)
+		}
+
+		return errors.New("merge aborted: empty commit message")
+	}
+
 	// Execute gh pr merge
 	if err := xexec.Command("gh", "pr", "merge", prNumber, "--squash", "--delete-branch", "--auto", "--subject", finalTitle, "--body", finalBody).Run(); err != nil {
 		return fmt.Errorf("failed to merge PR: %w", err)

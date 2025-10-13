@@ -440,3 +440,72 @@ echo "# User edited merge message" >> "$1"
 		assert.Assert(t, os.IsNotExist(err), "merge message file should be cleaned up")
 	})
 }
+
+func TestMerge_AbortsWhenMergeMessageEmpty(t *testing.T) {
+	_, cleanup := setupMockCommandsWithPR(t, mockPROptions{
+		ID:                "PR_kwDOTest123",
+		State:             "OPEN",
+		URL:               "https://github.com/test/test/pull/42",
+		BaseRefName:       "main",
+		ReviewDecision:    "APPROVED",
+		StatusCheckRollup: "[]",
+	})
+	defer cleanup()
+
+	testutil.WithTempWorkingDir(t, func() {
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+			git remote add origin https://github.com/test/test.git
+
+			# main
+			touch main
+			git add main
+			git commit -m "main-0"
+
+			# topic-a
+			git checkout -b topic-a
+			touch a
+			git add a
+			git commit -m "topic-a-0"
+		`)
+
+		// Initialize yas config
+		cfg := yas.Config{
+			RepoDirectory: ".",
+			TrunkBranch:   "main",
+		}
+		_, err := yas.WriteConfig(cfg)
+		assert.NilError(t, err)
+
+		// Create YAS instance and track branch
+		y, err := yas.NewFromRepository(".")
+		assert.NilError(t, err)
+		err = y.SetParent("topic-a", "main", "")
+		assert.NilError(t, err)
+
+		// Submit first to simulate that PR exists and is up to date
+		err = y.Submit()
+		assert.NilError(t, err)
+
+		// Set EDITOR to a script that clears the file (simulating user deleting content)
+		editorScript := filepath.Join(t.TempDir(), "editor.sh")
+		err = os.WriteFile(editorScript, []byte(`#!/bin/bash
+# Clear the file content
+echo "" > "$1"
+`), 0o755)
+		assert.NilError(t, err)
+		t.Setenv("EDITOR", editorScript)
+
+		// Try to merge - should fail because merge message is empty
+		testutil.ExecOrFail(t, "git checkout topic-a")
+
+		err = y.Merge(false)
+		assert.ErrorContains(t, err, "merge aborted")
+		assert.ErrorContains(t, err, "empty commit message")
+
+		// Verify merge message file was cleaned up even after abort
+		mergeFilePath := filepath.Join(".", ".git", "yas-merge-msg")
+		_, err = os.Stat(mergeFilePath)
+		assert.Assert(t, os.IsNotExist(err), "merge message file should be cleaned up after abort")
+	})
+}
