@@ -7,7 +7,7 @@ import (
 type moveCmd struct {
 	Arguments struct {
 		TargetBranch string `description:"Branch to move (defaults to current branch)"`
-	} `positional-args:"true" required:"false"`
+	} `positional-args:"true"`
 
 	Onto string `description:"Target branch to rebase onto" long:"onto" required:"true"`
 }
