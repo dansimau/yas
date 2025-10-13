@@ -1816,7 +1816,8 @@ func (yas *YAS) Merge(force bool) error {
 	}
 
 	// Execute gh pr merge
-	if err := xexec.Command("gh", "pr", "merge", prNumber, "--squash", "--delete-branch", "--auto", "--subject", finalTitle, "--body", finalBody).Run(); err != nil {
+	//	if err := xexec.Command("gh", "pr", "merge", prNumber, "--squash", "--delete-branch", "--auto", "--subject", finalTitle, "--body", finalBody).Run(); err != nil {
+	if err := xexec.Command("gh", "pr", "merge", prNumber, "--squash", "--auto", "--subject", finalTitle, "--body", finalBody).Run(); err != nil {
 		return fmt.Errorf("failed to merge PR: %w", err)
 	}
 
