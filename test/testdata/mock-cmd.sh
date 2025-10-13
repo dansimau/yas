@@ -20,8 +20,52 @@ case "$CMD_NAME" in
         # Handle git commands
         case "$1" in
             push)
+                # Track which branch was pushed
+                branch_name=""
+                for arg in "$@"; do
+                    if [[ "$arg" != -* && "$arg" != "origin" && "$arg" != "push" ]]; then
+                        branch_name="$arg"
+                        break
+                    fi
+                done
+                # Mark this branch as pushed and save its hash
+                if [ -n "$branch_name" ]; then
+                    echo "pushed" > "/tmp/yas-test-pushed-$branch_name"
+                    # Save the current hash of the branch being pushed
+                    if [ -n "$YAS_TEST_REAL_GIT" ]; then
+                        "$YAS_TEST_REAL_GIT" rev-parse "$branch_name" > "/tmp/yas-test-pushed-hash-$branch_name" 2>/dev/null
+                    else
+                        /usr/bin/git rev-parse "$branch_name" > "/tmp/yas-test-pushed-hash-$branch_name" 2>/dev/null
+                    fi
+                fi
                 # Simulate successful push
                 exit 0
+                ;;
+            rev-parse)
+                # Check if they're asking for origin/branch
+                if [[ "$2" == origin/* ]]; then
+                    branch_name="${2#origin/}"
+                    # Check if this branch was pushed
+                    if [ -f "/tmp/yas-test-pushed-$branch_name" ]; then
+                        # Return the saved hash from when branch was pushed
+                        if [ -f "/tmp/yas-test-pushed-hash-$branch_name" ]; then
+                            cat "/tmp/yas-test-pushed-hash-$branch_name"
+                            exit 0
+                        fi
+                        # Fallback to local branch hash if no saved hash
+                        if [ -n "$YAS_TEST_REAL_GIT" ]; then
+                            "$YAS_TEST_REAL_GIT" rev-parse "$branch_name" 2>/dev/null && exit 0
+                        else
+                            /usr/bin/git rev-parse "$branch_name" 2>/dev/null && exit 0
+                        fi
+                    fi
+                fi
+                # For other rev-parse commands, call real git
+                if [ -n "$YAS_TEST_REAL_GIT" ]; then
+                    exec "$YAS_TEST_REAL_GIT" "$@"
+                else
+                    exec /usr/bin/git "$@"
+                fi
                 ;;
             --version)
                 echo "git version 2.40.0"
@@ -105,8 +149,47 @@ case "$CMD_NAME" in
             fi
             exit 0
         elif [[ "$1" == "pr" && "$2" == "view" ]]; then
-            # Return mock PR body
-            echo "This is the original PR description."
+            # Check if they want JSON output with title and body
+            has_json=false
+            for arg in "$@"; do
+                if [[ "$arg" == "--json" ]]; then
+                    has_json=true
+                    break
+                fi
+            done
+
+            if $has_json; then
+                # Extract the query to determine what fields to return
+                query=""
+                for ((i=1; i<=$#; i++)); do
+                    if [[ "${!i}" == "-q" ]]; then
+                        ((i++))
+                        query="${!i}"
+                        break
+                    fi
+                done
+
+                # Mock PR title and body
+                title="Mock PR Title"
+                body="This is the original PR description."
+
+                # If the query contains the separator, return title and body separated
+                if [[ "$query" == *"---SEPARATOR---"* ]]; then
+                    echo "$title"
+                    echo "---SEPARATOR---"
+                    echo "$body"
+                else
+                    # Otherwise just return the body (for backwards compatibility)
+                    echo "$body"
+                fi
+            else
+                # Return mock PR body (plain text)
+                echo "This is the original PR description."
+            fi
+            exit 0
+        elif [[ "$1" == "pr" && "$2" == "merge" ]]; then
+            # Simulate successful merge
+            echo "✓ Merged pull request"
             exit 0
         elif [[ "$1" == "pr" && "$2" == "edit" ]]; then
             # Extract PR number and base argument
