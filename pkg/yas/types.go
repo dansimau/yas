@@ -34,7 +34,7 @@ type PullRequestMetadata struct {
 // GetOverallCIStatus computes the overall CI status from status checks.
 func (pr *PullRequestMetadata) GetOverallCIStatus() string {
 	if len(pr.StatusCheckRollup) == 0 {
-		return "" // No checks configured
+		return "SUCCESS" // No checks configured means all checks pass
 	}
 
 	hasFailure := false

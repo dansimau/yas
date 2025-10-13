@@ -69,6 +69,7 @@ func Run(args ...string) (exitCode int) {
 	mustAddCommand(parser.AddCommand("continue", "Continue a restack operation after fixing conflicts", "", &continueCmd{}))
 	mustAddCommand(parser.AddCommand("init", "Set up initial configuration", "", &initCmd{}))
 	mustAddCommand(parser.AddCommand("list", "List stacks", "", &listCmd{})).Aliases = []string{"ls"}
+	mustAddCommand(parser.AddCommand("merge", "Merge PR for current branch", "", &mergeCmd{}))
 	mustAddCommand(parser.AddCommand("submit", "Push to remote and open or update PR(s)", "", &submitCmd{}))
 	mustAddCommand(parser.AddCommand("restack", "Rebase all branches in the current stack", "", &restackCmd{}))
 	mustAddCommand(parser.AddCommand("sync", "Pull latest PR statuses and sync with local branches", "", &syncCmd{}))
