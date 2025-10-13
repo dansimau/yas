@@ -1110,6 +1110,71 @@ func (yas *YAS) Submit() error {
 	return nil
 }
 
+func (yas *YAS) SubmitOutdated() error {
+	// Check if a restack is in progress (do this before getting branch name
+	// which would fail in detached HEAD state during rebase)
+	if err := yas.checkRestackInProgress(); err != nil {
+		return err
+	}
+
+	// Get all branches with PRs (optimization: skip branches without PRs)
+	branchesWithPRs := yas.data.Branches.ToSlice().WithPRs()
+
+	if len(branchesWithPRs) == 0 {
+		fmt.Println("No branches with PRs found")
+		return nil
+	}
+
+	// Find branches that need submitting
+	var branchesToSubmit []string
+	for _, branch := range branchesWithPRs {
+		needsSubmit, err := yas.needsSubmit(branch.Name)
+		if err != nil {
+			return fmt.Errorf("failed to check if %s needs submit: %w", branch.Name, err)
+		}
+
+		if needsSubmit {
+			branchesToSubmit = append(branchesToSubmit, branch.Name)
+		}
+	}
+
+	if len(branchesToSubmit) == 0 {
+		fmt.Println("No branches need submitting")
+		return nil
+	}
+
+	fmt.Printf("Found %d branch(es) that need submitting:\n", len(branchesToSubmit))
+	for _, branchName := range branchesToSubmit {
+		fmt.Printf("  - %s\n", branchName)
+	}
+
+	// Submit each branch that needs updating
+	var submittedBranches []string
+	for _, branchName := range branchesToSubmit {
+		fmt.Printf("\n=== Submitting %s ===\n", branchName)
+
+		if err := yas.submitBranch(branchName); err != nil {
+			return fmt.Errorf("failed to submit %s: %w", branchName, err)
+		}
+
+		submittedBranches = append(submittedBranches, branchName)
+	}
+
+	// Annotate all submitted branches with stack information
+	fmt.Printf("\n=== Annotating PRs ===\n")
+
+	for _, branchName := range submittedBranches {
+		if err := yas.annotateBranch(branchName); err != nil {
+			// Don't fail the submit if annotation fails
+			fmt.Printf("Warning: failed to annotate PR for %s: %v\n", branchName, err)
+		}
+	}
+
+	fmt.Printf("\nSuccessfully submitted %d outdated branch(es)\n", len(submittedBranches))
+
+	return nil
+}
+
 func (yas *YAS) SubmitStack() error {
 	// Check if a restack is in progress (do this before getting branch name
 	// which would fail in detached HEAD state during rebase)

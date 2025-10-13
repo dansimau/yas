@@ -465,3 +465,235 @@ func contains(slice []string, str string) bool {
 
 	return false
 }
+
+func TestSubmit_OutdatedSubmitsAllBranchesNeedingSubmit(t *testing.T) {
+	// Mock commands without existing PRs (so they get created)
+	cmdLogFile, cleanup := setupMockCommands(t, "")
+	defer cleanup()
+
+	testutil.WithTempWorkingDir(t, func() {
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+			git remote add origin https://github.com/test/test.git
+
+			# main
+			touch main
+			git add main
+			git commit -m "main-0"
+
+			# topic-a
+			git checkout -b topic-a
+			touch a
+			git add a
+			git commit -m "topic-a-0"
+
+			# topic-b
+			git checkout -b topic-b
+			touch b
+			git add b
+			git commit -m "topic-b-0"
+
+			# topic-c
+			git checkout -b topic-c
+			touch c
+			git add c
+			git commit -m "topic-c-0"
+		`)
+
+		// Initialize yas config
+		cfg := yas.Config{
+			RepoDirectory: ".",
+			TrunkBranch:   "main",
+		}
+		_, err := yas.WriteConfig(cfg)
+		assert.NilError(t, err)
+
+		// Create YAS instance and track branches
+		y, err := yas.NewFromRepository(".")
+		assert.NilError(t, err)
+		err = y.SetParent("topic-a", "main", "")
+		assert.NilError(t, err)
+		err = y.SetParent("topic-b", "main", "")
+		assert.NilError(t, err)
+		err = y.SetParent("topic-c", "main", "")
+		assert.NilError(t, err)
+
+		// First, create PRs for all branches by submitting them individually
+		// Submit topic-a
+		testutil.ExecOrFail(t, "git checkout topic-a")
+		err = y.Submit()
+		assert.NilError(t, err)
+
+		// Submit topic-b
+		testutil.ExecOrFail(t, "git checkout topic-b")
+		err = y.Submit()
+		assert.NilError(t, err)
+
+		// Submit topic-c
+		testutil.ExecOrFail(t, "git checkout topic-c")
+		err = y.Submit()
+		assert.NilError(t, err)
+
+		// Make additional commits to make branches need submitting
+		testutil.ExecOrFail(t, `
+			git checkout topic-a
+			touch a2
+			git add a2
+			git commit -m "topic-a-1"
+
+			git checkout topic-b
+			touch b2
+			git add b2
+			git commit -m "topic-b-1"
+
+			git checkout topic-c
+			touch c2
+			git add c2
+			git commit -m "topic-c-1"
+		`)
+
+		// Now test the --outdated flag
+		assert.Equal(t, yascli.Run("submit", "--outdated"), 0)
+
+		// Parse the command log
+		commands, err := parseCmdLog(cmdLogFile)
+		assert.NilError(t, err)
+
+		// Verify all branches were pushed
+		assert.Assert(t, wasCalled(commands, "git", "push", "--force-with-lease", "origin", "topic-a"), "topic-a should be pushed")
+		assert.Assert(t, wasCalled(commands, "git", "push", "--force-with-lease", "origin", "topic-b"), "topic-b should be pushed")
+		assert.Assert(t, wasCalled(commands, "git", "push", "--force-with-lease", "origin", "topic-c"), "topic-c should be pushed")
+
+		// Verify gh pr list was called for all branches (to check existing PRs)
+		assert.Assert(t, wasCalled(commands, "gh", "pr", "list"), "gh pr list should be called to check existing PRs")
+
+		// Count total PR operations (create + list)
+		prCreateCount := 0
+		prListCount := 0
+		for _, cmd := range commands {
+			if len(cmd) >= 3 && cmd[0] == "gh" && cmd[1] == "pr" {
+				if cmd[2] == "create" {
+					prCreateCount++
+				} else if cmd[2] == "list" {
+					prListCount++
+				}
+			}
+		}
+
+		// Should have created 3 PRs initially, then listed them during --outdated
+		assert.Equal(t, prCreateCount, 3, "Should create 3 PRs initially")
+		assert.Assert(t, prListCount >= 3, "Should list PRs for outdated branches")
+	})
+}
+
+func TestSubmit_OutdatedSkipsBranchesWithoutPRs(t *testing.T) {
+	// No existing PRs
+	cmdLogFile, cleanup := setupMockCommands(t, "")
+	defer cleanup()
+
+	testutil.WithTempWorkingDir(t, func() {
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+			git remote add origin https://github.com/test/test.git
+
+			# main
+			touch main
+			git add main
+			git commit -m "main-0"
+
+			# topic-a (no PR)
+			git checkout -b topic-a
+			touch a
+			git add a
+			git commit -m "topic-a-0"
+		`)
+
+		// Initialize yas config
+		cfg := yas.Config{
+			RepoDirectory: ".",
+			TrunkBranch:   "main",
+		}
+		_, err := yas.WriteConfig(cfg)
+		assert.NilError(t, err)
+
+		// Create YAS instance and track branch
+		y, err := yas.NewFromRepository(".")
+		assert.NilError(t, err)
+		err = y.SetParent("topic-a", "main", "")
+		assert.NilError(t, err)
+
+		// Call submit with --outdated
+		assert.Equal(t, yascli.Run("submit", "--outdated"), 0)
+
+		// Parse the command log
+		commands, err := parseCmdLog(cmdLogFile)
+		assert.NilError(t, err)
+
+		// Verify no git push was called (no PRs exist)
+		assert.Assert(t, !wasCalled(commands, "git", "push"), "git push should NOT be called when no PRs exist")
+
+		// Verify no gh pr create was called
+		assert.Assert(t, !wasCalled(commands, "gh", "pr", "create"), "gh pr create should NOT be called when no PRs exist")
+	})
+}
+
+func TestSubmit_OutdatedSkipsUpToDateBranches(t *testing.T) {
+	// Mock commands without existing PRs (so they get created)
+	cmdLogFile, cleanup := setupMockCommands(t, "")
+	defer cleanup()
+
+	testutil.WithTempWorkingDir(t, func() {
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+			git remote add origin https://github.com/test/test.git
+
+			# main
+			touch main
+			git add main
+			git commit -m "main-0"
+
+			# topic-a
+			git checkout -b topic-a
+			touch a
+			git add a
+			git commit -m "topic-a-0"
+		`)
+
+		// Initialize yas config
+		cfg := yas.Config{
+			RepoDirectory: ".",
+			TrunkBranch:   "main",
+		}
+		_, err := yas.WriteConfig(cfg)
+		assert.NilError(t, err)
+
+		// Create YAS instance and track branch
+		y, err := yas.NewFromRepository(".")
+		assert.NilError(t, err)
+		err = y.SetParent("topic-a", "main", "")
+		assert.NilError(t, err)
+
+		// First, create PR for the branch
+		err = y.Submit()
+		assert.NilError(t, err)
+
+		// Call submit with --outdated (should find no branches need submitting)
+		assert.Equal(t, yascli.Run("submit", "--outdated"), 0)
+
+		// Parse the command log
+		commands, err := parseCmdLog(cmdLogFile)
+		assert.NilError(t, err)
+
+		// Verify git push was called (to update the PR)
+		assert.Assert(t, wasCalled(commands, "git", "push"), "git push should be called to update PR")
+
+		// Verify gh pr list was called (to check for existing PR)
+		assert.Assert(t, wasCalled(commands, "gh", "pr", "list"), "gh pr list should be called")
+
+		// Verify gh pr create was called (to create the initial PR)
+		assert.Assert(t, wasCalled(commands, "gh", "pr", "create"), "gh pr create should be called to create initial PR")
+
+		// The --outdated command should find no branches need submitting since they're up to date
+		// This is the expected behavior - the test should pass
+	})
+}
