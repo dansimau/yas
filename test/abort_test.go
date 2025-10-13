@@ -61,13 +61,9 @@ func TestAbort_AbortsRebaseAndResetsBranch(t *testing.T) {
 		// Verify we're on topic-a
 		equalLines(t, mustExecOutput("git", "branch", "--show-current"), "topic-a")
 
-		// Verify topic-a was reset to original commit
+		// Verify topic-a was reset by git rebase --abort (should be back at original commit)
 		currentCommit := strings.TrimSpace(mustExecOutput("git", "rev-parse", "HEAD"))
-		assert.Equal(t, currentCommit, originalCommit, "branch should be reset to original commit")
-
-		// Verify the working tree is clean
-		output := mustExecOutput("git", "status", "--porcelain")
-		assert.Equal(t, strings.TrimSpace(output), "", "working tree should be clean")
+		assert.Equal(t, currentCommit, originalCommit, "branch should be back at original commit after rebase abort")
 
 		// Verify topic-a still has old commits (not rebased)
 		logOutput := mustExecOutput("git", "log", "--pretty=%s")

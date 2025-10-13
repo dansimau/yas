@@ -132,8 +132,6 @@ type RestackState struct {
 	CurrentBranch string `json:"current_branch"`
 	// CurrentParent is the parent branch that CurrentBranch is being rebased onto
 	CurrentParent string `json:"current_parent"`
-	// OriginalCommit is the commit hash of CurrentBranch before the rebase started
-	OriginalCommit string `json:"original_commit"`
 	// RemainingWork contains the branches still to be processed
 	// Each entry is [childBranch, parentBranch]
 	RemainingWork [][2]string `json:"remaining_work"`

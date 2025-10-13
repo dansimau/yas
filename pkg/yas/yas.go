@@ -484,18 +484,11 @@ func (yas *YAS) processRebaseWorkQueue(startingBranch string, workQueue [][2]str
 		}
 
 		if rebaseErr != nil {
-			// Get the original commit hash before the rebase for potential abort
-			originalCommit, err := yas.git.GetCommitHash(childBranch)
-			if err != nil {
-				return fmt.Errorf("failed to get original commit for %s: %w", childBranch, err)
-			}
-
 			// Save state for resuming later
 			state := &RestackState{
 				StartingBranch:  startingBranch,
 				CurrentBranch:   childBranch,
 				CurrentParent:   parentBranch,
-				OriginalCommit:  originalCommit,
 				RemainingWork:   workQueue[i+1:],
 				RebasedBranches: *rebasedBranches,
 			}
@@ -702,17 +695,6 @@ func (yas *YAS) Abort() error {
 		if err := yas.git.RebaseAbort(); err != nil {
 			return fmt.Errorf("failed to abort rebase: %w", err)
 		}
-	}
-
-	// Hard reset the current branch to its original commit if we have it
-	if state.OriginalCommit != "" {
-		fmt.Printf("Resetting %s to original state (%s)...\n", state.CurrentBranch, state.OriginalCommit[:8])
-
-		if err := yas.git.HardReset(state.OriginalCommit); err != nil {
-			return fmt.Errorf("failed to reset branch to original state: %w", err)
-		}
-	} else {
-		fmt.Printf("Warning: original commit not found in state, branch may not be fully restored\n")
 	}
 
 	// Delete the restack state
