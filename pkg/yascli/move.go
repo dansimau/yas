@@ -5,6 +5,10 @@ import (
 )
 
 type moveCmd struct {
+	Arguments struct {
+		TargetBranch string `description:"Branch to move (defaults to current branch)"`
+	} `positional-args:"true" required:"false"`
+
 	Onto string `description:"Target branch to rebase onto" long:"onto" required:"true"`
 }
 
@@ -14,5 +18,5 @@ func (c *moveCmd) Execute(args []string) error {
 		return NewError(err.Error())
 	}
 
-	return yasInstance.Move(c.Onto)
+	return yasInstance.MoveBranch(c.Arguments.TargetBranch, c.Onto)
 }

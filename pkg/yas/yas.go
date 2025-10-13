@@ -761,15 +761,31 @@ func (yas *YAS) Abort() error {
 
 // Move rebases the current branch and all its descendants onto a new parent branch.
 func (yas *YAS) Move(targetBranch string) error {
+	return yas.MoveBranch("", targetBranch)
+}
+
+// MoveBranch rebases the specified branch and all its descendants onto a new parent branch.
+func (yas *YAS) MoveBranch(branchName, targetBranch string) error {
 	// Check if a restack is already in progress
 	if err := yas.checkRestackInProgress(); err != nil {
 		return err
 	}
 
-	// Get the current branch
-	currentBranch, err := yas.git.GetCurrentBranchName()
-	if err != nil {
-		return err
+	// Get the branch to move (default to current branch if not specified)
+	var currentBranch string
+	var err error
+
+	if branchName == "" {
+		currentBranch, err = yas.git.GetCurrentBranchName()
+		if err != nil {
+			return err
+		}
+	} else {
+		currentBranch = branchName
+		// Switch to the specified branch
+		if err := yas.git.QuietCheckout(branchName); err != nil {
+			return fmt.Errorf("failed to checkout branch %s: %w", branchName, err)
+		}
 	}
 
 	// Can't move trunk branch
