@@ -1,3 +1,4 @@
+// Package gitexec provides utilities for executing git commands.
 package gitexec
 
 import (

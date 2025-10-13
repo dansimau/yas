@@ -250,12 +250,6 @@ func TestSync_ErrorsWhenMergedBranchHasNoParent(t *testing.T) {
 		y, err := yas.NewFromRepository(".")
 		assert.NilError(t, err)
 
-		// Manually add topic-a to tracked branches without a parent
-		branchMetadata := y.TrackedBranches()
-		topicA, _ := branchMetadata.Get("topic-a")
-		topicA.Name = "topic-a"
-		topicA.Parent = "" // No parent set
-
 		// Simulate merged PR metadata
 		err = y.RefreshRemoteStatus("topic-a")
 		assert.NilError(t, err)

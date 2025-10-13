@@ -1,3 +1,4 @@
+// Package yas provides the core business logic for the yas tool.
 package yas
 
 import (

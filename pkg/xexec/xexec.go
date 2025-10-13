@@ -1,3 +1,5 @@
+// Package xexec provides a wrapper for exec.Cmd that allows for easy
+// debugging and verbose output.
 package xexec
 
 import (
@@ -14,7 +16,7 @@ import (
 	"gopkg.in/alessio/shellescape.v1"
 )
 
-// xexec.Cmd is a wrapper for exec.Cmd.
+// Cmd is a wrapper for exec.Cmd.
 type Cmd struct {
 	*exec.Cmd
 
@@ -49,7 +51,7 @@ func Command(args ...string) *Cmd {
 	})
 }
 
-// Command creates a new wrapped exec.Cmd with context.
+// CommandContext creates a new wrapped exec.Cmd with context.
 func CommandContext(ctx context.Context, args ...string) *Cmd {
 	return cmdConstructor(&Cmd{
 		Cmd: exec.CommandContext(ctx, args[0], args[1:]...),
