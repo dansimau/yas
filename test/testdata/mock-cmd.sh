@@ -28,9 +28,15 @@ case "$CMD_NAME" in
                         break
                     fi
                 done
-                # Mark this branch as pushed (so rev-parse can find it)
+                # Mark this branch as pushed and save its hash
                 if [ -n "$branch_name" ]; then
                     echo "pushed" > "/tmp/yas-test-pushed-$branch_name"
+                    # Save the current hash of the branch being pushed
+                    if [ -n "$YAS_TEST_REAL_GIT" ]; then
+                        "$YAS_TEST_REAL_GIT" rev-parse "$branch_name" > "/tmp/yas-test-pushed-hash-$branch_name" 2>/dev/null
+                    else
+                        /usr/bin/git rev-parse "$branch_name" > "/tmp/yas-test-pushed-hash-$branch_name" 2>/dev/null
+                    fi
                 fi
                 # Simulate successful push
                 exit 0
@@ -41,7 +47,12 @@ case "$CMD_NAME" in
                     branch_name="${2#origin/}"
                     # Check if this branch was pushed
                     if [ -f "/tmp/yas-test-pushed-$branch_name" ]; then
-                        # Return the actual local branch hash (to simulate remote is in sync)
+                        # Return the saved hash from when branch was pushed
+                        if [ -f "/tmp/yas-test-pushed-hash-$branch_name" ]; then
+                            cat "/tmp/yas-test-pushed-hash-$branch_name"
+                            exit 0
+                        fi
+                        # Fallback to local branch hash if no saved hash
                         if [ -n "$YAS_TEST_REAL_GIT" ]; then
                             "$YAS_TEST_REAL_GIT" rev-parse "$branch_name" 2>/dev/null && exit 0
                         else
