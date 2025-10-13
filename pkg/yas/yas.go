@@ -484,7 +484,19 @@ func (yas *YAS) processRebaseWorkQueue(startingBranch string, workQueue [][2]str
 		}
 
 		if rebaseErr != nil {
-			// Save state for resuming later
+			// Check if a rebase is actually in progress
+			rebaseInProgress, err := yas.git.IsRebaseInProgress()
+			if err != nil {
+				return fmt.Errorf("rebase failed and unable to check rebase status: %w", err)
+			}
+
+			// If no rebase is in progress, this is a fatal error (e.g., unstashed changes)
+			// Don't save state, just return the error
+			if !rebaseInProgress {
+				return fmt.Errorf("rebase failed for %s onto %s: %w", childBranch, parentBranch, rebaseErr)
+			}
+
+			// Rebase is in progress (e.g., conflicts), save state for resuming later
 			state := &RestackState{
 				StartingBranch:  startingBranch,
 				CurrentBranch:   childBranch,
