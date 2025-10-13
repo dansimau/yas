@@ -1671,6 +1671,11 @@ func (yas *YAS) refreshRemoteStatus(name string) error {
 
 	yas.data.Branches.Set(name, branchMetadata)
 
+	// Set parent based on PR base ref name
+	if branchMetadata.Parent == "" {
+		branchMetadata.Parent = pullRequestMetadata.BaseRefName
+	}
+
 	if err := yas.data.Save(); err != nil {
 		return err
 	}
