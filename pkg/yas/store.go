@@ -27,6 +27,29 @@ func (d *yasDatabase) Save() error {
 	return os.WriteFile(d.filePath, b, 0o644)
 }
 
+// migrateCreatedTimestamps backfills Created timestamps for branches that don't have them.
+// This ensures consistent ordering across runs. The migration is saved to disk immediately.
+func (d *yasDatabase) migrateCreatedTimestamps() error {
+	d.Branches.Lock()
+	defer d.Branches.Unlock()
+
+	needsSave := false
+
+	for name, bm := range d.Branches.data {
+		if bm.Created.IsZero() && name != "" {
+			bm.Created = time.Now()
+			d.Branches.data[name] = bm
+			needsSave = true
+		}
+	}
+
+	if needsSave {
+		return d.Save()
+	}
+
+	return nil
+}
+
 func loadData(filePath string) (*yasDatabase, error) {
 	db := &yasDatabase{
 		filePath: filePath,
@@ -50,6 +73,11 @@ func loadData(filePath string) (*yasDatabase, error) {
 		return nil, err
 	}
 
+	// Migrate: Backfill Created timestamps for branches that don't have them
+	if err := db.migrateCreatedTimestamps(); err != nil {
+		return nil, err
+	}
+
 	return db, nil
 }
 
@@ -69,19 +97,10 @@ func (m *branchMap) Exists(name string) bool {
 
 func (m *branchMap) Get(name string) BranchMetadata {
 	m.RLock()
+	defer m.RUnlock()
+
 	bm := m.data[name]
-	m.RUnlock()
-
 	bm.Name = name
-
-	// Backward compatibility: Initialize Created timestamp if not set
-	if bm.Created.IsZero() && name != "" {
-		m.Lock()
-
-		bm.Created = time.Now()
-		m.data[name] = bm
-		m.Unlock()
-	}
 
 	return bm
 }

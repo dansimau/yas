@@ -700,9 +700,11 @@ func TestList_SortsByCreatedTimestamp(t *testing.T) {
 			if strings.Contains(line, "topic-c") {
 				topicCPos = i
 			}
+
 			if strings.Contains(line, "topic-a") {
 				topicAPos = i
 			}
+
 			if strings.Contains(line, "topic-b") {
 				topicBPos = i
 			}
