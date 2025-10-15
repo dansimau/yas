@@ -12,11 +12,14 @@ import (
 type initCmd struct{}
 
 func (c *initCmd) Execute(args []string) error {
+	isNewConfig := !yas.IsConfigured(cmd.RepoDirectory)
+
 	cfg := &yas.Config{
-		RepoDirectory: cmd.RepoDirectory,
+		RepoDirectory:    cmd.RepoDirectory,
+		AutoPrefixBranch: true,
 	}
 
-	if yas.IsConfigured(cmd.RepoDirectory) {
+	if !isNewConfig {
 		_cfg, err := yas.ReadConfig(cmd.RepoDirectory)
 		if err != nil {
 			return NewError(err.Error())

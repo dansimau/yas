@@ -12,8 +12,9 @@ import (
 const configFilename = ".git/yas.yaml"
 
 type Config struct {
-	RepoDirectory string `yaml:"-"`
-	TrunkBranch   string `yaml:"trunkBranch"`
+	RepoDirectory    string `yaml:"-"`
+	TrunkBranch      string `yaml:"trunkBranch"`
+	AutoPrefixBranch bool   `yaml:"autoPrefixBranch"`
 }
 
 func IsConfigured(repoDirectory string) bool {
@@ -30,7 +31,10 @@ func ReadConfig(repoDirectory string) (*Config, error) {
 		return nil, err
 	}
 
-	config := Config{}
+	// Default AutoPrefixBranch to true for backward compatibility
+	config := Config{
+		AutoPrefixBranch: true,
+	}
 	if err := yaml.Unmarshal(yamlBytes, &config); err != nil {
 		return nil, err
 	}
