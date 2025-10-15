@@ -26,6 +26,7 @@ type Task struct {
 // Runner manages parallel goroutine execution with progress display.
 type Runner struct {
 	maxGoroutines int
+	header        string
 	tasks         []Task
 	results       []TaskResult
 	mu            sync.Mutex
@@ -36,10 +37,11 @@ type Runner struct {
 	completed map[string]error
 }
 
-// New creates a new Runner with the specified max goroutines.
-func New(maxGoroutines int) *Runner {
+// New creates a new Runner with the specified max goroutines and header.
+func New(maxGoroutines int, header string) *Runner {
 	return &Runner{
 		maxGoroutines: maxGoroutines,
+		header:        header,
 		tasks:         []Task{},
 		results:       []TaskResult{},
 		pending:       make(map[string]bool),
@@ -55,9 +57,15 @@ func (r *Runner) Add(name string, fn func() error) {
 }
 
 // Start executes all tasks in parallel and displays progress.
-func (r *Runner) Start() error {
+// If printResults is true, prints the final results after completion.
+func (r *Runner) Start(printResults bool) error {
 	if len(r.tasks) == 0 {
 		return nil
+	}
+
+	// Print header if provided
+	if r.header != "" {
+		fmt.Printf("\x1b[1m%s\x1b[0m\n", r.header)
 	}
 
 	// Hide cursor during execution
@@ -66,7 +74,7 @@ func (r *Runner) Start() error {
 
 	// Print initial status for all tasks
 	for _, task := range r.tasks {
-		fmt.Printf("⌛ %s\r\n", task.Name)
+		fmt.Printf("⌛ %s\n", task.Name)
 	}
 
 	// Start spinner goroutine
@@ -76,8 +84,8 @@ func (r *Runner) Start() error {
 
 	// Execute tasks in parallel
 	p := pool.New().WithMaxGoroutines(r.maxGoroutines).WithErrors()
-	for _, task := range r.tasks {
-		task := task // capture for closure
+	for i := range r.tasks {
+		task := r.tasks[i]
 		p.Go(func() error {
 			// Mark as running
 			r.mu.Lock()
@@ -115,14 +123,36 @@ func (r *Runner) Start() error {
 	// Wait for all tasks to complete
 	_ = p.Wait()
 
-	// Stop spinner
+	// Stop spinner and wait for it to fully exit
 	close(stopSpinner)
 	<-spinnerDone
 
-	// Clear all status lines
-	r.clearStatusLines()
+	if printResults {
+		// Print final results
+		r.printFinalResults()
+	} else {
+		// Clear all status lines
+		r.clearStatusLines()
+	}
 
 	return nil
+}
+
+// clearStatusLines clears all status lines from the terminal.
+func (r *Runner) clearStatusLines() {
+	n := len(r.tasks)
+
+	// Move cursor up n lines to first task line
+	fmt.Printf("\x1b[%dA", n)
+
+	// Clear each line and move down
+	for range r.tasks {
+		fmt.Print("\x1b[2K") // Clear entire line
+		fmt.Print("\x1b[B")  // Move down one line
+	}
+
+	// Move cursor back up to first task line
+	fmt.Printf("\x1b[%dA", n)
 }
 
 // Results returns the results of all executed tasks.
@@ -156,14 +186,14 @@ func (r *Runner) updateDisplay(spinnerChar rune) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Move cursor to start of status lines (up len(tasks) lines)
-	for range r.tasks {
-		fmt.Print("\x1b[A")
-	}
+	n := len(r.tasks)
+
+	// Move cursor up n lines to first task line
+	fmt.Printf("\x1b[%dA", n)
 
 	// Redraw each task's status
-	for i, task := range r.tasks {
-		fmt.Print("\r\x1b[2K") // Clear entire line
+	for _, task := range r.tasks {
+		fmt.Print("\x1b[2K") // Clear entire line
 
 		var icon string
 		if err, completed := r.completed[task.Name]; completed {
@@ -173,42 +203,45 @@ func (r *Runner) updateDisplay(spinnerChar rune) {
 				icon = "☑️"
 			}
 		} else if r.running[task.Name] {
-			icon = string(spinnerChar)
+			icon = " " + string(spinnerChar)
 		} else {
 			icon = "⌛"
 		}
 
-		fmt.Printf("%s %s", icon, task.Name)
-
-		if i < len(r.tasks)-1 {
-			fmt.Print("\r\n")
-		}
+		fmt.Printf("%s %s\n", icon, task.Name)
 	}
-
-	// Move cursor to one line below all tasks
-	fmt.Print("\r\n")
+	// Cursor is now at start of line after all tasks
 }
 
-// clearStatusLines clears all status lines from the terminal.
-func (r *Runner) clearStatusLines() {
-	// Move up len(tasks) lines to first status line
-	for range r.tasks {
-		fmt.Print("\x1b[A")
-	}
+// printFinalResults clears the status lines and prints final results.
+func (r *Runner) printFinalResults() {
+	n := len(r.tasks)
 
-	// Clear all status lines
-	for i := range r.tasks {
-		fmt.Print("\r\x1b[2K") // Clear current line
+	// Move cursor up n lines to first task line
+	fmt.Printf("\x1b[%dA", n)
 
-		if i < len(r.tasks)-1 {
-			fmt.Print("\x1b[B") // Move down one line (no newline)
+	// Print final results for each task
+	for _, task := range r.tasks {
+		err := r.completed[task.Name]
+
+		if err != nil {
+			// Failed task - print with error icon and stderr
+			fmt.Printf("❌ %s\n", task.Name)
+
+			// Find the stderr for this task
+			for _, result := range r.results {
+				if result.Name == task.Name && result.Stderr != "" {
+					// Print stderr in red
+					fmt.Printf("\x1b[31m%s\x1b[0m", result.Stderr)
+					if result.Stderr[len(result.Stderr)-1] != '\n' {
+						fmt.Println()
+					}
+					break
+				}
+			}
+		} else {
+			// Successful task
+			fmt.Printf("☑️ %s\n", task.Name)
 		}
 	}
-
-	// Move back up to line 0 (original position)
-	for range len(r.tasks) - 1 {
-		fmt.Print("\x1b[A")
-	}
-
-	fmt.Print("\r") // Ensure at column 0
 }
