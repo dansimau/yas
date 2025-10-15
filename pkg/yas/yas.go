@@ -11,6 +11,7 @@ import (
 
 	"github.com/dansimau/yas/pkg/gitexec"
 	"github.com/dansimau/yas/pkg/log"
+	"github.com/dansimau/yas/pkg/progress"
 	"github.com/dansimau/yas/pkg/xexec"
 	"github.com/fatih/color"
 	"github.com/go-git/go-git/v5"
@@ -1503,6 +1504,65 @@ func (yas *YAS) Annotate() error {
 	}
 
 	return yas.annotateBranch(currentBranch)
+}
+
+// AnnotateAll annotates all branches that have PRs with stack information.
+func (yas *YAS) AnnotateAll() error {
+	branchesWithPRs := yas.data.Branches.ToSlice().WithPRs()
+
+	if len(branchesWithPRs) == 0 {
+		fmt.Println("No branches with PRs found")
+		return nil
+	}
+
+	fmt.Printf("Annotating %d branch(es)...\n\n", len(branchesWithPRs))
+
+	// Create progress runner
+	runner := progress.New(5)
+
+	// Add annotation tasks
+	for _, branch := range branchesWithPRs {
+		branchName := branch.Name // capture for closure
+		runner.Add(branchName, func() error {
+			return yas.annotateBranch(branchName)
+		})
+	}
+
+	// Execute with progress display
+	if err := runner.Start(); err != nil {
+		return err
+	}
+
+	// Print results
+	results := runner.Results()
+
+	successCount := 0
+	failCount := 0
+
+	for _, result := range results {
+		if result.Error != nil {
+			failCount++
+		} else {
+			successCount++
+		}
+	}
+
+	// Print summary
+	fmt.Printf("✓ Successfully annotated %d branch(es)\n", successCount)
+
+	if failCount > 0 {
+		fmt.Printf("✗ Failed to annotate %d branch(es):\n", failCount)
+		for _, result := range results {
+			if result.Error != nil {
+				fmt.Printf("  - %s: %v\n", result.Name, result.Error)
+				if result.Stderr != "" {
+					fmt.Fprintf(os.Stderr, "%s\n", result.Stderr)
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 func (yas *YAS) annotateBranch(branchName string) error {

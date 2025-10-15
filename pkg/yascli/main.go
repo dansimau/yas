@@ -64,7 +64,7 @@ func Run(args ...string) (exitCode int) {
 
 	mustAddCommand(parser.AddCommand("abort", "Abort a restack operation in progress", "", &abortCmd{}))
 	mustAddCommand(parser.AddCommand("add", "Add/set parent of branch", "", &addCmd{}))
-	mustAddCommand(parser.AddCommand("annotate", "Annotate PR with stack information", "", &annotateCmd{})).Hidden = true
+	mustAddCommand(parser.AddCommand("annotate", "Annotate PR with stack information", "", &annotateCmd{}))
 	mustAddCommand(parser.AddCommand("branch", "Work with branches", "", &branchCmd{})).Aliases = []string{"nb", "br"}
 	mustAddCommand(parser.AddCommand("config", "Manage repository-specific configuration", "", &configCmd{}))
 	mustAddCommand(parser.AddCommand("continue", "Continue a restack operation after fixing conflicts", "", &continueCmd{}))
