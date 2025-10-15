@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hashicorp/go-multierror"
 	"github.com/sourcegraph/conc/pool"
 )
 
@@ -83,10 +84,10 @@ func (r *Runner) Start(printResults bool) error {
 	go r.spinner(stopSpinner, spinnerDone)
 
 	// Execute tasks in parallel
-	p := pool.New().WithMaxGoroutines(r.maxGoroutines).WithErrors()
+	p := pool.New().WithMaxGoroutines(r.maxGoroutines)
 	for i := range r.tasks {
 		task := r.tasks[i]
-		p.Go(func() error {
+		p.Go(func() {
 			// Mark as running
 			r.mu.Lock()
 			delete(r.pending, task.Name)
@@ -115,13 +116,11 @@ func (r *Runner) Start(printResults bool) error {
 				Stderr: stderr,
 			})
 			r.mu.Unlock()
-
-			return nil // Don't propagate errors to pool
 		})
 	}
 
 	// Wait for all tasks to complete
-	_ = p.Wait()
+	p.Wait()
 
 	// Stop spinner and wait for it to fully exit
 	close(stopSpinner)
@@ -135,7 +134,15 @@ func (r *Runner) Start(printResults bool) error {
 		r.clearStatusLines()
 	}
 
-	return nil
+	// Collect errors from task results
+	var result error
+	for _, taskResult := range r.results {
+		if taskResult.Error != nil {
+			result = multierror.Append(result, taskResult.Error)
+		}
+	}
+
+	return result
 }
 
 // clearStatusLines clears all status lines from the terminal.
