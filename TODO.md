@@ -4,6 +4,7 @@
 * Bug: CI status shows as passing when it's still running
 * Bug: `gh pr merge` deleting local branch breaks `yas sync`
 * Show PR as MERGED in status
+* Add command completion, also for branches in `yas br`
 * Don't allow `yas add` when it's already added, except with --force. Use move instead.
 * Parallel operations where possible:
     -> Annotation
