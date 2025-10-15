@@ -760,8 +760,10 @@ func (yas *YAS) MoveBranch(branchName, targetBranch string) error {
 	}
 
 	// Get the branch to move (default to current branch if not specified)
-	var currentBranch string
-	var err error
+	var (
+		currentBranch string
+		err           error
+	)
 
 	if branchName == "" {
 		currentBranch, err = yas.git.GetCurrentBranchName()
@@ -1247,11 +1249,13 @@ func (yas *YAS) SubmitOutdated() error {
 
 	if len(branchesWithPRs) == 0 {
 		fmt.Println("No branches with PRs found")
+
 		return nil
 	}
 
 	// Find branches that need submitting
 	var branchesToSubmit []string
+
 	for _, branch := range branchesWithPRs {
 		needsSubmit, err := yas.needsSubmit(branch.Name)
 		if err != nil {
@@ -1265,16 +1269,19 @@ func (yas *YAS) SubmitOutdated() error {
 
 	if len(branchesToSubmit) == 0 {
 		fmt.Println("No branches need submitting")
+
 		return nil
 	}
 
 	fmt.Printf("Found %d branch(es) that need submitting:\n", len(branchesToSubmit))
+
 	for _, branchName := range branchesToSubmit {
 		fmt.Printf("  - %s\n", branchName)
 	}
 
 	// Submit each branch that needs updating
 	var submittedBranches []string
+
 	for _, branchName := range branchesToSubmit {
 		fmt.Printf("\n=== Submitting %s ===\n", branchName)
 

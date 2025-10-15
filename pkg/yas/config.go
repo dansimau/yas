@@ -31,7 +31,10 @@ func ReadConfig(repoDirectory string) (*Config, error) {
 		return nil, err
 	}
 
-	config := Config{}
+	// Default AutoPrefixBranch to true for backward compatibility
+	config := Config{
+		AutoPrefixBranch: true,
+	}
 	if err := yaml.Unmarshal(yamlBytes, &config); err != nil {
 		return nil, err
 	}

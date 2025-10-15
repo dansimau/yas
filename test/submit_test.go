@@ -521,16 +521,19 @@ func TestSubmit_OutdatedSubmitsAllBranchesNeedingSubmit(t *testing.T) {
 		// First, create PRs for all branches by submitting them individually
 		// Submit topic-a
 		testutil.ExecOrFail(t, "git checkout topic-a")
+
 		err = y.Submit()
 		assert.NilError(t, err)
 
 		// Submit topic-b
 		testutil.ExecOrFail(t, "git checkout topic-b")
+
 		err = y.Submit()
 		assert.NilError(t, err)
 
 		// Submit topic-c
 		testutil.ExecOrFail(t, "git checkout topic-c")
+
 		err = y.Submit()
 		assert.NilError(t, err)
 
@@ -570,11 +573,13 @@ func TestSubmit_OutdatedSubmitsAllBranchesNeedingSubmit(t *testing.T) {
 		// Count total PR operations (create + list)
 		prCreateCount := 0
 		prListCount := 0
+
 		for _, cmd := range commands {
 			if len(cmd) >= 3 && cmd[0] == "gh" && cmd[1] == "pr" {
-				if cmd[2] == "create" {
+				switch cmd[2] {
+				case "create":
 					prCreateCount++
-				} else if cmd[2] == "list" {
+				case "list":
 					prListCount++
 				}
 			}
