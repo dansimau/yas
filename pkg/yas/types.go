@@ -5,6 +5,7 @@ import (
 	"os"
 	"path"
 	"slices"
+	"time"
 
 	"github.com/dansimau/yas/pkg/sliceutil"
 )
@@ -12,8 +13,9 @@ import (
 type BranchMetadata struct {
 	Name              string
 	GitHubPullRequest PullRequestMetadata
-	Parent            string `json:",omitempty"`
-	BranchPoint       string `json:",omitempty"` // Commit SHA where this branch diverged from parent
+	Parent            string    `json:",omitempty"`
+	BranchPoint       string    `json:",omitempty"` // Commit SHA where this branch diverged from parent
+	Created           time.Time `json:",omitempty"` // Timestamp when this branch was first tracked
 }
 
 type StatusCheck struct {

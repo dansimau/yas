@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/dansimau/yas/pkg/fsutil"
 )
@@ -68,10 +69,19 @@ func (m *branchMap) Exists(name string) bool {
 
 func (m *branchMap) Get(name string) BranchMetadata {
 	m.RLock()
-	defer m.RUnlock()
-
 	bm := m.data[name]
+	m.RUnlock()
+
 	bm.Name = name
+
+	// Backward compatibility: Initialize Created timestamp if not set
+	if bm.Created.IsZero() && name != "" {
+		m.Lock()
+
+		bm.Created = time.Now()
+		m.data[name] = bm
+		m.Unlock()
+	}
 
 	return bm
 }

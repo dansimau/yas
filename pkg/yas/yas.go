@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/dansimau/yas/pkg/gitexec"
 	"github.com/dansimau/yas/pkg/log"
@@ -760,8 +762,10 @@ func (yas *YAS) MoveBranch(branchName, targetBranch string) error {
 	}
 
 	// Get the branch to move (default to current branch if not specified)
-	var currentBranch string
-	var err error
+	var (
+		currentBranch string
+		err           error
+	)
 
 	if branchName == "" {
 		currentBranch, err = yas.git.GetCurrentBranchName()
@@ -1013,6 +1017,20 @@ func (yas *YAS) collectBranchItems(items *[]SelectionItem, graph *dag.DAG, paren
 		childIDs = append(childIDs, childID)
 	}
 
+	// Sort by Created timestamp (ascending), then by name alphabetically
+	sort.Slice(childIDs, func(i, j int) bool {
+		metaI := yas.data.Branches.Get(childIDs[i])
+		metaJ := yas.data.Branches.Get(childIDs[j])
+
+		// If timestamps differ, sort by timestamp (older first)
+		if !metaI.Created.Equal(metaJ.Created) {
+			return metaI.Created.Before(metaJ.Created)
+		}
+
+		// If timestamps are equal, sort by name alphabetically
+		return childIDs[i] < childIDs[j]
+	})
+
 	for i, childID := range childIDs {
 		isLastChild := i == len(childIDs)-1
 
@@ -1193,6 +1211,11 @@ func (yas *YAS) SetParent(branchName, parentBranchName, branchPoint string) erro
 
 	branchMetdata.BranchPoint = branchPoint
 
+	// Initialize Created timestamp if not already set
+	if branchMetdata.Created.IsZero() {
+		branchMetdata.Created = time.Now()
+	}
+
 	yas.data.Branches.Set(branchName, branchMetdata)
 
 	if err := yas.data.Save(); err != nil {
@@ -1247,11 +1270,13 @@ func (yas *YAS) SubmitOutdated() error {
 
 	if len(branchesWithPRs) == 0 {
 		fmt.Println("No branches with PRs found")
+
 		return nil
 	}
 
 	// Find branches that need submitting
 	var branchesToSubmit []string
+
 	for _, branch := range branchesWithPRs {
 		needsSubmit, err := yas.needsSubmit(branch.Name)
 		if err != nil {
@@ -1265,16 +1290,19 @@ func (yas *YAS) SubmitOutdated() error {
 
 	if len(branchesToSubmit) == 0 {
 		fmt.Println("No branches need submitting")
+
 		return nil
 	}
 
 	fmt.Printf("Found %d branch(es) that need submitting:\n", len(branchesToSubmit))
+
 	for _, branchName := range branchesToSubmit {
 		fmt.Printf("  - %s\n", branchName)
 	}
 
 	// Submit each branch that needs updating
 	var submittedBranches []string
+
 	for _, branchName := range branchesToSubmit {
 		fmt.Printf("\n=== Submitting %s ===\n", branchName)
 

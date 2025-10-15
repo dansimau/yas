@@ -10,7 +10,7 @@ import (
 	"gotest.tools/v3/assert"
 )
 
-// TestMove_BasicMove tests moving a branch to a new parent
+// TestMove_BasicMove tests moving a branch to a new parent.
 func TestMove_BasicMove(t *testing.T) {
 	testutil.WithTempWorkingDir(t, func() {
 		testutil.ExecOrFail(t, `
@@ -61,6 +61,7 @@ func TestMove_BasicMove(t *testing.T) {
 
 		// Verify feature-a-child is still a child and also includes topic-b
 		testutil.ExecOrFail(t, "git checkout feature-a-child")
+
 		logOutput = mustExecOutput("git", "log", "--pretty=%s")
 		assert.Assert(t, strings.Contains(logOutput, "topic-b-0"), "feature-a-child should include topic-b commit")
 		assert.Assert(t, strings.Contains(logOutput, "feature-a-0"), "feature-a-child should include feature-a commit")
@@ -70,18 +71,22 @@ func TestMove_BasicMove(t *testing.T) {
 		assert.NilError(t, err)
 
 		branches := yasInstance.TrackedBranches()
+
 		var featureAMetadata yas.BranchMetadata
+
 		for _, b := range branches {
 			if b.Name == "feature-a" {
 				featureAMetadata = b
+
 				break
 			}
 		}
+
 		assert.Equal(t, featureAMetadata.Parent, "topic-b", "feature-a parent should be updated to topic-b")
 	})
 }
 
-// TestMove_WithConflicts tests that move handles conflicts correctly with state save/resume
+// TestMove_WithConflicts tests that move handles conflicts correctly with state save/resume.
 func TestMove_WithConflicts(t *testing.T) {
 	testutil.WithTempWorkingDir(t, func() {
 		testutil.ExecOrFail(t, `
@@ -145,7 +150,7 @@ func TestMove_WithConflicts(t *testing.T) {
 	})
 }
 
-// TestMove_Abort tests that aborting a move works correctly
+// TestMove_Abort tests that aborting a move works correctly.
 func TestMove_Abort(t *testing.T) {
 	testutil.WithTempWorkingDir(t, func() {
 		testutil.ExecOrFail(t, `
@@ -211,7 +216,7 @@ func TestMove_Abort(t *testing.T) {
 	})
 }
 
-// TestMove_FatalError tests that fatal errors don't save state
+// TestMove_FatalError tests that fatal errors don't save state.
 func TestMove_FatalError(t *testing.T) {
 	testutil.WithTempWorkingDir(t, func() {
 		testutil.ExecOrFail(t, `
@@ -263,7 +268,7 @@ func TestMove_FatalError(t *testing.T) {
 	})
 }
 
-// TestMove_WithMultipleDescendants tests moving a branch with multiple descendants
+// TestMove_WithMultipleDescendants tests moving a branch with multiple descendants.
 func TestMove_WithMultipleDescendants(t *testing.T) {
 	testutil.WithTempWorkingDir(t, func() {
 		testutil.ExecOrFail(t, `
@@ -318,6 +323,7 @@ func TestMove_WithMultipleDescendants(t *testing.T) {
 		// Verify all branches include topic-b-0
 		for _, branch := range []string{"feature-a", "feature-a-child-1", "feature-a-child-2"} {
 			testutil.ExecOrFail(t, "git checkout "+branch)
+
 			logOutput := mustExecOutput("git", "log", "--pretty=%s")
 			assert.Assert(t, strings.Contains(logOutput, "topic-b-0"),
 				"%s should include topic-b commit", branch)
@@ -328,18 +334,22 @@ func TestMove_WithMultipleDescendants(t *testing.T) {
 		assert.NilError(t, err)
 
 		branches := yasInstance.TrackedBranches()
+
 		var featureAMetadata yas.BranchMetadata
+
 		for _, b := range branches {
 			if b.Name == "feature-a" {
 				featureAMetadata = b
+
 				break
 			}
 		}
+
 		assert.Equal(t, featureAMetadata.Parent, "topic-b", "feature-a parent should be updated to topic-b")
 	})
 }
 
-// TestMove_CannotMoveTrunk tests that moving trunk branch is not allowed
+// TestMove_CannotMoveTrunk tests that moving trunk branch is not allowed.
 func TestMove_CannotMoveTrunk(t *testing.T) {
 	testutil.WithTempWorkingDir(t, func() {
 		testutil.ExecOrFail(t, `
