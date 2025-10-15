@@ -11,6 +11,7 @@ import (
 
 	"github.com/dansimau/yas/pkg/gitexec"
 	"github.com/dansimau/yas/pkg/log"
+	"github.com/dansimau/yas/pkg/progress"
 	"github.com/dansimau/yas/pkg/xexec"
 	"github.com/fatih/color"
 	"github.com/go-git/go-git/v5"
@@ -1286,13 +1287,16 @@ func (yas *YAS) SubmitOutdated() error {
 	}
 
 	// Annotate all submitted branches with stack information
-	fmt.Printf("\n=== Annotating PRs ===\n")
-
+	runner := progress.New(5, "\nAnnotating PRs:")
 	for _, branchName := range submittedBranches {
-		if err := yas.annotateBranch(branchName); err != nil {
-			// Don't fail the submit if annotation fails
-			fmt.Printf("Warning: failed to annotate PR for %s: %v\n", branchName, err)
-		}
+		branchName := branchName // capture for closure
+		runner.Add(branchName, func() error {
+			return yas.annotateBranch(branchName)
+		})
+	}
+
+	if err := runner.Start(true); err != nil {
+		return err
 	}
 
 	fmt.Printf("\nSuccessfully submitted %d outdated branch(es)\n", len(submittedBranches))
@@ -1335,13 +1339,16 @@ func (yas *YAS) SubmitStack() error {
 	}
 
 	// Second pass: Annotate all submitted branches now that all PRs exist
-	fmt.Printf("\n=== Annotating PRs ===\n")
-
+	runner := progress.New(5, "\nAnnotating PRs:")
 	for _, branch := range submittedBranches {
-		if err := yas.annotateBranch(branch); err != nil {
-			// Don't fail the submit if annotation fails
-			fmt.Printf("Warning: failed to annotate PR for %s: %v\n", branch, err)
-		}
+		branchName := branch // capture for closure
+		runner.Add(branchName, func() error {
+			return yas.annotateBranch(branchName)
+		})
+	}
+
+	if err := runner.Start(true); err != nil {
+		return err
 	}
 
 	fmt.Printf("\nSuccessfully submitted all branches in stack\n")
@@ -1502,7 +1509,37 @@ func (yas *YAS) Annotate() error {
 		return errors.New("cannot annotate in detached HEAD state")
 	}
 
-	return yas.annotateBranch(currentBranch)
+	if err := yas.annotateBranch(currentBranch); err != nil {
+		return err
+	}
+
+	// Print success message for single-branch annotation
+	fmt.Printf("Updated PR for %s with stack information\n", currentBranch)
+	return nil
+}
+
+// AnnotateAll annotates all branches that have PRs with stack information.
+func (yas *YAS) AnnotateAll() error {
+	branchesWithPRs := yas.data.Branches.ToSlice().WithPRs()
+
+	if len(branchesWithPRs) == 0 {
+		fmt.Println("No branches with PRs found")
+		return nil
+	}
+
+	// Create progress runner
+	runner := progress.New(5, fmt.Sprintf("Annotating %d branch(es):", len(branchesWithPRs)))
+
+	// Add annotation tasks
+	for _, branch := range branchesWithPRs {
+		branchName := branch.Name // capture for closure
+		runner.Add(branchName, func() error {
+			return yas.annotateBranch(branchName)
+		})
+	}
+
+	// Execute with progress display and print final results
+	return runner.Start(true)
 }
 
 func (yas *YAS) annotateBranch(branchName string) error {
@@ -1544,8 +1581,6 @@ func (yas *YAS) annotateBranch(branchName string) error {
 	if err := yas.updatePRBody(prNumber, newBody); err != nil {
 		return fmt.Errorf("failed to update PR: %w", err)
 	}
-
-	fmt.Printf("Updated PR #%s with stack information\n", prNumber)
 
 	return nil
 }
@@ -1698,7 +1733,7 @@ func (yas *YAS) getPRBody(prNumber string) (string, error) {
 }
 
 func (yas *YAS) updatePRBody(prNumber, newBody string) error {
-	return xexec.Command("gh", "pr", "edit", prNumber, "--body", newBody).Run()
+	return xexec.Command("gh", "pr", "edit", prNumber, "--body", newBody).WithStdout(nil).WithStderr(nil).Run()
 }
 
 func removeStackSection(currentBody string) string {
