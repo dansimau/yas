@@ -31,17 +31,19 @@ func (d *yasDatabase) Save() error {
 // This ensures consistent ordering across runs. The migration is saved to disk immediately.
 func (d *yasDatabase) migrateCreatedTimestamps() error {
 	d.Branches.Lock()
-	defer d.Branches.Unlock()
 
 	needsSave := false
+	now := time.Now()
 
 	for name, bm := range d.Branches.data {
 		if bm.Created.IsZero() && name != "" {
-			bm.Created = time.Now()
+			bm.Created = now
 			d.Branches.data[name] = bm
 			needsSave = true
 		}
 	}
+
+	d.Branches.Unlock()
 
 	if needsSave {
 		return d.Save()
