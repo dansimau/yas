@@ -8,7 +8,6 @@ import (
 	"github.com/dansimau/yas/pkg/log"
 	"github.com/dansimau/yas/pkg/progress"
 	"github.com/dansimau/yas/pkg/xexec"
-	"github.com/heimdalr/dag"
 )
 
 func (yas *YAS) Submit() error {
@@ -27,26 +26,11 @@ func (yas *YAS) Submit() error {
 		return errors.New("cannot submit in detached HEAD state")
 	}
 
-	if err := yas.submitBranch(currentBranch); err != nil {
-		return err
-	}
-
-	// Annotate the PR with stack information
-	if err := yas.annotateBranch(currentBranch); err != nil {
-		// Don't fail the submit if annotation fails
-		fmt.Printf("Warning: failed to annotate PR: %v\n", err)
-	}
-
-	return nil
+	// Submit and annotate the current branch
+	return yas.submitBranches([]string{currentBranch})
 }
 
 func (yas *YAS) SubmitOutdated() error {
-	// Check if a restack is in progress (do this before getting branch name
-	// which would fail in detached HEAD state during rebase)
-	if err := yas.checkRestackInProgress(); err != nil {
-		return err
-	}
-
 	// Get all branches with PRs (optimization: skip branches without PRs)
 	branchesWithPRs := yas.data.Branches.ToSlice().WithPRs()
 
@@ -76,50 +60,11 @@ func (yas *YAS) SubmitOutdated() error {
 		return nil
 	}
 
-	fmt.Printf("Found %d branch(es) that need submitting:\n", len(branchesToSubmit))
-
-	for _, branchName := range branchesToSubmit {
-		fmt.Printf("  - %s\n", branchName)
-	}
-
-	// Submit each branch that needs updating
-	var submittedBranches []string
-
-	for _, branchName := range branchesToSubmit {
-		fmt.Printf("\n=== Submitting %s ===\n", branchName)
-
-		if err := yas.submitBranch(branchName); err != nil {
-			return fmt.Errorf("failed to submit %s: %w", branchName, err)
-		}
-
-		submittedBranches = append(submittedBranches, branchName)
-	}
-
-	// Annotate all submitted branches with stack information
-	runner := progress.New(5, "\nAnnotating PRs:")
-	for _, branchName := range submittedBranches {
-		branchName := branchName // capture for closure
-		runner.Add(branchName, func() error {
-			return yas.annotateBranch(branchName)
-		})
-	}
-
-	if err := runner.Start(true); err != nil {
-		return err
-	}
-
-	fmt.Printf("\nSuccessfully submitted %d outdated branch(es)\n", len(submittedBranches))
-
-	return nil
+	// Submit and annotate all branches that need updating
+	return yas.submitBranches(branchesToSubmit)
 }
 
 func (yas *YAS) SubmitStack() error {
-	// Check if a restack is in progress (do this before getting branch name
-	// which would fail in detached HEAD state during rebase)
-	if err := yas.checkRestackInProgress(); err != nil {
-		return err
-	}
-
 	currentBranch, err := yas.git.GetCurrentBranchName()
 	if err != nil {
 		return err
@@ -135,57 +80,63 @@ func (yas *YAS) SubmitStack() error {
 		return fmt.Errorf("failed to get graph: %w", err)
 	}
 
-	// Get the current stack
+	// Extract the current stack from the full graph
 	stackGraph, err := yas.currentStackGraph(fullGraph, currentBranch)
 	if err != nil {
 		return fmt.Errorf("failed to get current stack: %w", err)
 	}
 
-	// First pass: Submit all branches in the stack starting from trunk
-	var submittedBranches []string
-	if err := yas.submitDescendants(stackGraph, yas.cfg.TrunkBranch, &submittedBranches); err != nil {
+	var stackBranches []string
+
+	// Walk the stack in topological order
+	stackGraph.OrderedWalk(&branchVisitor{
+		branches:    &stackBranches,
+		trunkBranch: yas.cfg.TrunkBranch,
+	})
+
+	// Submit and annotate all branches in the stack
+	return yas.submitBranches(stackBranches)
+}
+
+// submitBranches submits multiple branches in parallel and then annotates them in parallel.
+func (yas *YAS) submitBranches(branches []string) error {
+	// Check if a restack is in progress (do this before getting branch name
+	// which would fail in detached HEAD state during rebase)
+	if err := yas.checkRestackInProgress(); err != nil {
 		return err
 	}
 
-	// Second pass: Annotate all submitted branches now that all PRs exist
-	runner := progress.New(5, "\nAnnotating PRs:")
-	for _, branch := range submittedBranches {
-		branchName := branch // capture for closure
-		runner.Add(branchName, func() error {
+	if len(branches) == 0 {
+		return nil
+	}
+
+	// Phase 1: Submit all branches in parallel
+	submitRunner := progress.New(5, "Submitting branches:")
+
+	for _, branchName := range branches {
+		submitRunner.Add(branchName, func() error {
+			return yas.submitBranch(branchName)
+		})
+	}
+
+	if err := submitRunner.Start(true); err != nil {
+		return err
+	}
+
+	// Phase 2: Annotate all branches in parallel
+	annotateRunner := progress.New(5, "Annotating PRs:")
+
+	for _, branchName := range branches {
+		annotateRunner.Add(branchName, func() error {
 			return yas.annotateBranch(branchName)
 		})
 	}
 
-	if err := runner.Start(true); err != nil {
+	if err := annotateRunner.Start(true); err != nil {
 		return err
 	}
 
-	fmt.Printf("\nSuccessfully submitted all branches in stack\n")
-
-	return nil
-}
-
-func (yas *YAS) submitDescendants(graph *dag.DAG, branchName string, submittedBranches *[]string) error {
-	children, err := graph.GetChildren(branchName)
-	if err != nil {
-		return err
-	}
-
-	for childID := range children {
-		fmt.Printf("\n=== Submitting %s ===\n", childID)
-
-		if err := yas.submitBranch(childID); err != nil {
-			return fmt.Errorf("failed to submit %s: %w", childID, err)
-		}
-
-		// Track that we submitted this branch
-		*submittedBranches = append(*submittedBranches, childID)
-
-		// Recursively submit this branch's descendants
-		if err := yas.submitDescendants(graph, childID, submittedBranches); err != nil {
-			return err
-		}
-	}
+	fmt.Printf("\nSuccessfully submitted and annotated %d branch(es)\n", len(branches))
 
 	return nil
 }
