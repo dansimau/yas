@@ -20,8 +20,9 @@ type TaskResult struct {
 
 // Task represents a unit of work to be executed.
 type Task struct {
-	Name string
-	Fn   func() error
+	Name       string
+	Fn         func() error
+	StatusLine string
 }
 
 // Runner manages parallel goroutine execution with progress display.
@@ -33,9 +34,10 @@ type Runner struct {
 	mu            sync.Mutex
 
 	// Status tracking
-	pending   map[string]bool
-	running   map[string]bool
-	completed map[string]error
+	pending     map[string]bool
+	running     map[string]bool
+	completed   map[string]error
+	statusLines map[string]string
 }
 
 // New creates a new Runner with the specified max goroutines and header.
@@ -48,6 +50,7 @@ func New(maxGoroutines int, header string) *Runner {
 		pending:       make(map[string]bool),
 		running:       make(map[string]bool),
 		completed:     make(map[string]error),
+		statusLines:   make(map[string]string),
 	}
 }
 
@@ -55,6 +58,13 @@ func New(maxGoroutines int, header string) *Runner {
 func (r *Runner) Add(name string, fn func() error) {
 	r.tasks = append(r.tasks, Task{Name: name, Fn: fn})
 	r.pending[name] = true
+}
+
+// UpdateStatusLine updates the status line for a task.
+func (r *Runner) UpdateStatusLine(name, statusLine string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.statusLines[name] = statusLine
 }
 
 // Start executes all tasks in parallel and displays progress.
@@ -136,6 +146,7 @@ func (r *Runner) Start(printResults bool) error {
 
 	// Collect errors from task results
 	var result error
+
 	for _, taskResult := range r.results {
 		if taskResult.Error != nil {
 			result = multierror.Append(result, taskResult.Error)
@@ -203,6 +214,7 @@ func (r *Runner) updateDisplay(spinnerChar rune) {
 		fmt.Print("\x1b[2K") // Clear entire line
 
 		var icon string
+
 		if err, completed := r.completed[task.Name]; completed {
 			if err != nil {
 				icon = "❌"
@@ -215,7 +227,13 @@ func (r *Runner) updateDisplay(spinnerChar rune) {
 			icon = "⌛"
 		}
 
-		fmt.Printf("%s %s\n", icon, task.Name)
+		// Format task name with optional status line
+		taskDisplay := task.Name
+		if statusLine, hasStatus := r.statusLines[task.Name]; hasStatus && statusLine != "" {
+			taskDisplay = task.Name + ": " + statusLine
+		}
+
+		fmt.Printf("%s %s\n", icon, taskDisplay)
 	}
 	// Cursor is now at start of line after all tasks
 }
@@ -231,24 +249,32 @@ func (r *Runner) printFinalResults() {
 	for _, task := range r.tasks {
 		err := r.completed[task.Name]
 
+		// Format task name with optional status line
+		taskDisplay := task.Name
+		if statusLine, hasStatus := r.statusLines[task.Name]; hasStatus && statusLine != "" {
+			taskDisplay = task.Name + ": " + statusLine
+		}
+
 		if err != nil {
 			// Failed task - print with error icon and stderr
-			fmt.Printf("❌ %s\n", task.Name)
+			fmt.Printf("❌ %s\n", taskDisplay)
 
 			// Find the stderr for this task
 			for _, result := range r.results {
 				if result.Name == task.Name && result.Stderr != "" {
 					// Print stderr in red
 					fmt.Printf("\x1b[31m%s\x1b[0m", result.Stderr)
+
 					if result.Stderr[len(result.Stderr)-1] != '\n' {
 						fmt.Println()
 					}
+
 					break
 				}
 			}
 		} else {
 			// Successful task
-			fmt.Printf("☑️ %s\n", task.Name)
+			fmt.Printf("☑️ %s\n", taskDisplay)
 		}
 	}
 }

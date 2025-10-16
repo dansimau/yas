@@ -10,6 +10,10 @@ import (
 	"github.com/dansimau/yas/pkg/xexec"
 )
 
+func print(s string) {
+	fmt.Println(s)
+}
+
 func (yas *YAS) Submit() error {
 	// Check if a restack is in progress (do this before getting branch name
 	// which would fail in detached HEAD state during rebase)
@@ -115,7 +119,9 @@ func (yas *YAS) submitBranches(branches []string) error {
 
 	for _, branchName := range branches {
 		submitRunner.Add(branchName, func() error {
-			return yas.submitBranch(branchName)
+			return yas.submitBranch(branchName, func(s string) {
+				submitRunner.UpdateStatusLine(branchName, s)
+			})
 		})
 	}
 
@@ -124,7 +130,7 @@ func (yas *YAS) submitBranches(branches []string) error {
 	}
 
 	// Phase 2: Annotate all branches in parallel
-	annotateRunner := progress.New(5, "Annotating PRs:")
+	annotateRunner := progress.New(5, "\nAnnotating PRs:")
 
 	for _, branchName := range branches {
 		annotateRunner.Add(branchName, func() error {
@@ -141,7 +147,7 @@ func (yas *YAS) submitBranches(branches []string) error {
 	return nil
 }
 
-func (yas *YAS) submitBranch(branchName string) error {
+func (yas *YAS) submitBranch(branchName string, status func(string)) error {
 	if err := yas.refreshRemoteStatus(branchName); err != nil {
 		return err
 	}
@@ -179,6 +185,7 @@ func (yas *YAS) submitBranch(branchName string) error {
 	needsPush := !remoteExists || oldRemoteHash != currentLocalHash
 
 	if needsPush {
+		status("Pushing branch...")
 		// Force push with lease (we expect the branch may have been rebased)
 		if err := yas.git.ForcePushBranch(branchName); err != nil {
 			return fmt.Errorf("failed to push: %w", err)
@@ -187,11 +194,6 @@ func (yas *YAS) submitBranch(branchName string) error {
 
 	// Check if PR already exists
 	if metadata.GitHubPullRequest.ID != "" {
-		state := metadata.GitHubPullRequest.State
-		if metadata.GitHubPullRequest.IsDraft {
-			state = "DRAFT"
-		}
-
 		// Check if base branch needs updating
 		needsBaseUpdate := metadata.Parent != "" &&
 			metadata.GitHubPullRequest.BaseRefName != "" &&
@@ -199,11 +201,10 @@ func (yas *YAS) submitBranch(branchName string) error {
 
 		if needsBaseUpdate {
 			prNumber := extractPRNumber(metadata.GitHubPullRequest.URL)
-			fmt.Printf("Updating PR base branch from %s to %s...\n",
-				metadata.GitHubPullRequest.BaseRefName,
-				metadata.Parent)
 
-			if err := xexec.Command("gh", "pr", "edit", prNumber, "--base", metadata.Parent).Run(); err != nil {
+			status("Updating PR base branch...")
+
+			if err := xexec.Command("gh", "pr", "edit", prNumber, "--base", metadata.Parent).WithStdout(nil).Run(); err != nil {
 				return fmt.Errorf("failed to update PR base branch: %w", err)
 			}
 
@@ -216,21 +217,23 @@ func (yas *YAS) submitBranch(branchName string) error {
 			metadata = yas.data.Branches.Get(branchName)
 		}
 
+		state := yas.prStateToYasState(metadata.GitHubPullRequest)
+
 		// Show appropriate message based on what happened
 		switch {
 		case !needsPush && !needsBaseUpdate:
-			fmt.Printf("PR exists: %s (state: %s), up to date\n",
+			status(fmt.Sprintf("%s (state: %s), up to date",
 				metadata.GitHubPullRequest.URL,
-				state)
+				state))
 		case oldRemoteHash != "" && oldRemoteHash != currentLocalHash:
-			fmt.Printf("PR exists: %s (state: %s), force pushed (was: %s)\n",
+			status(fmt.Sprintf("%s (state: %s), force pushed (was: %s)",
 				metadata.GitHubPullRequest.URL,
 				state,
-				oldRemoteHash)
+				oldRemoteHash))
 		default:
-			fmt.Printf("PR exists: %s (state: %s), pushed new commits\n",
+			status(fmt.Sprintf("%s (state: %s), pushed new commits",
 				metadata.GitHubPullRequest.URL,
-				state)
+				state))
 		}
 
 		return nil
@@ -247,7 +250,7 @@ func (yas *YAS) submitBranch(branchName string) error {
 		prCreateArgs = append(prCreateArgs, "--base", metadata.Parent)
 	}
 
-	if err := xexec.Command(append([]string{"gh", "pr", "create"}, prCreateArgs...)...).Run(); err != nil {
+	if err := xexec.Command(append([]string{"gh", "pr", "create"}, prCreateArgs...)...).WithStdout(nil).Run(); err != nil {
 		return err
 	}
 
@@ -255,6 +258,10 @@ func (yas *YAS) submitBranch(branchName string) error {
 	if err := yas.refreshRemoteStatus(branchName); err != nil {
 		return err
 	}
+
+	status(fmt.Sprintf("%s (state: %s), created",
+		metadata.GitHubPullRequest.URL,
+		yas.prStateToYasState(metadata.GitHubPullRequest)))
 
 	return nil
 }
