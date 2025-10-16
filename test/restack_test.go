@@ -192,7 +192,7 @@ func TestRestack_ShowsReminderWhenBranchesWithPRsAreRestacked(t *testing.T) {
 	testutil.WithTempWorkingDir(t, func() {
 		testutil.ExecOrFail(t, `
 			git init --initial-branch=main
-			git remote add origin https://github.com/test/test.git
+			git remote add origin https://fake.origin/test/test.git
 
 			# main
 			touch main

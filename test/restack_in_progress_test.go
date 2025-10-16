@@ -59,7 +59,7 @@ func TestSubmit_RefusesWhenRestackInProgress(t *testing.T) {
 	testutil.WithTempWorkingDir(t, func() {
 		testutil.ExecOrFail(t, `
 			git init --initial-branch=main
-			git remote add origin https://github.com/test/test.git
+			git remote add origin https://fake.origin/test/test.git
 
 			# main
 			echo "line1" > file.txt
@@ -106,7 +106,7 @@ func TestSync_RefusesWhenRestackInProgress(t *testing.T) {
 	testutil.WithTempWorkingDir(t, func() {
 		testutil.ExecOrFail(t, `
 			git init --initial-branch=main
-			git remote add origin https://github.com/test/test.git
+			git remote add origin https://fake.origin/test/test.git
 
 			# main
 			echo "line1" > file.txt

@@ -24,7 +24,7 @@ func TestMerge_FailsWhenNoRestackInProgress(t *testing.T) {
 	testutil.WithTempWorkingDir(t, func() {
 		testutil.ExecOrFail(t, `
 			git init --initial-branch=main
-			git remote add origin https://github.com/test/test.git
+			git remote add origin https://fake.origin/test/test.git
 
 			# main
 			touch main
@@ -74,7 +74,7 @@ func TestMerge_FailsWhenNoPR(t *testing.T) {
 	testutil.WithTempWorkingDir(t, func() {
 		testutil.ExecOrFail(t, `
 			git init --initial-branch=main
-			git remote add origin https://github.com/test/test.git
+			git remote add origin https://fake.origin/test/test.git
 
 			# main
 			touch main
@@ -122,7 +122,7 @@ func TestMerge_FailsWhenNotAtTopOfStack(t *testing.T) {
 	testutil.WithTempWorkingDir(t, func() {
 		testutil.ExecOrFail(t, `
 			git init --initial-branch=main
-			git remote add origin https://github.com/test/test.git
+			git remote add origin https://fake.origin/test/test.git
 
 			# main
 			touch main
@@ -185,7 +185,7 @@ func TestMerge_FailsWhenNeedsRestack(t *testing.T) {
 	testutil.WithTempWorkingDir(t, func() {
 		testutil.ExecOrFail(t, `
 			git init --initial-branch=main
-			git remote add origin https://github.com/test/test.git
+			git remote add origin https://fake.origin/test/test.git
 
 			# main
 			touch main
@@ -245,7 +245,7 @@ func TestMerge_FailsWhenCINotPassing(t *testing.T) {
 	testutil.WithTempWorkingDir(t, func() {
 		testutil.ExecOrFail(t, `
 			git init --initial-branch=main
-			git remote add origin https://github.com/test/test.git
+			git remote add origin https://fake.origin/test/test.git
 
 			# main
 			touch main
@@ -308,7 +308,7 @@ func TestMerge_FailsWhenNotApproved(t *testing.T) {
 	testutil.WithTempWorkingDir(t, func() {
 		testutil.ExecOrFail(t, `
 			git init --initial-branch=main
-			git remote add origin https://github.com/test/test.git
+			git remote add origin https://fake.origin/test/test.git
 
 			# main
 			touch main
@@ -371,7 +371,7 @@ func TestMerge_SucceedsWithForceFlag(t *testing.T) {
 	testutil.WithTempWorkingDir(t, func() {
 		testutil.ExecOrFail(t, `
 			git init --initial-branch=main
-			git remote add origin https://github.com/test/test.git
+			git remote add origin https://fake.origin/test/test.git
 
 			# main
 			touch main
@@ -455,7 +455,7 @@ func TestMerge_AbortsWhenMergeMessageEmpty(t *testing.T) {
 	testutil.WithTempWorkingDir(t, func() {
 		testutil.ExecOrFail(t, `
 			git init --initial-branch=main
-			git remote add origin https://github.com/test/test.git
+			git remote add origin https://fake.origin/test/test.git
 
 			# main
 			touch main
