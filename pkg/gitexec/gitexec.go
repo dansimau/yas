@@ -194,6 +194,8 @@ func (r *Repo) ForcePushBranch(branchName string) error {
 	return xexec.Command("git", "push", "--force-with-lease", "origin", branchName, "-q").
 		WithEnvVars(CleanedGitEnv()).
 		WithWorkingDir(r.path).
+		WithStdout(nil).
+		WithStderr(nil).
 		Run()
 }
 

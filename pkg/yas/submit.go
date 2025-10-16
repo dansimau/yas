@@ -259,6 +259,7 @@ func (yas *YAS) submitBranch(branchName string, status func(string)) error {
 		return err
 	}
 
+	metadata = yas.data.Branches.Get(branchName)
 	status(fmt.Sprintf("%s (state: %s), created",
 		metadata.GitHubPullRequest.URL,
 		yas.prStateToYasState(metadata.GitHubPullRequest)))
