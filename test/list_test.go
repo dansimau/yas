@@ -645,3 +645,80 @@ func TestList_ShowsNeedsRestackAndNotSubmitted(t *testing.T) {
 			"topic-a should show '(needs restack, not submitted)' but got: %s", output)
 	})
 }
+
+func TestList_SortsByCreatedTimestamp(t *testing.T) {
+	testutil.WithTempWorkingDir(t, func() {
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+
+			# main
+			touch main
+			git add main
+			git commit -m "main-0"
+
+			# Create branches (will be tracked in specific order to test timestamp sorting)
+			git checkout -b topic-c
+			touch c
+			git add c
+			git commit -m "topic-c-0"
+
+			git checkout main
+			git checkout -b topic-a
+			touch a
+			git add a
+			git commit -m "topic-a-0"
+
+			git checkout main
+			git checkout -b topic-b
+			touch b
+			git add b
+			git commit -m "topic-b-0"
+
+			git checkout main
+		`)
+
+		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
+
+		// Add branches in the order: topic-c first, then topic-a, then topic-b
+		// This establishes the Created timestamps
+		assert.Equal(t, yascli.Run("add", "--branch=topic-c", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "--branch=topic-b", "--parent=main"), 0)
+
+		// Capture the list output
+		output := captureStdout(t, func() {
+			assert.Equal(t, yascli.Run("list"), 0)
+		})
+
+		// Find the line positions of each branch
+		lines := strings.Split(output, "\n")
+		topicCPos := -1
+		topicAPos := -1
+		topicBPos := -1
+
+		for i, line := range lines {
+			if strings.Contains(line, "topic-c") {
+				topicCPos = i
+			}
+
+			if strings.Contains(line, "topic-a") {
+				topicAPos = i
+			}
+
+			if strings.Contains(line, "topic-b") {
+				topicBPos = i
+			}
+		}
+
+		// Verify all branches were found
+		assert.Assert(t, topicCPos != -1, "topic-c should appear in list")
+		assert.Assert(t, topicAPos != -1, "topic-a should appear in list")
+		assert.Assert(t, topicBPos != -1, "topic-b should appear in list")
+
+		// Verify they appear in timestamp order (oldest first: topic-c, topic-a, topic-b)
+		assert.Assert(t, topicCPos < topicAPos,
+			"topic-c (created first) should appear before topic-a, but got positions: c=%d, a=%d", topicCPos, topicAPos)
+		assert.Assert(t, topicAPos < topicBPos,
+			"topic-a (created second) should appear before topic-b, but got positions: a=%d, b=%d", topicAPos, topicBPos)
+	})
+}

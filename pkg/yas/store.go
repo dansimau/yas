@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/dansimau/yas/pkg/fsutil"
 )
@@ -26,6 +27,31 @@ func (d *yasDatabase) Save() error {
 	return os.WriteFile(d.filePath, b, 0o644)
 }
 
+// migrateCreatedTimestamps backfills Created timestamps for branches that don't have them.
+// This ensures consistent ordering across runs. The migration is saved to disk immediately.
+func (d *yasDatabase) migrateCreatedTimestamps() error {
+	d.Branches.Lock()
+
+	needsSave := false
+	now := time.Now()
+
+	for name, bm := range d.Branches.data {
+		if bm.Created.IsZero() && name != "" {
+			bm.Created = now
+			d.Branches.data[name] = bm
+			needsSave = true
+		}
+	}
+
+	d.Branches.Unlock()
+
+	if needsSave {
+		return d.Save()
+	}
+
+	return nil
+}
+
 func loadData(filePath string) (*yasDatabase, error) {
 	db := &yasDatabase{
 		filePath: filePath,
@@ -46,6 +72,11 @@ func loadData(filePath string) (*yasDatabase, error) {
 	}
 
 	if err := json.Unmarshal(b, &db.yasData); err != nil {
+		return nil, err
+	}
+
+	// Migrate: Backfill Created timestamps for branches that don't have them
+	if err := db.migrateCreatedTimestamps(); err != nil {
 		return nil, err
 	}
 

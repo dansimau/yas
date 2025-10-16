@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/dansimau/yas/pkg/gitexec"
 	"github.com/dansimau/yas/pkg/log"
@@ -1016,6 +1018,20 @@ func (yas *YAS) collectBranchItems(items *[]SelectionItem, graph *dag.DAG, paren
 		childIDs = append(childIDs, childID)
 	}
 
+	// Sort by Created timestamp (ascending), then by name alphabetically
+	sort.Slice(childIDs, func(i, j int) bool {
+		metaI := yas.data.Branches.Get(childIDs[i])
+		metaJ := yas.data.Branches.Get(childIDs[j])
+
+		// If timestamps differ, sort by timestamp (older first)
+		if !metaI.Created.Equal(metaJ.Created) {
+			return metaI.Created.Before(metaJ.Created)
+		}
+
+		// If timestamps are equal, sort by name alphabetically
+		return childIDs[i] < childIDs[j]
+	})
+
 	for i, childID := range childIDs {
 		isLastChild := i == len(childIDs)-1
 
@@ -1195,6 +1211,11 @@ func (yas *YAS) SetParent(branchName, parentBranchName, branchPoint string) erro
 	}
 
 	branchMetdata.BranchPoint = branchPoint
+
+	// Initialize Created timestamp if not already set
+	if branchMetdata.Created.IsZero() {
+		branchMetdata.Created = time.Now()
+	}
 
 	yas.data.Branches.Set(branchName, branchMetdata)
 
