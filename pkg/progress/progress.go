@@ -2,6 +2,7 @@
 package progress
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"sync"
@@ -64,6 +65,7 @@ func (r *Runner) Add(name string, fn func() error) {
 func (r *Runner) UpdateStatusLine(name, statusLine string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
 	r.statusLines[name] = statusLine
 }
 
@@ -90,6 +92,7 @@ func (r *Runner) Start(printResults bool) error {
 
 	// Start spinner goroutine
 	stopSpinner := make(chan struct{})
+
 	spinnerDone := make(chan struct{})
 	go r.spinner(stopSpinner, spinnerDone)
 
@@ -97,6 +100,7 @@ func (r *Runner) Start(printResults bool) error {
 	p := pool.New().WithMaxGoroutines(r.maxGoroutines)
 	for i := range r.tasks {
 		task := r.tasks[i]
+
 		p.Go(func() {
 			// Mark as running
 			r.mu.Lock()
@@ -114,8 +118,10 @@ func (r *Runner) Start(printResults bool) error {
 
 			// Capture stderr if it's an exec error
 			stderr := ""
+
 			if err != nil {
-				if exitErr, ok := err.(*exec.ExitError); ok {
+				exitErr := &exec.ExitError{}
+				if errors.As(err, &exitErr) {
 					stderr = string(exitErr.Stderr)
 				}
 			}

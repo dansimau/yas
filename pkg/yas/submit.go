@@ -10,10 +10,6 @@ import (
 	"github.com/dansimau/yas/pkg/xexec"
 )
 
-func print(s string) {
-	fmt.Println(s)
-}
-
 func (yas *YAS) Submit() error {
 	// Check if a restack is in progress (do this before getting branch name
 	// which would fail in detached HEAD state during rebase)
