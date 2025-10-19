@@ -17,8 +17,13 @@ func (yas *YAS) cleanupBranch(name string) error {
 }
 
 func (yas *YAS) BranchExists(branchName string) (bool, error) {
-	if exists, err := yas.branchExistsLocally(branchName); err != nil {
-		return exists, err
+	exists, err := yas.branchExistsLocally(branchName)
+	if err != nil {
+		return false, err
+	}
+
+	if exists {
+		return true, nil
 	}
 
 	return yas.branchExistsRemotely(branchName)
