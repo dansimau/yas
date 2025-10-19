@@ -255,7 +255,7 @@ func TestList_ShowsPRInfo(t *testing.T) {
 		assert.NilError(t, err)
 
 		// Submit to create PR and populate metadata
-		err = y.Submit()
+		err = y.Submit(false)
 		assert.NilError(t, err)
 
 		// Capture the list output
@@ -315,7 +315,7 @@ func TestList_ShowsDraftPR(t *testing.T) {
 		assert.NilError(t, err)
 
 		// Submit to create PR and populate metadata
-		err = y.Submit()
+		err = y.Submit(false)
 		assert.NilError(t, err)
 
 		// Capture the list output

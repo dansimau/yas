@@ -294,7 +294,7 @@ func TestMerge_FailsWhenCINotPassing(t *testing.T) {
 		assert.NilError(t, err)
 
 		// Submit first to simulate that PR exists and is up to date
-		err = y.Submit()
+		err = y.Submit(false)
 		assert.NilError(t, err)
 
 		// Reload instance to get updated metadata
@@ -361,7 +361,7 @@ func TestMerge_FailsWhenNotApproved(t *testing.T) {
 		assert.NilError(t, err)
 
 		// Submit first to simulate that PR exists and is up to date
-		err = y.Submit()
+		err = y.Submit(false)
 		assert.NilError(t, err)
 
 		// Reload instance to get updated metadata
@@ -428,7 +428,7 @@ func TestMerge_SucceedsWithForceFlag(t *testing.T) {
 		assert.NilError(t, err)
 
 		// Submit first to simulate that PR exists and is up to date
-		err = y.Submit()
+		err = y.Submit(false)
 		assert.NilError(t, err)
 
 		// Set EDITOR to a script that just adds a comment to the merge message
@@ -516,7 +516,7 @@ func TestMerge_AbortsWhenMergeMessageEmpty(t *testing.T) {
 		assert.NilError(t, err)
 
 		// Submit first to simulate that PR exists and is up to date
-		err = y.Submit()
+		err = y.Submit(false)
 		assert.NilError(t, err)
 
 		// Set EDITOR to a script that clears the file (simulating user deleting content)

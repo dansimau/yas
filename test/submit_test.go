@@ -230,7 +230,7 @@ func TestSubmit_SkipsCreatingPRWhenAlreadyExists(t *testing.T) {
 		assert.NilError(t, err)
 
 		// Call submit - should push but NOT create PR since one exists
-		err = y.Submit()
+		err = y.Submit(false)
 		assert.NilError(t, err)
 
 		// Parse the command log
@@ -373,7 +373,7 @@ func TestSubmit_CreatesNewPRWhenNoneExists(t *testing.T) {
 		assert.NilError(t, err)
 
 		// Call submit - should push AND create PR
-		err = y.Submit()
+		err = y.Submit(false)
 		assert.NilError(t, err)
 
 		// Parse the command log
@@ -453,7 +453,7 @@ func TestSubmit_UpdatesPRBaseWhenLocalParentChanges(t *testing.T) {
 		// Submit topic-b - should detect base mismatch and update
 		testutil.ExecOrFail(t, "git checkout topic-b")
 
-		err = y.Submit()
+		err = y.Submit(false)
 		assert.NilError(t, err)
 
 		// Parse the command log
@@ -542,19 +542,19 @@ func TestSubmit_OutdatedSubmitsAllBranchesNeedingSubmit(t *testing.T) {
 		// Submit topic-a
 		testutil.ExecOrFail(t, "git checkout topic-a")
 
-		err = y.Submit()
+		err = y.Submit(false)
 		assert.NilError(t, err)
 
 		// Submit topic-b
 		testutil.ExecOrFail(t, "git checkout topic-b")
 
-		err = y.Submit()
+		err = y.Submit(false)
 		assert.NilError(t, err)
 
 		// Submit topic-c
 		testutil.ExecOrFail(t, "git checkout topic-c")
 
-		err = y.Submit()
+		err = y.Submit(false)
 		assert.NilError(t, err)
 
 		// Make additional commits to make branches need submitting
@@ -707,7 +707,7 @@ func TestSubmit_OutdatedSkipsUpToDateBranches(t *testing.T) {
 		assert.NilError(t, err)
 
 		// First, create PR for the branch
-		err = y.Submit()
+		err = y.Submit(false)
 		assert.NilError(t, err)
 
 		// Call submit with --outdated (should find no branches need submitting)
@@ -728,5 +728,117 @@ func TestSubmit_OutdatedSkipsUpToDateBranches(t *testing.T) {
 
 		// The --outdated command should find no branches need submitting since they're up to date
 		// This is the expected behavior - the test should pass
+	})
+}
+
+func TestSubmit_CreatesNonDraftPRByDefault(t *testing.T) {
+	cmdLogFile, cleanup := setupMockCommands(t, "") // No existing PR
+	defer cleanup()
+
+	testutil.WithTempWorkingDir(t, func() {
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+			git remote add origin https://fake.origin/test/test.git
+
+			# main
+			touch main
+			git add main
+			git commit -m "main-0"
+
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
+
+			# topic-a
+			git checkout -b topic-a
+			touch a
+			git add a
+			git commit -m "topic-a-0"
+		`)
+
+		// Initialize yas config
+		cfg := yas.Config{
+			RepoDirectory: ".",
+			TrunkBranch:   "main",
+		}
+		_, err := yas.WriteConfig(cfg)
+		assert.NilError(t, err)
+
+		// Create YAS instance and track branch
+		y, err := yas.NewFromRepository(".")
+		assert.NilError(t, err)
+		err = y.SetParent("topic-a", "main", "")
+		assert.NilError(t, err)
+
+		// Call submit without --draft flag
+		err = y.Submit(false)
+		assert.NilError(t, err)
+
+		// Parse the command log
+		commands, err := parseCmdLog(cmdLogFile)
+		assert.NilError(t, err)
+
+		// Verify gh pr create was called
+		prCreateCmd := findCommand(commands, "gh", "pr", "create")
+		assert.Assert(t, prCreateCmd != nil, "gh pr create should be called")
+
+		// Verify --draft flag is NOT present
+		assert.Assert(t, !contains(prCreateCmd, "--draft"), "gh pr create should NOT include --draft flag by default")
+	})
+}
+
+func TestSubmit_CreatesDraftPRWithFlag(t *testing.T) {
+	cmdLogFile, cleanup := setupMockCommands(t, "") // No existing PR
+	defer cleanup()
+
+	testutil.WithTempWorkingDir(t, func() {
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+			git remote add origin https://fake.origin/test/test.git
+
+			# main
+			touch main
+			git add main
+			git commit -m "main-0"
+
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
+
+			# topic-a
+			git checkout -b topic-a
+			touch a
+			git add a
+			git commit -m "topic-a-0"
+		`)
+
+		// Initialize yas config
+		cfg := yas.Config{
+			RepoDirectory: ".",
+			TrunkBranch:   "main",
+		}
+		_, err := yas.WriteConfig(cfg)
+		assert.NilError(t, err)
+
+		// Create YAS instance and track branch
+		y, err := yas.NewFromRepository(".")
+		assert.NilError(t, err)
+		err = y.SetParent("topic-a", "main", "")
+		assert.NilError(t, err)
+
+		// Call submit with draft=true
+		err = y.Submit(true)
+		assert.NilError(t, err)
+
+		// Parse the command log
+		commands, err := parseCmdLog(cmdLogFile)
+		assert.NilError(t, err)
+
+		// Verify gh pr create was called
+		prCreateCmd := findCommand(commands, "gh", "pr", "create")
+		assert.Assert(t, prCreateCmd != nil, "gh pr create should be called")
+
+		// Verify --draft flag IS present
+		assert.Assert(t, contains(prCreateCmd, "--draft"), "gh pr create should include --draft flag when draft=true")
 	})
 }
