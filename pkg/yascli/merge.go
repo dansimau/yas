@@ -6,8 +6,8 @@ import (
 
 type mergeCmd struct {
 	Arguments struct {
-		BranchName string `description:"Branch to merge" positional-arg-name:"branch" required:"false"`
-	} `positional-args:"true" required:"false"`
+		BranchName string `description:"Branch to merge" positional-arg-name:"branch"`
+	} `positional-args:"true"`
 
 	Force bool `description:"Skip CI and review checks" long:"force"`
 }
