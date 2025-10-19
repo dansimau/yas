@@ -41,6 +41,25 @@ case "$CMD_NAME" in
                 # Simulate successful push
                 exit 0
                 ;;
+            show-ref)
+                # Handle show-ref for remote branches
+                if [[ "$2" == refs/remotes/origin/* ]]; then
+                    branch_name="${2#refs/remotes/origin/}"
+                    # Check if this branch was pushed
+                    if [ -f "/tmp/yas-test-pushed-$branch_name" ]; then
+                        # Return success (branch exists remotely)
+                        exit 0
+                    fi
+                    # Branch not pushed, return exit code 1
+                    exit 1
+                fi
+                # For other show-ref commands, call real git
+                if [ -n "$YAS_TEST_REAL_GIT" ]; then
+                    exec "$YAS_TEST_REAL_GIT" "$@"
+                else
+                    exec /usr/bin/git "$@"
+                fi
+                ;;
             rev-parse)
                 # Check if they're asking for origin/branch
                 if [[ "$2" == origin/* ]]; then
@@ -61,6 +80,42 @@ case "$CMD_NAME" in
                     fi
                 fi
                 # For other rev-parse commands, call real git
+                if [ -n "$YAS_TEST_REAL_GIT" ]; then
+                    exec "$YAS_TEST_REAL_GIT" "$@"
+                else
+                    exec /usr/bin/git "$@"
+                fi
+                ;;
+            checkout)
+                # Handle checkout of remote branches
+                # If checking out a branch that doesn't exist locally but was pushed,
+                # simulate git's remote branch checkout behavior
+                if [[ "$2" != -* ]]; then
+                    branch_name="$2"
+                    # Check if branch exists locally
+                    if [ -n "$YAS_TEST_REAL_GIT" ]; then
+                        "$YAS_TEST_REAL_GIT" show-ref refs/heads/"$branch_name" >/dev/null 2>&1
+                        local_exists=$?
+                    else
+                        /usr/bin/git show-ref refs/heads/"$branch_name" >/dev/null 2>&1
+                        local_exists=$?
+                    fi
+
+                    # If doesn't exist locally but was pushed, create it from the pushed hash
+                    if [ $local_exists -ne 0 ] && [ -f "/tmp/yas-test-pushed-$branch_name" ]; then
+                        if [ -f "/tmp/yas-test-pushed-hash-$branch_name" ]; then
+                            pushed_hash=$(cat "/tmp/yas-test-pushed-hash-$branch_name")
+                            # Create the branch from the pushed hash
+                            if [ -n "$YAS_TEST_REAL_GIT" ]; then
+                                "$YAS_TEST_REAL_GIT" checkout -b "$branch_name" "$pushed_hash"
+                            else
+                                /usr/bin/git checkout -b "$branch_name" "$pushed_hash"
+                            fi
+                            exit $?
+                        fi
+                    fi
+                fi
+                # For all other checkout commands, call real git
                 if [ -n "$YAS_TEST_REAL_GIT" ]; then
                     exec "$YAS_TEST_REAL_GIT" "$@"
                 else

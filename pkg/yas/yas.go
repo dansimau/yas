@@ -3,7 +3,9 @@ package yas
 
 import (
 	"fmt"
+	"os"
 	"path"
+	"strings"
 
 	"github.com/dansimau/yas/pkg/gitexec"
 	"github.com/go-git/go-git/v5"
@@ -86,4 +88,71 @@ func (yas *YAS) validate() error {
 	}
 
 	return nil
+}
+
+// CreateBranch creates a new branch with the given name, optionally applying a user prefix.
+// If parentBranch is empty, it uses the current branch as the parent.
+// The new branch is created, checked out, and added to the stack.
+// If there are staged changes, they are automatically committed.
+func (yas *YAS) CreateBranch(branchName string, parentBranch string) (string, error) {
+	// Determine full branch name (with or without prefix based on config)
+	fullBranchName := branchName
+
+	if yas.cfg.AutoPrefixBranch {
+		// Get git email to determine prefix
+		// Check GIT_AUTHOR_EMAIL env var first, then fall back to git config
+		email := os.Getenv("GIT_AUTHOR_EMAIL")
+		if email == "" {
+			var err error
+
+			email, err = yas.git.GetConfig("user.email")
+			if err != nil {
+				return "", fmt.Errorf("failed to get git user.email: %w", err)
+			}
+		}
+
+		// Extract username from email (part before @)
+		username := email
+		if idx := strings.Index(email, "@"); idx != -1 {
+			username = email[:idx]
+		}
+
+		// Create full branch name with username prefix
+		fullBranchName = fmt.Sprintf("%s/%s", username, branchName)
+	}
+
+	// Determine parent branch
+	if parentBranch == "" {
+		// Use current branch as parent
+		currentBranch, err := yas.git.GetCurrentBranchName()
+		if err != nil {
+			return "", fmt.Errorf("failed to get current branch: %w", err)
+		}
+
+		parentBranch = currentBranch
+	}
+
+	// Create the new branch
+	if err := yas.git.CreateBranch(fullBranchName); err != nil {
+		return "", fmt.Errorf("failed to create branch: %w", err)
+	}
+
+	// Add to stack with parent
+	if err := yas.SetParent(fullBranchName, parentBranch, ""); err != nil {
+		return "", err
+	}
+
+	// Check for staged changes and commit automatically
+	hasStagedChanges, err := yas.git.HasStagedChanges()
+	if err != nil {
+		return "", fmt.Errorf("failed to check for staged changes: %w", err)
+	}
+
+	if hasStagedChanges {
+		if err := yas.git.Commit(); err != nil {
+			return "", fmt.Errorf("failed to commit staged changes: %w", err)
+		}
+	}
+
+	return fullBranchName, nil
 }

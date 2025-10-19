@@ -16,6 +16,27 @@ func (yas *YAS) cleanupBranch(name string) error {
 	return yas.data.Save()
 }
 
+func (yas *YAS) BranchExists(branchName string) (bool, error) {
+	exists, err := yas.branchExistsLocally(branchName)
+	if err != nil {
+		return false, err
+	}
+
+	if exists {
+		return true, nil
+	}
+
+	return yas.branchExistsRemotely(branchName)
+}
+
+func (yas *YAS) branchExistsLocally(branchName string) (bool, error) {
+	return yas.git.BranchExists(branchName)
+}
+
+func (yas *YAS) branchExistsRemotely(branchName string) (bool, error) {
+	return yas.git.RemoteBranchExists(branchName)
+}
+
 func (yas *YAS) DeleteBranch(name string) error {
 	branchExists, err := yas.git.BranchExists(name)
 	if err != nil {
@@ -231,6 +252,29 @@ func (yas *YAS) SwitchBranchInteractive() error {
 	// Check out the selected branch
 	if err := yas.git.Checkout(selected.ID); err != nil {
 		return fmt.Errorf("failed to checkout branch: %w", err)
+	}
+
+	return nil
+}
+
+func (yas *YAS) SwitchBranch(branchName string) error {
+	// Check if the branch exists locally
+	localBranchExists, err := yas.branchExistsLocally(branchName)
+	if err != nil {
+		return fmt.Errorf("failed to check if branch exists locally: %w", err)
+	}
+
+	// Call on git to switch to the branch
+	if err := yas.git.Checkout(branchName); err != nil {
+		return fmt.Errorf("failed to checkout branch: %w", err)
+	}
+
+	// If the branch did not previously exist locally, refresh it so we can
+	// track it and get the latest PR status.
+	if !localBranchExists {
+		if err := yas.RefreshRemoteStatus(branchName); err != nil {
+			fmt.Fprintf(os.Stderr, "WARNING: failed to refresh remote status for branch: %v\n", err)
+		}
 	}
 
 	return nil
