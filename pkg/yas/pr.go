@@ -83,6 +83,16 @@ func (yas *YAS) refreshRemoteStatus(name string) error {
 }
 
 func (yas *YAS) RefreshRemoteStatus(branchNames ...string) error {
+	// Refresh current branch if no branches are provided
+	if len(branchNames) == 0 {
+		currentBranch, err := yas.git.GetCurrentBranchName()
+		if err != nil {
+			return err
+		}
+
+		branchNames = append(branchNames, currentBranch)
+	}
+
 	p := pool.New().WithMaxGoroutines(5).WithErrors().WithFirstError()
 	for _, name := range branchNames {
 		p.Go(func() error {
