@@ -20,6 +20,10 @@ func TestUpdateTrunk(t *testing.T) {
 			git add main
 			git commit -m "main-0"
 
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
+
 			# topic-a
 			git checkout -b topic-a
 			touch a
@@ -65,6 +69,10 @@ func TestUpdateTrunkTopicA(t *testing.T) {
 			touch main
 			git add main
 			git commit -m "main-0"
+
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
 
 			# main -> topic-a
 			git checkout -b topic-a
@@ -126,6 +134,10 @@ func TestRestackReturnsToBranch(t *testing.T) {
 			touch main
 			git add main
 			git commit -m "main-0"
+
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
 
 			# topic-a
 			git checkout -b topic-a
@@ -199,6 +211,10 @@ func TestRestack_ShowsReminderWhenBranchesWithPRsAreRestacked(t *testing.T) {
 			git add main
 			git commit -m "main-0"
 
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
+
 			# topic-a
 			git checkout -b topic-a
 			touch a
@@ -271,6 +287,10 @@ func TestRestack_OnlyRebasesWhenNeeded(t *testing.T) {
 			touch main
 			git add main
 			git commit -m "main-0"
+
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
 
 			# topic-a
 			git checkout -b topic-a
@@ -364,6 +384,10 @@ func TestRestack_SkipsRebasingWhenNotNeeded(t *testing.T) {
 			git add main
 			git commit -m "main-0"
 
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
+
 			# topic-a
 			git checkout -b topic-a
 			touch a
@@ -427,6 +451,10 @@ func TestRestack_NoReminderWhenNoBranchesHavePRs(t *testing.T) {
 			touch main
 			git add main
 			git commit -m "main-0"
+
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
 
 			# topic-a
 			git checkout -b topic-a

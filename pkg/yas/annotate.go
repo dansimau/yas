@@ -25,6 +25,7 @@ func (yas *YAS) Annotate() error {
 
 	// Print success message for single-branch annotation
 	fmt.Printf("Updated PR for %s with stack information\n", currentBranch)
+
 	return nil
 }
 
@@ -34,6 +35,7 @@ func (yas *YAS) AnnotateAll() error {
 
 	if len(branchesWithPRs) == 0 {
 		fmt.Println("No branches with PRs found")
+
 		return nil
 	}
 

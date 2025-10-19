@@ -30,6 +30,10 @@ func TestAnnotate_UpdatesPRWithStackInfo(t *testing.T) {
 			git add main
 			git commit -m "main-0"
 
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
+
 			# topic-a
 			git checkout -b topic-a
 			touch a
@@ -88,6 +92,10 @@ func TestAnnotate_ErrorWhenNoPR(t *testing.T) {
 			git add main
 			git commit -m "main-0"
 
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
+
 			# topic-a
 			git checkout -b topic-a
 			touch a
@@ -123,6 +131,10 @@ func TestAnnotate_SinglePRInStack_DoesNotAddStackSection(t *testing.T) {
 			touch main
 			git add main
 			git commit -m "main-0"
+
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
 
 			# topic-a (only PR in stack)
 			git checkout -b topic-a
@@ -185,6 +197,10 @@ Stacked PRs:
 			touch main
 			git add main
 			git commit -m "main-0"
+
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
 
 			# topic-a
 			git checkout -b topic-a

@@ -5,7 +5,7 @@ import (
 )
 
 type annotateCmd struct {
-	All bool `long:"all" description:"Annotate all branches with PRs"`
+	All bool `description:"Annotate all branches with PRs" long:"all"`
 }
 
 func (c *annotateCmd) Execute(args []string) error {

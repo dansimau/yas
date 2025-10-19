@@ -31,6 +31,10 @@ func TestMerge_FailsWhenNoRestackInProgress(t *testing.T) {
 			git add main
 			git commit -m "main-0"
 
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
+
 			# topic-a
 			git checkout -b topic-a
 			touch a
@@ -81,6 +85,10 @@ func TestMerge_FailsWhenNoPR(t *testing.T) {
 			git add main
 			git commit -m "main-0"
 
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
+
 			# topic-a
 			git checkout -b topic-a
 			touch a
@@ -128,6 +136,10 @@ func TestMerge_FailsWhenNotAtTopOfStack(t *testing.T) {
 			touch main
 			git add main
 			git commit -m "main-0"
+
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
 
 			# topic-a
 			git checkout -b topic-a
@@ -192,6 +204,10 @@ func TestMerge_FailsWhenNeedsRestack(t *testing.T) {
 			git add main
 			git commit -m "main-0"
 
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
+
 			# topic-a
 			git checkout -b topic-a
 			touch a
@@ -251,6 +267,10 @@ func TestMerge_FailsWhenCINotPassing(t *testing.T) {
 			touch main
 			git add main
 			git commit -m "main-0"
+
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
 
 			# topic-a
 			git checkout -b topic-a
@@ -315,6 +335,10 @@ func TestMerge_FailsWhenNotApproved(t *testing.T) {
 			git add main
 			git commit -m "main-0"
 
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
+
 			# topic-a
 			git checkout -b topic-a
 			touch a
@@ -377,6 +401,10 @@ func TestMerge_SucceedsWithForceFlag(t *testing.T) {
 			touch main
 			git add main
 			git commit -m "main-0"
+
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
 
 			# topic-a
 			git checkout -b topic-a
@@ -461,6 +489,10 @@ func TestMerge_AbortsWhenMergeMessageEmpty(t *testing.T) {
 			touch main
 			git add main
 			git commit -m "main-0"
+
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
 
 			# topic-a
 			git checkout -b topic-a

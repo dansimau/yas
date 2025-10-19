@@ -21,6 +21,10 @@ func TestList_NeedsRestack(t *testing.T) {
 			git add main
 			git commit -m "main-0"
 
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
+
 			# topic-a
 			git checkout -b topic-a
 			touch a
@@ -77,6 +81,10 @@ func TestList_AfterRestack_NoWarning(t *testing.T) {
 			git add main
 			git commit -m "main-0"
 
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
+
 			# topic-a
 			git checkout -b topic-a
 			touch a
@@ -117,6 +125,10 @@ func TestList_ShowsCurrentBranch(t *testing.T) {
 			touch main
 			git add main
 			git commit -m "main-0"
+
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
 
 			# topic-a
 			git checkout -b topic-a
@@ -159,6 +171,10 @@ func TestList_ShowsCurrentBranch_OnTrunk(t *testing.T) {
 			touch main
 			git add main
 			git commit -m "main-0"
+
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
 
 			# topic-a
 			git checkout -b topic-a
@@ -212,6 +228,10 @@ func TestList_ShowsPRInfo(t *testing.T) {
 			touch main
 			git add main
 			git commit -m "main-0"
+
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
 
 			# topic-a
 			git checkout -b topic-a
@@ -269,6 +289,10 @@ func TestList_ShowsDraftPR(t *testing.T) {
 			git add main
 			git commit -m "main-0"
 
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
+
 			# topic-a
 			git checkout -b topic-a
 			touch a
@@ -315,6 +339,10 @@ func TestList_CurrentStack(t *testing.T) {
 			touch main
 			git add main
 			git commit -m "main-0"
+
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
 
 			# Create stack: main -> topic-a -> topic-b -> topic-c
 			git checkout -b topic-a
@@ -396,6 +424,10 @@ func TestList_GreysOutBranchPrefix(t *testing.T) {
                         git add main
                         git commit -m "main-0"
 
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
+
                         # user/topic-a
                         git checkout -b user/topic-a
                         touch a
@@ -441,6 +473,10 @@ func TestList_ShowsNeedsSubmit_WhenBaseRefDiffers(t *testing.T) {
 			touch main
 			git add main
 			git commit -m "main-0"
+
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
 
 			# topic-a
 			git checkout -b topic-a
@@ -517,6 +553,10 @@ func TestList_ShowsBothNeedsRestackAndNeedsSubmit(t *testing.T) {
 			git add main
 			git commit -m "main-0"
 
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
+
 			# topic-a
 			git checkout -b topic-a
 			touch a
@@ -582,6 +622,10 @@ func TestList_ShowsNotSubmitted_WhenNoPRExists(t *testing.T) {
 			git add main
 			git commit -m "main-0"
 
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
+
 			# topic-a (not submitted yet)
 			git checkout -b topic-a
 			touch a
@@ -614,6 +658,10 @@ func TestList_ShowsNeedsRestackAndNotSubmitted(t *testing.T) {
 			touch main
 			git add main
 			git commit -m "main-0"
+
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
 
 			# topic-a
 			git checkout -b topic-a
@@ -655,6 +703,10 @@ func TestList_SortsByCreatedTimestamp(t *testing.T) {
 			touch main
 			git add main
 			git commit -m "main-0"
+
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
 
 			# Create branches (will be tracked in specific order to test timestamp sorting)
 			git checkout -b topic-c

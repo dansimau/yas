@@ -2,6 +2,7 @@
 package progress
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"sync"
@@ -80,6 +81,7 @@ func (r *Runner) Start(printResults bool) error {
 
 	// Start spinner goroutine
 	stopSpinner := make(chan struct{})
+
 	spinnerDone := make(chan struct{})
 	go r.spinner(stopSpinner, spinnerDone)
 
@@ -87,6 +89,7 @@ func (r *Runner) Start(printResults bool) error {
 	p := pool.New().WithMaxGoroutines(r.maxGoroutines)
 	for i := range r.tasks {
 		task := r.tasks[i]
+
 		p.Go(func() {
 			// Mark as running
 			r.mu.Lock()
@@ -104,8 +107,10 @@ func (r *Runner) Start(printResults bool) error {
 
 			// Capture stderr if it's an exec error
 			stderr := ""
+
 			if err != nil {
-				if exitErr, ok := err.(*exec.ExitError); ok {
+				exitErr := &exec.ExitError{}
+				if errors.As(err, &exitErr) {
 					stderr = string(exitErr.Stderr)
 				}
 			}
@@ -136,6 +141,7 @@ func (r *Runner) Start(printResults bool) error {
 
 	// Collect errors from task results
 	var result error
+
 	for _, taskResult := range r.results {
 		if taskResult.Error != nil {
 			result = multierror.Append(result, taskResult.Error)
@@ -203,6 +209,7 @@ func (r *Runner) updateDisplay(spinnerChar rune) {
 		fmt.Print("\x1b[2K") // Clear entire line
 
 		var icon string
+
 		if err, completed := r.completed[task.Name]; completed {
 			if err != nil {
 				icon = "❌"
@@ -230,7 +237,6 @@ func (r *Runner) printFinalResults() {
 	// Print final results for each task
 	for _, task := range r.tasks {
 		err := r.completed[task.Name]
-
 		if err != nil {
 			// Failed task - print with error icon and stderr
 			fmt.Printf("❌ %s\n", task.Name)
@@ -240,9 +246,11 @@ func (r *Runner) printFinalResults() {
 				if result.Name == task.Name && result.Stderr != "" {
 					// Print stderr in red
 					fmt.Printf("\x1b[31m%s\x1b[0m", result.Stderr)
+
 					if result.Stderr[len(result.Stderr)-1] != '\n' {
 						fmt.Println()
 					}
+
 					break
 				}
 			}
