@@ -1166,3 +1166,188 @@ func TestList_FromInsideWorktree(t *testing.T) {
 		}
 	}
 }
+
+func TestList_All_ShowsUntrackedBranches(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+
+		# main
+		touch main
+		git add main
+		git commit -m "main-0"
+
+		# Set up remote tracking for main
+		git config branch.main.remote origin
+		git config branch.main.merge refs/heads/main
+
+		# Create a tracked branch
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+
+		# Create an untracked branch
+		git checkout main
+		git checkout -b untracked-b
+		touch b
+		git add b
+		git commit -m "untracked-b-0"
+
+		git checkout main
+	`)
+
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
+
+	// Without --all, should not show untracked branch
+	result := cli.Run("list")
+	assert.NilError(t, result.Err())
+	output := result.Stdout()
+
+	assert.Assert(t, strings.Contains(output, "topic-a"), "List should contain topic-a")
+	assert.Assert(t, !strings.Contains(output, "untracked-b"), "List should not contain untracked-b without --all")
+
+	// With --all, should show untracked branch
+	resultAll := cli.Run("list", "--all")
+	assert.NilError(t, resultAll.Err())
+	outputAll := resultAll.Stdout()
+
+	assert.Assert(t, strings.Contains(outputAll, "topic-a"), "List --all should contain topic-a")
+	assert.Assert(t, strings.Contains(outputAll, "untracked-b"), "List --all should contain untracked-b")
+}
+
+func TestList_All_GreysOutUntrackedBranches(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+
+		# main
+		touch main
+		git add main
+		git commit -m "main-0"
+
+		# Set up remote tracking for main
+		git config branch.main.remote origin
+		git config branch.main.merge refs/heads/main
+
+		# Create a tracked branch
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+
+		# Create an untracked branch
+		git checkout main
+		git checkout -b untracked-b
+		touch b
+		git add b
+		git commit -m "untracked-b-0"
+
+		git checkout main
+	`)
+
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
+
+	result := cli.Run("list", "--all")
+	assert.NilError(t, result.Err())
+	output := result.Stdout()
+
+	// Check that untracked-b is shown (tracked branches have status like "(not submitted)"
+	// but untracked branches appear without status indicators)
+	assert.Assert(t, strings.Contains(output, "untracked-b"),
+		"List --all should show untracked-b but got: %s", output)
+
+	// Verify untracked branch doesn't have status like "(not submitted)" - that's for tracked branches
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "untracked-b") {
+			// Untracked branches should NOT have status indicators like "(not submitted)"
+			assert.Assert(t, !strings.Contains(line, "(not submitted)"),
+				"Untracked branch should not show '(not submitted)' status but got: %s", line)
+
+			break
+		}
+	}
+}
+
+func TestList_All_PlacesUntrackedBranchesInHierarchy(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+
+		# main
+		touch main
+		git add main
+		git commit -m "main-0"
+
+		# Set up remote tracking for main
+		git config branch.main.remote origin
+		git config branch.main.merge refs/heads/main
+
+		# Create a tracked branch
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+
+		# Create an untracked branch from topic-a
+		git checkout -b untracked-child
+		touch child
+		git add child
+		git commit -m "untracked-child-0"
+
+		git checkout main
+	`)
+
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
+
+	result := cli.Run("list", "--all")
+	assert.NilError(t, result.Err())
+	output := result.Stdout()
+
+	// Find the line positions to verify hierarchy
+	lines := strings.Split(output, "\n")
+	topicAPos := -1
+	untrackedChildPos := -1
+
+	for i, line := range lines {
+		if strings.Contains(line, "topic-a") {
+			topicAPos = i
+		}
+
+		if strings.Contains(line, "untracked-child") {
+			untrackedChildPos = i
+		}
+	}
+
+	assert.Assert(t, topicAPos != -1, "topic-a should appear in list")
+	assert.Assert(t, untrackedChildPos != -1, "untracked-child should appear in list")
+
+	// untracked-child should come after topic-a (its parent)
+	assert.Assert(t, untrackedChildPos > topicAPos,
+		"untracked-child should appear after topic-a (its parent), but got positions: topic-a=%d, untracked-child=%d", topicAPos, untrackedChildPos)
+}
