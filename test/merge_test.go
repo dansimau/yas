@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/dansimau/yas/pkg/gitexec"
 	"github.com/dansimau/yas/pkg/testutil"
 	"github.com/dansimau/yas/pkg/yas"
 	"gotest.tools/v3/assert"
@@ -66,7 +67,7 @@ func TestMerge_FailsWhenNoRestackInProgress(t *testing.T) {
 		assert.NilError(t, err)
 
 		// Try to merge - should fail
-		err = y.Merge(false)
+		err = y.Merge("", false)
 		assert.ErrorContains(t, err, "restack operation is already in progress")
 	})
 }
@@ -111,7 +112,7 @@ func TestMerge_FailsWhenNoPR(t *testing.T) {
 		assert.NilError(t, err)
 
 		// Try to merge - should fail
-		err = y.Merge(false)
+		err = y.Merge("", false)
 		assert.ErrorContains(t, err, "does not have a PR")
 	})
 }
@@ -177,7 +178,7 @@ func TestMerge_FailsWhenNotAtTopOfStack(t *testing.T) {
 		// Try to merge topic-b (which is not at top of stack) - should fail
 		testutil.ExecOrFail(t, "git checkout topic-b")
 
-		err = y.Merge(false)
+		err = y.Merge("", false)
 		assert.ErrorContains(t, err, "must be at top of stack")
 		assert.ErrorContains(t, err, "Merge parent branches first")
 	})
@@ -242,7 +243,7 @@ func TestMerge_FailsWhenNeedsRestack(t *testing.T) {
 		// Try to merge - should fail because branch needs restack
 		testutil.ExecOrFail(t, "git checkout topic-a")
 
-		err = y.Merge(false)
+		err = y.Merge("", false)
 		assert.ErrorContains(t, err, "branch needs restack")
 	})
 }
@@ -308,7 +309,7 @@ func TestMerge_FailsWhenCINotPassing(t *testing.T) {
 		// Try to merge - should fail because CI is failing
 		testutil.ExecOrFail(t, "git checkout topic-a")
 
-		err = y.Merge(false)
+		err = y.Merge("", false)
 		assert.ErrorContains(t, err, "CI checks are not passing")
 		assert.ErrorContains(t, err, "Use --force to override")
 	})
@@ -375,7 +376,7 @@ func TestMerge_FailsWhenNotApproved(t *testing.T) {
 		// Try to merge - should fail because PR needs approval
 		testutil.ExecOrFail(t, "git checkout topic-a")
 
-		err = y.Merge(false)
+		err = y.Merge("", false)
 		assert.ErrorContains(t, err, "PR needs approval")
 		assert.ErrorContains(t, err, "Use --force to override")
 	})
@@ -442,7 +443,7 @@ echo "# User edited merge message" >> "$1"
 		// Try to merge with --force - should succeed even with failing CI/reviews
 		testutil.ExecOrFail(t, "git checkout topic-a")
 
-		err = y.Merge(true)
+		err = y.Merge("", true)
 		assert.NilError(t, err)
 
 		// Parse the command log
@@ -531,7 +532,7 @@ echo "" > "$1"
 		// Try to merge - should fail because merge message is empty
 		testutil.ExecOrFail(t, "git checkout topic-a")
 
-		err = y.Merge(false)
+		err = y.Merge("", false)
 		assert.ErrorContains(t, err, "merge aborted")
 		assert.ErrorContains(t, err, "empty commit message")
 
@@ -539,5 +540,100 @@ echo "" > "$1"
 		mergeFilePath := filepath.Join(".", ".git", "yas-merge-msg")
 		_, err = os.Stat(mergeFilePath)
 		assert.Assert(t, os.IsNotExist(err), "merge message file should be cleaned up after abort")
+	})
+}
+
+func TestMerge_WithBranchNameReturnsToOriginalBranch(t *testing.T) {
+	cmdLogFile, cleanup := setupMockCommandsWithPR(t, mockPROptions{
+		ID:                "PR_kwDOTest123",
+		State:             "OPEN",
+		URL:               "https://github.com/test/test/pull/42",
+		BaseRefName:       "main",
+		ReviewDecision:    "APPROVED",
+		StatusCheckRollup: "[]",
+	})
+	defer cleanup()
+
+	testutil.WithTempWorkingDir(t, func() {
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+			git remote add origin https://fake.origin/test/test.git
+
+			# main
+			touch main
+			git add main
+			git commit -m "main-0"
+
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
+
+			# topic-a
+			git checkout -b topic-a
+			touch a
+			git add a
+			git commit -m "topic-a-0"
+
+			# other-branch (we'll be on this branch when merging topic-a)
+			git checkout -b other-branch
+			touch other
+			git add other
+			git commit -m "other-0"
+		`)
+
+		// Initialize yas config
+		cfg := yas.Config{
+			RepoDirectory: ".",
+			TrunkBranch:   "main",
+		}
+		_, err := yas.WriteConfig(cfg)
+		assert.NilError(t, err)
+
+		// Create YAS instance and track branches
+		y, err := yas.NewFromRepository(".")
+		assert.NilError(t, err)
+		err = y.SetParent("topic-a", "main", "")
+		assert.NilError(t, err)
+		err = y.SetParent("other-branch", "main", "")
+		assert.NilError(t, err)
+
+		// Submit topic-a
+		testutil.ExecOrFail(t, "git checkout topic-a")
+		err = y.Submit(false)
+		assert.NilError(t, err)
+
+		// Set EDITOR to a script that just adds a comment to the merge message
+		editorScript := filepath.Join(t.TempDir(), "editor.sh")
+		err = os.WriteFile(editorScript, []byte(`#!/bin/bash
+echo "# User edited merge message" >> "$1"
+`), 0o755)
+		assert.NilError(t, err)
+		t.Setenv("EDITOR", editorScript)
+
+		// Checkout other-branch (so we're NOT on topic-a)
+		testutil.ExecOrFail(t, "git checkout other-branch")
+
+		// Verify we're on other-branch
+		git := gitexec.WithRepo(".")
+		currentBranch, err := git.GetCurrentBranchName()
+		assert.NilError(t, err)
+		assert.Equal(t, "other-branch", currentBranch)
+
+		// Merge topic-a (specifying the branch name explicitly)
+		err = y.Merge("topic-a", true)
+		assert.NilError(t, err)
+
+		// Verify we're back on other-branch after the merge
+		currentBranch, err = git.GetCurrentBranchName()
+		assert.NilError(t, err)
+		assert.Equal(t, "other-branch", currentBranch)
+
+		// Parse the command log
+		commands, err := parseCmdLog(cmdLogFile)
+		assert.NilError(t, err)
+
+		// Verify gh pr merge was called
+		mergeCmd := findCommand(commands, "gh", "pr", "merge")
+		assert.Assert(t, mergeCmd != nil, "gh pr merge should be called")
 	})
 }

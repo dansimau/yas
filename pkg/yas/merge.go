@@ -11,28 +11,38 @@ import (
 )
 
 // Merge merges the PR for the current branch using gh pr merge.
-func (yas *YAS) Merge(force bool) error {
+func (yas *YAS) Merge(branchName string, force bool) error {
 	// Check if a restack is in progress
 	if err := yas.checkRestackInProgress(); err != nil {
 		return err
 	}
 
-	// Get current branch
-	currentBranch, err := yas.git.GetCurrentBranchName()
+	startingBranch, err := yas.git.GetCurrentBranchName()
 	if err != nil {
 		return err
 	}
 
-	if currentBranch == "HEAD" {
-		return errors.New("cannot merge in detached HEAD state")
+	// Get current branch
+	if branchName == "" {
+		branchName = startingBranch
+	} else {
+		if err := yas.git.QuietCheckout(branchName); err != nil {
+			return fmt.Errorf("failed to checkout branch %s: %w", branchName, err)
+		}
+
+		defer func() {
+			if err := yas.git.QuietCheckout(startingBranch); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to return to starting branch %s: %v\n", startingBranch, err)
+			}
+		}()
 	}
 
 	// Get branch metadata
-	metadata := yas.data.Branches.Get(currentBranch)
+	metadata := yas.data.Branches.Get(branchName)
 
 	// Check that PR exists
 	if metadata.GitHubPullRequest.ID == "" {
-		return fmt.Errorf("branch '%s' does not have a PR", currentBranch)
+		return fmt.Errorf("branch '%s' does not have a PR", branchName)
 	}
 
 	// Check that branch is at top of stack (parent is trunk)
@@ -41,7 +51,7 @@ func (yas *YAS) Merge(force bool) error {
 	}
 
 	// Check that branch doesn't need restack
-	needsRebase, err := yas.needsRebase(currentBranch, metadata.Parent)
+	needsRebase, err := yas.needsRebase(branchName, metadata.Parent)
 	if err != nil {
 		return fmt.Errorf("failed to check if branch needs restack: %w", err)
 	}
@@ -51,7 +61,7 @@ func (yas *YAS) Merge(force bool) error {
 	}
 
 	// Check that branch doesn't need submit
-	needsSubmit, err := yas.needsSubmit(currentBranch)
+	needsSubmit, err := yas.needsSubmit(branchName)
 	if err != nil {
 		return fmt.Errorf("failed to check if branch needs submit: %w", err)
 	}
@@ -62,7 +72,7 @@ func (yas *YAS) Merge(force bool) error {
 
 	// Check CI and review status (unless --force)
 	if !force {
-		pr, err := yas.fetchPRStatusWithChecks(currentBranch)
+		pr, err := yas.fetchPRStatusWithChecks(branchName)
 		if err != nil {
 			return fmt.Errorf("failed to fetch PR status: %w", err)
 		}
