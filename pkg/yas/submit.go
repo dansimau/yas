@@ -11,7 +11,7 @@ import (
 	"github.com/heimdalr/dag"
 )
 
-func (yas *YAS) Submit() error {
+func (yas *YAS) Submit(draft bool) error {
 	// Check if a restack is in progress (do this before getting branch name
 	// which would fail in detached HEAD state during rebase)
 	if err := yas.checkRestackInProgress(); err != nil {
@@ -27,7 +27,7 @@ func (yas *YAS) Submit() error {
 		return errors.New("cannot submit in detached HEAD state")
 	}
 
-	if err := yas.submitBranch(currentBranch); err != nil {
+	if err := yas.submitBranch(currentBranch, draft); err != nil {
 		return err
 	}
 
@@ -40,7 +40,7 @@ func (yas *YAS) Submit() error {
 	return nil
 }
 
-func (yas *YAS) SubmitOutdated() error {
+func (yas *YAS) SubmitOutdated(draft bool) error {
 	// Check if a restack is in progress (do this before getting branch name
 	// which would fail in detached HEAD state during rebase)
 	if err := yas.checkRestackInProgress(); err != nil {
@@ -88,7 +88,7 @@ func (yas *YAS) SubmitOutdated() error {
 	for _, branchName := range branchesToSubmit {
 		fmt.Printf("\n=== Submitting %s ===\n", branchName)
 
-		if err := yas.submitBranch(branchName); err != nil {
+		if err := yas.submitBranch(branchName, draft); err != nil {
 			return fmt.Errorf("failed to submit %s: %w", branchName, err)
 		}
 
@@ -112,7 +112,7 @@ func (yas *YAS) SubmitOutdated() error {
 	return nil
 }
 
-func (yas *YAS) SubmitStack() error {
+func (yas *YAS) SubmitStack(draft bool) error {
 	// Check if a restack is in progress (do this before getting branch name
 	// which would fail in detached HEAD state during rebase)
 	if err := yas.checkRestackInProgress(); err != nil {
@@ -142,7 +142,7 @@ func (yas *YAS) SubmitStack() error {
 
 	// First pass: Submit all branches in the stack starting from trunk
 	var submittedBranches []string
-	if err := yas.submitDescendants(stackGraph, yas.cfg.TrunkBranch, &submittedBranches); err != nil {
+	if err := yas.submitDescendants(stackGraph, yas.cfg.TrunkBranch, &submittedBranches, draft); err != nil {
 		return err
 	}
 
@@ -164,7 +164,7 @@ func (yas *YAS) SubmitStack() error {
 	return nil
 }
 
-func (yas *YAS) submitDescendants(graph *dag.DAG, branchName string, submittedBranches *[]string) error {
+func (yas *YAS) submitDescendants(graph *dag.DAG, branchName string, submittedBranches *[]string, draft bool) error {
 	children, err := graph.GetChildren(branchName)
 	if err != nil {
 		return err
@@ -173,7 +173,7 @@ func (yas *YAS) submitDescendants(graph *dag.DAG, branchName string, submittedBr
 	for childID := range children {
 		fmt.Printf("\n=== Submitting %s ===\n", childID)
 
-		if err := yas.submitBranch(childID); err != nil {
+		if err := yas.submitBranch(childID, draft); err != nil {
 			return fmt.Errorf("failed to submit %s: %w", childID, err)
 		}
 
@@ -181,7 +181,7 @@ func (yas *YAS) submitDescendants(graph *dag.DAG, branchName string, submittedBr
 		*submittedBranches = append(*submittedBranches, childID)
 
 		// Recursively submit this branch's descendants
-		if err := yas.submitDescendants(graph, childID, submittedBranches); err != nil {
+		if err := yas.submitDescendants(graph, childID, submittedBranches, draft); err != nil {
 			return err
 		}
 	}
@@ -189,7 +189,7 @@ func (yas *YAS) submitDescendants(graph *dag.DAG, branchName string, submittedBr
 	return nil
 }
 
-func (yas *YAS) submitBranch(branchName string) error {
+func (yas *YAS) submitBranch(branchName string, draft bool) error {
 	if err := yas.refreshRemoteStatus(branchName); err != nil {
 		return err
 	}
@@ -292,9 +292,12 @@ func (yas *YAS) submitBranch(branchName string) error {
 
 	// Create new PR
 	prCreateArgs := []string{
-		"--draft",
 		"--fill-first",
 		"--head", branchName,
+	}
+
+	if draft {
+		prCreateArgs = append(prCreateArgs, "--draft")
 	}
 
 	if metadata.Parent != "" {

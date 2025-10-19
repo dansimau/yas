@@ -7,6 +7,7 @@ import (
 type submitCmd struct {
 	Stack    bool `description:"Submit all branches in the current stack" long:"stack"`
 	Outdated bool `description:"Submit all branches that need submitting" long:"outdated"`
+	Draft    bool `description:"Create new PRs as draft" long:"draft"`
 }
 
 func (c *submitCmd) Execute(args []string) error {
@@ -16,12 +17,12 @@ func (c *submitCmd) Execute(args []string) error {
 	}
 
 	if c.Outdated {
-		return yasInstance.SubmitOutdated()
+		return yasInstance.SubmitOutdated(c.Draft)
 	}
 
 	if c.Stack {
-		return yasInstance.SubmitStack()
+		return yasInstance.SubmitStack(c.Draft)
 	}
 
-	return yasInstance.Submit()
+	return yasInstance.Submit(c.Draft)
 }

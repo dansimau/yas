@@ -74,7 +74,7 @@ func TestAnnotate_UpdatesPRWithStackInfo(t *testing.T) {
 		// Submit topic-b to create a PR
 		testutil.ExecOrFail(t, "git checkout topic-b")
 
-		err = y.Submit()
+		err = y.Submit(false)
 		assert.NilError(t, err)
 
 		// Run annotate
@@ -160,7 +160,7 @@ func TestAnnotate_SinglePRInStack_DoesNotAddStackSection(t *testing.T) {
 		// Submit to create a PR
 		testutil.ExecOrFail(t, "git checkout topic-a")
 
-		err = y.Submit()
+		err = y.Submit(false)
 		assert.NilError(t, err)
 
 		// Run annotate - should not add stack section
@@ -226,7 +226,7 @@ Stacked PRs:
 		// Submit to create a PR - this calls annotate internally
 		testutil.ExecOrFail(t, "git checkout topic-a")
 
-		err = y.Submit()
+		err = y.Submit(false)
 		assert.NilError(t, err)
 
 		// Read the body file to get the result from submit's annotate call

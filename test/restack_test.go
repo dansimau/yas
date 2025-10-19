@@ -256,7 +256,7 @@ func TestRestack_ShowsReminderWhenBranchesWithPRsAreRestacked(t *testing.T) {
 		// Submit topic-a to create a PR and populate metadata
 		testutil.ExecOrFail(t, "git checkout topic-a")
 
-		err = y.Submit()
+		err = y.Submit(false)
 		assert.NilError(t, err)
 
 		// Go back to topic-b and restack
