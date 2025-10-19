@@ -196,6 +196,31 @@ func WithTempWorkingDir(t *testing.T, fn func()) {
 	fn()
 }
 
+// SetupFakeRemote configures a fake origin remote for testing purposes.
+// It sets up the remote and configures the specified branch to track it.
+// The remote URL is set to a fake GitHub URL.
+func SetupFakeRemote(t *testing.T, branchName string) {
+	t.Helper()
+
+	// Configure the remote
+	if err := xexec.Command("git", "config", "remote.origin.url", "https://github.com/test/test.git").Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := xexec.Command("git", "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*").Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Configure the branch to track the remote
+	if err := xexec.Command("git", "config", "branch."+branchName+".remote", "origin").Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := xexec.Command("git", "config", "branch."+branchName+".merge", "refs/heads/"+branchName).Run(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // parseEnvVar parses an env var string e.g. "foo=bar" and returns the
 // key/value components. It panics if the input string is invalid.
 func parseEnvVar(s string) (key, value string) {
