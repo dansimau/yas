@@ -178,7 +178,12 @@ func (yas *YAS) SetParent(branchName, parentBranchName, branchPoint string) erro
 		return fmt.Errorf("failed to save data: %w", err)
 	}
 
-	fmt.Printf("Set '%s' as parent of '%s'\n", parentBranchName, branchName)
+	shortHash, err := yas.git.GetShortHash(branchPoint)
+	if err != nil {
+		return fmt.Errorf("failed to get short hash: %w", err)
+	}
+
+	fmt.Printf("Set '%s' as parent of '%s' (branched after %s)\n", parentBranchName, branchName, shortHash)
 
 	return nil
 }
