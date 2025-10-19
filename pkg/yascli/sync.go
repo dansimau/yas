@@ -7,6 +7,8 @@ import (
 )
 
 type syncCmd struct {
+	SkipRestack bool `description:"Skip restacking branches after sync" long:"skip-restack"`
+
 	yasInstance *yas.YAS
 }
 
@@ -76,10 +78,12 @@ func (c *syncCmd) Execute(args []string) error {
 		return NewError(err.Error())
 	}
 
-	fmt.Println("🔄 Restacking branches...")
+	if !c.SkipRestack {
+		fmt.Println("🔄 Restacking branches...")
 
-	if err := yasInstance.Restack(); err != nil {
-		return NewError(err.Error())
+		if err := yasInstance.Restack(); err != nil {
+			return NewError(err.Error())
+		}
 	}
 
 	return nil
