@@ -12,8 +12,8 @@ yas (Yet Another Stacked Diff Tool) is a CLI tool for managing stacked PRs on Gi
 # Build the binary
 go build ./cmd/yas
 
-# Run all tests
-go test ./...
+# Run all tests and see failures
+make test >/dev/null
 
 # Run tests in a specific package
 go test ./pkg/yas
@@ -23,7 +23,7 @@ go test ./test
 go test ./test -run TestUpdateTrunk
 
 # Run tests with verbose output
-go test -v ./...
+make test
 
 # Run lint checks
 make lint
