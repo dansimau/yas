@@ -206,7 +206,7 @@ func (r *Repo) GetRemoteForBranch(branchNames ...string) (string, error) {
 		return "", lastErr
 	}
 
-	return "", fmt.Errorf("no branch names provided")
+	return "", errors.New("no branch names provided")
 }
 
 func (r *Repo) ForcePushBranch(origin string, branchName string) error {

@@ -204,6 +204,10 @@ func TestSubmit_SkipsCreatingPRWhenAlreadyExists(t *testing.T) {
 			git add main
 			git commit -m "main-0"
 
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
+
 			# topic-a
 			git checkout -b topic-a
 			touch a
@@ -257,6 +261,10 @@ func TestSubmit_StackSubmitsAllBranches(t *testing.T) {
 			touch main
 			git add main
 			git commit -m "main-0"
+
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
 
 			# topic-a
 			git checkout -b topic-a
@@ -339,6 +347,10 @@ func TestSubmit_CreatesNewPRWhenNoneExists(t *testing.T) {
 			git add main
 			git commit -m "main-0"
 
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
+
 			# topic-a
 			git checkout -b topic-a
 			touch a
@@ -399,6 +411,10 @@ func TestSubmit_UpdatesPRBaseWhenLocalParentChanges(t *testing.T) {
 			touch main
 			git add main
 			git commit -m "main-0"
+
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
 
 			# topic-a
 			git checkout -b topic-a
@@ -480,6 +496,10 @@ func TestSubmit_OutdatedSubmitsAllBranchesNeedingSubmit(t *testing.T) {
 			touch main
 			git add main
 			git commit -m "main-0"
+
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
 
 			# topic-a
 			git checkout -b topic-a
@@ -606,6 +626,10 @@ func TestSubmit_OutdatedSkipsBranchesWithoutPRs(t *testing.T) {
 			git add main
 			git commit -m "main-0"
 
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
+
 			# topic-a (no PR)
 			git checkout -b topic-a
 			touch a
@@ -656,6 +680,10 @@ func TestSubmit_OutdatedSkipsUpToDateBranches(t *testing.T) {
 			touch main
 			git add main
 			git commit -m "main-0"
+
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
 
 			# topic-a
 			git checkout -b topic-a

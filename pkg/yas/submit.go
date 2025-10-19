@@ -98,7 +98,6 @@ func (yas *YAS) SubmitOutdated() error {
 	// Annotate all submitted branches with stack information
 	runner := progress.New(5, "\nAnnotating PRs:")
 	for _, branchName := range submittedBranches {
-		branchName := branchName // capture for closure
 		runner.Add(branchName, func() error {
 			return yas.annotateBranch(branchName)
 		})
@@ -149,8 +148,8 @@ func (yas *YAS) SubmitStack() error {
 
 	// Second pass: Annotate all submitted branches now that all PRs exist
 	runner := progress.New(5, "\nAnnotating PRs:")
-	for _, branch := range submittedBranches {
-		branchName := branch // capture for closure
+
+	for _, branchName := range submittedBranches {
 		runner.Add(branchName, func() error {
 			return yas.annotateBranch(branchName)
 		})
@@ -228,11 +227,10 @@ func (yas *YAS) submitBranch(branchName string) error {
 	needsPush := !remoteExists || oldRemoteHash != currentLocalHash
 
 	if needsPush {
-		// Get remote for this branch (default to "origin" if not configured)
-		remote, err := yas.git.GetRemoteForBranch(branchName)
+		// Get remote for this branch, or trunk if no remote is configured
+		remote, err := yas.git.GetRemoteForBranch(branchName, yas.cfg.TrunkBranch)
 		if err != nil {
-			// If no remote is configured, default to "origin"
-			remote = "origin"
+			return fmt.Errorf("failed to get remote for branch %s or trunk: %w", branchName, err)
 		}
 
 		// Force push with lease (we expect the branch may have been rebased)
