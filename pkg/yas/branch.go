@@ -262,10 +262,11 @@ func (yas *YAS) UntrackedBranches() ([]string, error) {
 	return branches, nil
 }
 
-func (yas *YAS) pruneMissingBranches() error {
+// pruneMetadata removes old branches from the metadata file.
+func (yas *YAS) pruneMetadata() error {
 	removed := false
 
-	for _, branch := range yas.data.Branches.ToSlice() {
+	for _, branch := range yas.data.Branches.ToSlice().WithCreatedDateBefore(time.Now().Add(-24 * time.Hour * 7)) {
 		if strings.TrimSpace(branch.Name) == "" {
 			continue
 		}

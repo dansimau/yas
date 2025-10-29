@@ -44,7 +44,7 @@ func (yas *YAS) Restack() error {
 
 		// Build the work queue: a list of [child, parent] pairs to rebase
 		var workQueue [][2]string
-		if err := yas.buildRebaseWorkQueue(graph, yas.cfg.TrunkBranch, &workQueue); err != nil {
+		if err := yas.buildRestackWorkQueue(graph, yas.cfg.TrunkBranch, &workQueue); err != nil {
 			return err
 		}
 
@@ -54,7 +54,7 @@ func (yas *YAS) Restack() error {
 		}
 
 		// Process the work queue
-		if err := yas.processRebaseWorkQueue(startingBranch, workQueue, &rebasedBranches); err != nil {
+		if err := yas.processRestackWorkQueue(startingBranch, workQueue, &rebasedBranches); err != nil {
 			return err
 		}
 	}
@@ -94,9 +94,88 @@ func (yas *YAS) Restack() error {
 	return nil
 }
 
-// buildRebaseWorkQueue builds a queue of [child, parent] pairs representing
+// findNearestLivingAncestor recursively walks up the parent chain in metadata
+// until it finds a branch that exists in git, or reaches trunk.
+func (yas *YAS) findNearestLivingAncestor(branchName string) (string, error) {
+	// If we've reached trunk, that's the answer
+	if branchName == yas.cfg.TrunkBranch {
+		return yas.cfg.TrunkBranch, nil
+	}
+
+	// Check if this branch exists in metadata
+	if !yas.data.Branches.Exists(branchName) {
+		// Branch not in metadata, go to trunk
+		return yas.cfg.TrunkBranch, nil
+	}
+
+	// Check if this branch exists as a git branch
+	exists, err := yas.git.BranchExists(branchName)
+	if err != nil {
+		return "", err
+	}
+
+	if exists {
+		// Found a living ancestor!
+		return branchName, nil
+	}
+
+	// This branch doesn't exist, check its parent
+	metadata := yas.data.Branches.Get(branchName)
+	if metadata.Parent == "" {
+		// No parent, go to trunk
+		return yas.cfg.TrunkBranch, nil
+	}
+
+	// Recurse to the parent
+	return yas.findNearestLivingAncestor(metadata.Parent)
+}
+
+// reparentIfParentDeleted checks if a branch's parent has been deleted and reparents
+// it to the nearest living ancestor if so. Returns the effective parent to use for rebasing.
+func (yas *YAS) reparentIfParentDeleted(branchName string) (string, error) {
+	metadata := yas.data.Branches.Get(branchName)
+
+	// If already pointing to trunk, nothing to do
+	if metadata.Parent == "" || metadata.Parent == yas.cfg.TrunkBranch {
+		return metadata.Parent, nil
+	}
+
+	// Check if parent exists as a git branch
+	parentExists, err := yas.git.BranchExists(metadata.Parent)
+	if err != nil {
+		return "", err
+	}
+
+	if parentExists {
+		// Parent exists, no reparenting needed
+		return metadata.Parent, nil
+	}
+
+	// Parent was deleted, find the nearest living ancestor
+	newParent, err := yas.findNearestLivingAncestor(metadata.Parent)
+	if err != nil {
+		return "", err
+	}
+
+	// Update metadata
+	oldParent := metadata.Parent
+	metadata.Parent = newParent
+	yas.data.Branches.Set(branchName, metadata)
+
+	// Save immediately to ensure partial progress is preserved
+	if err := yas.data.Save(); err != nil {
+		return "", fmt.Errorf("failed to save metadata after reparenting: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Warning: parent branch '%s' for '%s' no longer exists, reparenting to '%s'\n",
+		oldParent, branchName, newParent)
+
+	return newParent, nil
+}
+
+// buildRestackWorkQueue builds a queue of [child, parent] pairs representing
 // the rebase operations that need to be performed.
-func (yas *YAS) buildRebaseWorkQueue(graph *dag.DAG, branchName string, workQueue *[][2]string) error {
+func (yas *YAS) buildRestackWorkQueue(graph *dag.DAG, branchName string, workQueue *[][2]string) error {
 	children, err := graph.GetChildren(branchName)
 	if err != nil {
 		return err
@@ -115,7 +194,7 @@ func (yas *YAS) buildRebaseWorkQueue(graph *dag.DAG, branchName string, workQueu
 		}
 
 		// Recursively add descendants to the work queue
-		if err := yas.buildRebaseWorkQueue(graph, childID, workQueue); err != nil {
+		if err := yas.buildRestackWorkQueue(graph, childID, workQueue); err != nil {
 			return err
 		}
 	}
@@ -123,11 +202,23 @@ func (yas *YAS) buildRebaseWorkQueue(graph *dag.DAG, branchName string, workQueu
 	return nil
 }
 
-// processRebaseWorkQueue processes a queue of rebase operations, saving state on error.
-func (yas *YAS) processRebaseWorkQueue(startingBranch string, workQueue [][2]string, rebasedBranches *[]string) error {
+// processRestackWorkQueue processes a queue of rebase operations, saving state on error.
+func (yas *YAS) processRestackWorkQueue(startingBranch string, workQueue [][2]string, rebasedBranches *[]string) error {
 	for i, work := range workQueue {
 		childBranch := work[0]
 		parentBranch := work[1]
+
+		// Check if the parent has been deleted and reparent if necessary
+		// This returns the effective parent to use for rebasing
+		newParent, err := yas.reparentIfParentDeleted(childBranch)
+		if err != nil {
+			return err
+		}
+
+		// If reparenting occurred, skip the rebase
+		if newParent != parentBranch {
+			continue
+		}
 
 		// Get child metadata for branch point
 		childMetadata := yas.data.Branches.Get(childBranch)
@@ -280,7 +371,7 @@ func (yas *YAS) Continue() error {
 		}
 
 		var newWorkQueue [][2]string
-		if err := yas.buildRebaseWorkQueue(graph, yas.cfg.TrunkBranch, &newWorkQueue); err != nil {
+		if err := yas.buildRestackWorkQueue(graph, yas.cfg.TrunkBranch, &newWorkQueue); err != nil {
 			return fmt.Errorf("failed to build work queue: %w", err)
 		}
 
@@ -291,7 +382,7 @@ func (yas *YAS) Continue() error {
 
 		fmt.Printf("\nContinuing restack with %d remaining branch(es)...\n", len(newWorkQueue))
 
-		if err := yas.processRebaseWorkQueue(state.StartingBranch, newWorkQueue, &rebasedBranches); err != nil {
+		if err := yas.processRestackWorkQueue(state.StartingBranch, newWorkQueue, &rebasedBranches); err != nil {
 			return err
 		}
 	}
@@ -396,6 +487,16 @@ func (yas *YAS) Abort() error {
 func (yas *YAS) needsRebase(branchName, parentBranch string) (bool, error) {
 	// Get the branch metadata to access the stored branch point
 	metadata := yas.data.Branches.Get(branchName)
+
+	branchExists, err := yas.git.BranchExists(parentBranch)
+	if err != nil {
+		return false, err
+	}
+
+	// If the parent no longer exists, we need to rebase (onto trunk)
+	if !branchExists {
+		return true, nil
+	}
 
 	// Get the current commit of the parent branch
 	parentCommit, err := yas.git.GetCommitHash(parentBranch)

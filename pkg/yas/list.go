@@ -115,18 +115,27 @@ func (yas *YAS) collectBranchItems(items *[]SelectionItem, graph *dag.DAG, paren
 
 		yellow := color.New(color.FgYellow).SprintFunc()
 
-		needsRebase, err := yas.needsRebase(childID, parentID)
-		if err == nil && needsRebase {
-			statusParts = append(statusParts, "needs restack")
+		branchExists, err := yas.git.BranchExists(childID)
+		if err != nil {
+			return err
 		}
 
-		// Check submit status
-		if branchMetadata.GitHubPullRequest.ID == "" {
-			statusParts = append(statusParts, "not submitted")
+		if !branchExists {
+			statusParts = append(statusParts, "deleted")
 		} else {
-			needsSubmit, err := yas.needsSubmit(childID)
-			if err == nil && needsSubmit {
-				statusParts = append(statusParts, "needs submit")
+			needsRebase, err := yas.needsRebase(childID, parentID)
+			if err == nil && needsRebase {
+				statusParts = append(statusParts, "needs restack")
+			}
+
+			// Check submit status
+			if branchMetadata.GitHubPullRequest.ID == "" {
+				statusParts = append(statusParts, "not submitted")
+			} else {
+				needsSubmit, err := yas.needsSubmit(childID)
+				if err == nil && needsSubmit {
+					statusParts = append(statusParts, "needs submit")
+				}
 			}
 		}
 
