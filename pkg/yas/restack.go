@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/heimdalr/dag"
 )
@@ -245,6 +246,28 @@ func (yas *YAS) processRestackWorkQueue(startingBranch string, workQueue [][2]st
 		childBranch := work[0]
 		parentBranch := work[1]
 
+		// Get child metadata for branch point
+		childMetadata := yas.data.Branches.Get(childBranch)
+
+		childBranchExists, err := yas.git.BranchExists(childBranch)
+		if err != nil {
+			return err
+		}
+
+		if !childBranchExists {
+			if childMetadata.Deleted != nil {
+				now := time.Now()
+				childMetadata.Deleted = &now
+				yas.data.Branches.Set(childBranch, childMetadata)
+
+				if err := yas.data.Save(); err != nil {
+					return fmt.Errorf("failed to save metadata after marking branch as deleted: %w", err)
+				}
+			}
+
+			continue
+		}
+
 		// Check if the parent has been deleted and reparent if necessary
 		// This returns the effective parent to use for rebasing
 		newParent, err := yas.reparentIfParentDeleted(childBranch)
@@ -256,9 +279,6 @@ func (yas *YAS) processRestackWorkQueue(startingBranch string, workQueue [][2]st
 		if newParent != parentBranch {
 			continue
 		}
-
-		// Get child metadata for branch point
-		childMetadata := yas.data.Branches.Get(childBranch)
 
 		// Perform the rebase
 		if childMetadata.BranchPoint == "" {
