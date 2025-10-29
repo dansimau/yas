@@ -80,11 +80,6 @@ func (yas *YAS) BranchMetadata(branchName string) BranchMetadata {
 	return yas.data.Branches.Get(branchName)
 }
 
-// BranchExists returns true if the branch is tracked by yas.
-func (yas *YAS) BranchExists(branchName string) bool {
-	return yas.data.Branches.Exists(branchName)
-}
-
 // CurrentBranchName returns the name of the current branch.
 func (yas *YAS) CurrentBranchName() (string, error) {
 	return yas.git.GetCurrentBranchName()

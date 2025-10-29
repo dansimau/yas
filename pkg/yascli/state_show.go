@@ -1,8 +1,6 @@
 package yascli
 
 import (
-	"fmt"
-
 	"github.com/dansimau/yas/pkg/yas"
 	"github.com/davecgh/go-spew/spew"
 )
@@ -34,13 +32,6 @@ func (c *stateShowCmd) Execute(args []string) error {
 		}
 
 		c.Args.Branches = []string{currentBranch}
-	}
-
-	// First check all branches exist
-	for _, branchName := range c.Args.Branches {
-		if !yasInstance.BranchExists(branchName) {
-			return NewError(fmt.Sprintf("Branch %q is not tracked by yas", branchName))
-		}
 	}
 
 	data := []any{}
