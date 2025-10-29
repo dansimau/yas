@@ -397,6 +397,16 @@ func (yas *YAS) needsRebase(branchName, parentBranch string) (bool, error) {
 	// Get the branch metadata to access the stored branch point
 	metadata := yas.data.Branches.Get(branchName)
 
+	branchExists, err := yas.git.BranchExists(parentBranch)
+	if err != nil {
+		return false, err
+	}
+
+	// If the parent no longer exists, we need to rebase (onto trunk)
+	if !branchExists {
+		return true, nil
+	}
+
 	// Get the current commit of the parent branch
 	parentCommit, err := yas.git.GetCommitHash(parentBranch)
 	if err != nil {

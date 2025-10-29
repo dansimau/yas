@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/dansimau/yas/pkg/testutil"
 	"github.com/dansimau/yas/pkg/yas"
@@ -27,6 +28,15 @@ func readStateFile(t *testing.T) yasState {
 	return state
 }
 
+func writeStateFile(t *testing.T, state yasState) {
+	t.Helper()
+
+	data, err := json.Marshal(state)
+	assert.NilError(t, err)
+
+	assert.NilError(t, os.WriteFile(".git/.yasstate", data, 0644))
+}
+
 func TestPrunesBranchesMissingLocally(t *testing.T) {
 	testutil.WithTempWorkingDir(t, func() {
 		testutil.ExecOrFail(t, `
@@ -45,7 +55,14 @@ func TestPrunesBranchesMissingLocally(t *testing.T) {
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
 		assert.Equal(t, yascli.Run("add", "--branch=feature/prune-me", "--parent=main"), 0)
 
+		// Set the branch creation date to 8 days ago (older than the 7-day threshold)
 		state := readStateFile(t)
+		branch := state.Branches["feature/prune-me"]
+		branch.Created = time.Now().Add(-8 * 24 * time.Hour)
+		state.Branches["feature/prune-me"] = branch
+		writeStateFile(t, state)
+
+		state = readStateFile(t)
 		if _, ok := state.Branches["feature/prune-me"]; !ok {
 			t.Fatalf("expected branch to exist in state before pruning")
 		}
@@ -61,6 +78,51 @@ func TestPrunesBranchesMissingLocally(t *testing.T) {
 		state = readStateFile(t)
 		if _, ok := state.Branches["feature/prune-me"]; ok {
 			t.Fatalf("expected branch to be pruned from state after deletion")
+		}
+	})
+}
+
+func TestDoesNotPruneRecentlyCreatedMissingBranches(t *testing.T) {
+	testutil.WithTempWorkingDir(t, func() {
+		testutil.ExecOrFail(t, `
+                        git init --initial-branch=main
+
+                        touch main
+                        git add main
+                        git commit -m "main-0"
+
+                        git checkout -b feature/keep-me
+                        touch feature
+                        git add feature
+                        git commit -m "feature-0"
+                `)
+
+		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
+		assert.Equal(t, yascli.Run("add", "--branch=feature/keep-me", "--parent=main"), 0)
+
+		// Set the branch creation date to 6 days ago (within the 7-day threshold)
+		state := readStateFile(t)
+		branch := state.Branches["feature/keep-me"]
+		branch.Created = time.Now().Add(-6 * 24 * time.Hour)
+		state.Branches["feature/keep-me"] = branch
+		writeStateFile(t, state)
+
+		state = readStateFile(t)
+		if _, ok := state.Branches["feature/keep-me"]; !ok {
+			t.Fatalf("expected branch to exist in state before pruning")
+		}
+
+		testutil.ExecOrFail(t, `
+                        git checkout main
+                        git branch -D feature/keep-me
+                `)
+
+		_, err := yas.NewFromRepository(".")
+		assert.NilError(t, err)
+
+		state = readStateFile(t)
+		if _, ok := state.Branches["feature/keep-me"]; !ok {
+			t.Fatalf("expected branch to still exist in state (not pruned) because it was created less than 7 days ago")
 		}
 	})
 }

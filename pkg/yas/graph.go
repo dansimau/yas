@@ -1,6 +1,8 @@
 package yas
 
 import (
+	"errors"
+
 	"github.com/heimdalr/dag"
 )
 
@@ -19,7 +21,25 @@ func (yas *YAS) graph() (*dag.DAG, error) {
 	}
 
 	for _, branch := range yas.data.Branches.ToSlice().WithParents() {
+		// Add parent vertex, if it doesn't exist
+		if _, err := graph.GetVertex(branch.Parent); errors.As(err, &dag.IDUnknownError{}) {
+			if err := graph.AddVertexByID(branch.Parent, branch.Parent); err != nil {
+				return nil, err
+			}
+		}
+
 		if err := graph.AddEdge(branch.Parent, branch.Name); err != nil {
+			return nil, err
+		}
+	}
+
+	// Iterate over parentless roots and attach everything to trunk. This happens if we delete a branch.
+	for branch := range graph.GetRoots() {
+		if branch == yas.cfg.TrunkBranch {
+			continue
+		}
+
+		if err := graph.AddEdge(yas.cfg.TrunkBranch, branch); err != nil {
 			return nil, err
 		}
 	}

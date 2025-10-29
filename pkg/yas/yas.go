@@ -46,7 +46,7 @@ func New(cfg Config) (*YAS, error) {
 		return nil, fmt.Errorf("validation failed: %w", err)
 	}
 
-	if err := yas.pruneMissingBranches(); err != nil {
+	if err := yas.pruneMetadata(); err != nil {
 		return nil, fmt.Errorf("failed to prune missing branches: %w", err)
 	}
 

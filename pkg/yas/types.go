@@ -108,6 +108,12 @@ func (b *Branches) Set(data BranchMetadata) {
 	*b = n
 }
 
+func (b Branches) WithCreatedDateBefore(ts time.Time) Branches {
+	return b.filter(func(b BranchMetadata) bool {
+		return !b.Created.IsZero() && b.Created.Before(ts)
+	})
+}
+
 func (b Branches) WithParents() Branches {
 	return b.filter(func(b BranchMetadata) bool {
 		return b.Parent != ""
