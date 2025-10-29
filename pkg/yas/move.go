@@ -101,7 +101,7 @@ func (yas *YAS) MoveBranch(branchName, targetBranch string) error {
 	rebasedBranches := []string{}
 
 	// Process the work queue
-	if err := yas.processRebaseWorkQueue(currentBranch, workQueue, &rebasedBranches); err != nil {
+	if err := yas.processRestackWorkQueue(currentBranch, workQueue, &rebasedBranches); err != nil {
 		return err
 	}
 
