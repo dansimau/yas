@@ -37,7 +37,7 @@ func (c *syncCmd) checkForClosedPRs() error {
 		}
 
 		if !cmd.DryRun {
-			if err := c.yasInstance.DeleteMergedBranch(branch.Name); err != nil {
+			if err := c.yasInstance.DeleteBranch(branch.Name); err != nil {
 				return fmt.Errorf("error deleting branch %s: %w", branch.Name, err)
 			}
 		} else {
