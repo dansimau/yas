@@ -148,6 +148,10 @@ func (yas *YAS) SetParent(branchName, parentBranchName, branchPoint string) erro
 		branchName = currentBranch
 	}
 
+	if branchName == yas.cfg.TrunkBranch {
+		return errors.New("refusing to add trunk branch as a child")
+	}
+
 	if parentBranchName == "" {
 		forkPoint, err := yas.git.GetForkPoint(branchName)
 		if err != nil {

@@ -44,8 +44,8 @@ func TestContinue_ResumeAfterConflict(t *testing.T) {
 
 		// Initialize yas config
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-b", "--parent=topic-a"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-b", "--parent=topic-a"), 0)
 
 		// Run restack - it should fail due to conflict on topic-a
 		exitCode := yascli.Run("restack")
@@ -142,7 +142,7 @@ func TestContinue_UserAlreadyCompletedRebase(t *testing.T) {
 
 		// Initialize yas config
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
 
 		// Run restack - it should fail due to conflict
 		exitCode := yascli.Run("restack")
@@ -203,7 +203,7 @@ func TestContinue_ErrorsWhenRebaseAborted(t *testing.T) {
 
 		// Initialize yas config
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
 
 		// Run restack - it should fail due to conflict
 		exitCode := yascli.Run("restack")
@@ -273,9 +273,9 @@ func TestContinue_MultipleConflicts(t *testing.T) {
 
 		// Initialize yas config
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-b", "--parent=topic-a"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-c", "--parent=topic-b"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-b", "--parent=topic-a"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-c", "--parent=topic-b"), 0)
 
 		// Run restack - it should fail on topic-a
 		exitCode := yascli.Run("restack")

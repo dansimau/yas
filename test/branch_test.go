@@ -26,7 +26,7 @@ func TestBranch_GetBranchList_ForInteractiveSwitcher(t *testing.T) {
 		`)
 
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
 
 		// Test GetBranchList directly (used by SwitchBranchInteractive)
 		y, err := yas.NewFromRepository(".")
@@ -83,9 +83,9 @@ func TestBranch_GetBranchList_MultiLevelStack(t *testing.T) {
 		`)
 
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-b", "--parent=topic-a"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-c", "--parent=topic-b"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-b", "--parent=topic-a"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-c", "--parent=topic-b"), 0)
 
 		// Test GetBranchList for multi-level stack
 		y, err := yas.NewFromRepository(".")
@@ -139,9 +139,9 @@ func TestBranch_GetBranchList_ForkedBranches(t *testing.T) {
 		`)
 
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-b", "--parent=topic-a"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-c", "--parent=topic-a"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-b", "--parent=topic-a"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-c", "--parent=topic-a"), 0)
 
 		// Test GetBranchList for forked branches
 		y, err := yas.NewFromRepository(".")
@@ -188,7 +188,7 @@ func TestBranch_GetBranchList_CurrentBranchHighlight(t *testing.T) {
 		`)
 
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
 
 		// Test GetBranchList shows current branch with *
 		y, err := yas.NewFromRepository(".")
@@ -278,7 +278,7 @@ func TestBranch_GetBranchList_BranchNameFormatting(t *testing.T) {
 		`)
 
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=user/feature-branch", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "user/feature-branch", "--parent=main"), 0)
 
 		// Test GetBranchList shows formatted branch name
 		y, err := yas.NewFromRepository(".")
@@ -324,8 +324,8 @@ func TestBranchSwitch_ExistingLocalBranch(t *testing.T) {
 		`)
 
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-b", "--parent=topic-a"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-b", "--parent=topic-a"), 0)
 
 		// Switch to existing local branch using yas branch command
 		assert.Equal(t, yascli.Run("branch", "topic-a"), 0)

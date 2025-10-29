@@ -49,8 +49,8 @@ func TestUpdateTrunk(t *testing.T) {
 		`)
 
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-b", "--parent=topic-a"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-b", "--parent=topic-a"), 0)
 		assert.Equal(t, yascli.Run("restack"), 0)
 
 		equalLines(t, mustExecOutput("git", "log", "--pretty=%D : %s"), `
@@ -113,8 +113,8 @@ func TestUpdateTrunkTopicA(t *testing.T) {
 		// main -> topic-a -> topic-b
 
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-b", "--parent=topic-a"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-b", "--parent=topic-a"), 0)
 		assert.Equal(t, yascli.Run("restack"), 0)
 
 		equalLines(t, mustExecOutput("git", "log", "--pretty=%D : %s"), `
@@ -164,8 +164,8 @@ func TestRestackReturnsToBranch(t *testing.T) {
 		`)
 
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-b", "--parent=topic-a"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-b", "--parent=topic-a"), 0)
 
 		// Verify we're on topic-a before restack
 		equalLines(t, mustExecOutput("git", "branch", "--show-current"), "topic-a")
@@ -341,7 +341,7 @@ func TestRestack_OnlyRebasesWhenNeeded(t *testing.T) {
 		assert.NilError(t, err)
 
 		// Run restack
-		err = y.Restack()
+		err = y.Restack(false)
 		assert.NilError(t, err)
 
 		// Parse the command log
@@ -422,7 +422,7 @@ func TestRestack_SkipsRebasingWhenNotNeeded(t *testing.T) {
 		assert.NilError(t, err)
 
 		// Run restack - nothing should be rebased since everything is up to date
-		err = y.Restack()
+		err = y.Restack(false)
 		assert.NilError(t, err)
 
 		// Parse the command log
@@ -475,7 +475,7 @@ func TestRestack_NoReminderWhenNoBranchesHavePRs(t *testing.T) {
 		`)
 
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
 
 		output := captureStdout(t, func() {
 			assert.Equal(t, yascli.Run("restack"), 0)
@@ -577,7 +577,7 @@ func TestRestack_WithDeletedParentBranch(t *testing.T) {
 
 		// Restack should succeed by reparenting topic-b to trunk
 		// and then restacking topic-c onto topic-b
-		err = y.Restack()
+		err = y.Restack(false)
 		assert.NilError(t, err)
 
 		// Verify that topic-b and topic-c are now based on main (not topic-a)

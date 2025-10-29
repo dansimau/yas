@@ -43,7 +43,7 @@ func TestRestack_FatalErrorDoesNotSaveState(t *testing.T) {
 
 		// Initialize yas config
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
 
 		// Run restack - it should fail due to unstashed changes
 		exitCode := yascli.Run("restack")

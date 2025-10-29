@@ -34,7 +34,7 @@ func writeStateFile(t *testing.T, state yasState) {
 	data, err := json.Marshal(state)
 	assert.NilError(t, err)
 
-	assert.NilError(t, os.WriteFile(".git/.yasstate", data, 0644))
+	assert.NilError(t, os.WriteFile(".git/.yasstate", data, 0o644))
 }
 
 func TestPrunesBranchesMissingLocally(t *testing.T) {
@@ -53,7 +53,7 @@ func TestPrunesBranchesMissingLocally(t *testing.T) {
                 `)
 
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=feature/prune-me", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "feature/prune-me", "--parent=main"), 0)
 
 		// Set the branch creation date to 8 days ago (older than the 7-day threshold)
 		state := readStateFile(t)
@@ -98,7 +98,7 @@ func TestDoesNotPruneRecentlyCreatedMissingBranches(t *testing.T) {
                 `)
 
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=feature/keep-me", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "feature/keep-me", "--parent=main"), 0)
 
 		// Set the branch creation date to 6 days ago (within the 7-day threshold)
 		state := readStateFile(t)

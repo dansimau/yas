@@ -5,9 +5,12 @@ import (
 )
 
 type addCmd struct {
-	Branch      string `description:"The name of the branch to add to stack (default: current)"          long:"branch"       required:"false"`
 	Parent      string `description:"Parent branch name (default: autodetect)"                           long:"parent"       required:"false"`
 	BranchPoint string `description:"Commit SHA where branch diverged from parent (default: autodetect)" long:"branch-point" required:"false"`
+
+	Args struct {
+		Branch string `positional-arg-name:"branch" description:"The name of the branch to add to stack (default: current)"`
+	} `positional-args:"true"`
 }
 
 func (c *addCmd) Execute(args []string) error {
@@ -16,5 +19,5 @@ func (c *addCmd) Execute(args []string) error {
 		return NewError(err.Error())
 	}
 
-	return yasInstance.SetParent(c.Branch, c.Parent, c.BranchPoint)
+	return yasInstance.SetParent(c.Args.Branch, c.Parent, c.BranchPoint)
 }

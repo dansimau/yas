@@ -93,7 +93,7 @@ func TestBranchCreate_WithParentAndPrefix(t *testing.T) {
 		// Initialize yas with auto-prefix enabled
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
 		assert.Equal(t, yascli.Run("config", "set", "--auto-prefix-branch"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=feature-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "feature-a", "--parent=main"), 0)
 
 		// Create a new branch with explicit parent
 		assert.Equal(t, yascli.Run("branch", "--parent=feature-a", "feature-b"), 0)

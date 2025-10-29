@@ -104,7 +104,7 @@ func TestAnnotate_ErrorWhenNoPR(t *testing.T) {
 		`)
 
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
 
 		// Try to annotate without a PR - should fail
 		exitCode := yascli.Run("annotate")

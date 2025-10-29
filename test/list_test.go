@@ -48,8 +48,8 @@ func TestList_NeedsRestack(t *testing.T) {
 		`)
 
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-b", "--parent=topic-a"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-b", "--parent=topic-a"), 0)
 
 		// Capture the list output
 		output := captureStdout(t, func() {
@@ -101,7 +101,7 @@ func TestList_AfterRestack_NoWarning(t *testing.T) {
 		`)
 
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
 
 		// Restack to fix it
 		assert.Equal(t, yascli.Run("restack"), 0)
@@ -144,8 +144,8 @@ func TestList_ShowsCurrentBranch(t *testing.T) {
 		`)
 
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-b", "--parent=topic-a"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-b", "--parent=topic-a"), 0)
 
 		// Should show star on topic-b (current branch)
 		output := captureStdout(t, func() {
@@ -187,7 +187,7 @@ func TestList_ShowsCurrentBranch_OnTrunk(t *testing.T) {
 		`)
 
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
 
 		// Should show star on main (current branch)
 		output := captureStdout(t, func() {
@@ -379,11 +379,11 @@ func TestList_CurrentStack(t *testing.T) {
 		`)
 
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-b", "--parent=topic-a"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-c", "--parent=topic-b"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-x", "--parent=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-d", "--parent=topic-b"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-b", "--parent=topic-a"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-c", "--parent=topic-b"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-x", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-d", "--parent=topic-b"), 0)
 
 		// Full list should show all branches
 		fullOutput := captureStdout(t, func() {
@@ -436,7 +436,7 @@ func TestList_GreysOutBranchPrefix(t *testing.T) {
                 `)
 
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=user/topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "user/topic-a", "--parent=main"), 0)
 
 		previousNoColor := color.NoColor
 		color.NoColor = false
@@ -636,7 +636,7 @@ func TestList_ShowsNotSubmitted_WhenNoPRExists(t *testing.T) {
 		`)
 
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
 
 		// Capture the list output
 		output := captureStdout(t, func() {
@@ -679,7 +679,7 @@ func TestList_ShowsNeedsRestackAndNotSubmitted(t *testing.T) {
 		`)
 
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
 
 		// Capture the list output
 		output := captureStdout(t, func() {
@@ -733,9 +733,9 @@ func TestList_SortsByCreatedTimestamp(t *testing.T) {
 
 		// Add branches in the order: topic-c first, then topic-a, then topic-b
 		// This establishes the Created timestamps
-		assert.Equal(t, yascli.Run("add", "--branch=topic-c", "--parent=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-b", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-c", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-b", "--parent=main"), 0)
 
 		// Capture the list output
 		output := captureStdout(t, func() {

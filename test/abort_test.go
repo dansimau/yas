@@ -42,7 +42,7 @@ func TestAbort_AbortsRebaseAndResetsBranch(t *testing.T) {
 
 		// Initialize yas config
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
 
 		// Run restack - it should fail due to conflict
 		exitCode := yascli.Run("restack")
@@ -107,8 +107,8 @@ func TestAbort_ReturnsToStartingBranch(t *testing.T) {
 
 		// Initialize yas config
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-b", "--parent=topic-a"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-b", "--parent=topic-a"), 0)
 
 		// Verify we're on topic-b
 		equalLines(t, mustExecOutput("git", "branch", "--show-current"), "topic-b")
@@ -169,8 +169,8 @@ func TestAbort_LeavesRebasedBranchesIntact(t *testing.T) {
 
 		// Initialize yas config
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-b", "--parent=topic-a"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-b", "--parent=topic-a"), 0)
 
 		// Run restack - topic-a will succeed, topic-b will fail
 		exitCode := yascli.Run("restack")

@@ -47,9 +47,9 @@ func TestMove_BasicMove(t *testing.T) {
 
 		// Initialize yas config
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=feature-a", "--parent=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-b", "--parent=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=feature-a-child", "--parent=feature-a"), 0)
+		assert.Equal(t, yascli.Run("add", "feature-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-b", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "feature-a-child", "--parent=feature-a"), 0)
 
 		// Move feature-a (and its child) to topic-b
 		exitCode := yascli.Run("move", "--onto=topic-b")
@@ -116,8 +116,8 @@ func TestMove_WithConflicts(t *testing.T) {
 
 		// Initialize yas config
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=feature-a", "--parent=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-b", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "feature-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-b", "--parent=main"), 0)
 
 		// Try to move feature-a to topic-b - should fail with conflicts
 		exitCode := yascli.Run("move", "--onto=topic-b")
@@ -184,8 +184,8 @@ func TestMove_Abort(t *testing.T) {
 
 		// Initialize yas config
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=feature-a", "--parent=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-b", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "feature-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-b", "--parent=main"), 0)
 
 		// Try to move feature-a to topic-b - should fail with conflicts
 		exitCode := yascli.Run("move", "--onto=topic-b")
@@ -249,8 +249,8 @@ func TestMove_FatalError(t *testing.T) {
 
 		// Initialize yas config
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=feature-a", "--parent=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-b", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "feature-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-b", "--parent=main"), 0)
 
 		// Try to move - should fail due to unstashed changes
 		exitCode := yascli.Run("move", "--onto=topic-b")
@@ -311,10 +311,10 @@ func TestMove_WithMultipleDescendants(t *testing.T) {
 
 		// Initialize yas config
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=feature-a", "--parent=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=feature-a-child-1", "--parent=feature-a"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=feature-a-child-2", "--parent=feature-a"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-b", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "feature-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "feature-a-child-1", "--parent=feature-a"), 0)
+		assert.Equal(t, yascli.Run("add", "feature-a-child-2", "--parent=feature-a"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-b", "--parent=main"), 0)
 
 		// Move feature-a (and both children) to topic-b
 		exitCode := yascli.Run("move", "--onto=topic-b")
