@@ -301,3 +301,95 @@ func TestBranch_GetBranchList_BranchNameFormatting(t *testing.T) {
 		assert.Assert(t, foundFormattedBranch, "Should display formatted branch name")
 	})
 }
+
+func TestBranchSwitch_ExistingLocalBranch(t *testing.T) {
+	testutil.WithTempWorkingDir(t, func() {
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+			touch main
+			git add main
+			git commit -m "main-0"
+
+			git checkout -b topic-a
+			touch a
+			git add a
+			git commit -m "topic-a-0"
+
+			git checkout -b topic-b
+			touch b
+			git add b
+			git commit -m "topic-b-0"
+
+			git checkout main
+		`)
+
+		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
+		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "--branch=topic-b", "--parent=topic-a"), 0)
+
+		// Switch to existing local branch using yas branch command
+		assert.Equal(t, yascli.Run("branch", "topic-a"), 0)
+
+		// Verify we're on the correct branch
+		currentBranch := strings.TrimSpace(mustExecOutput("git", "branch", "--show-current"))
+		assert.Equal(t, currentBranch, "topic-a")
+
+		// Switch to another existing branch
+		assert.Equal(t, yascli.Run("branch", "topic-b"), 0)
+
+		// Verify we're on the correct branch
+		currentBranch = strings.TrimSpace(mustExecOutput("git", "branch", "--show-current"))
+		assert.Equal(t, currentBranch, "topic-b")
+	})
+}
+
+func TestBranchSwitch_RemoteBranchInitiatesRefresh(t *testing.T) {
+	cmdLogFile, cleanup := setupMockCommandsWithPR(t, mockPROptions{
+		ID:    "PR_kwDOTest123",
+		State: "OPEN",
+		URL:   "https://github.com/test/test/pull/42",
+	})
+	defer cleanup()
+
+	testutil.WithTempWorkingDir(t, func() {
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+			git remote add origin https://fake.origin/test/test.git
+
+			touch main
+			git add main
+			git commit -m "main-0"
+
+			git checkout -b topic-a
+			touch a
+			git add a
+			git commit -m "topic-a-0"
+
+			# Push topic-a to simulate it being a remote branch
+			git push origin topic-a
+
+			# Delete local branch to simulate checking out remote branch for first time
+			git checkout main
+			git branch -D topic-a
+		`)
+
+		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
+
+		// Verify topic-a doesn't exist locally
+		localBranchExists := strings.TrimSpace(mustExecOutput("sh", "-c", "git branch --list topic-a"))
+		assert.Equal(t, localBranchExists, "")
+
+		// Switch to remote branch (first time checkout)
+		assert.Equal(t, yascli.Run("branch", "topic-a"), 0)
+
+		// Verify we're on the correct branch
+		currentBranch := strings.TrimSpace(mustExecOutput("git", "branch", "--show-current"))
+		assert.Equal(t, currentBranch, "topic-a")
+
+		// Verify that gh pr list was called (indicating refresh was initiated)
+		cmdLog := mustExecOutput("cat", cmdLogFile)
+		assert.Assert(t, strings.Contains(cmdLog, "gh"), "Expected gh command to be called")
+		assert.Assert(t, strings.Contains(cmdLog, "pr"), "Expected gh pr command to be called")
+		assert.Assert(t, strings.Contains(cmdLog, "list"), "Expected gh pr list to be called")
+	})
+}
