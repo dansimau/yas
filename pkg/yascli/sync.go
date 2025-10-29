@@ -7,6 +7,7 @@ import (
 )
 
 type syncCmd struct {
+	SkipPull    bool `description:"Skip pulling the trunk branch" long:"skip-pull"`
 	SkipRestack bool `description:"Skip restacking branches after sync" long:"skip-restack"`
 
 	yasInstance *yas.YAS
@@ -60,15 +61,13 @@ func (c *syncCmd) Execute(args []string) error {
 		return NewError("a restack operation is already in progress\n\nRun 'yas continue' to resume or 'yas abort' to cancel")
 	}
 
-	if len(args) > 0 {
-		return yasInstance.RefreshRemoteStatus(args...)
-	}
-
 	if err := c.trackUntrackedBranches(); err != nil {
 		return NewError(err.Error())
 	}
 
-	fmt.Printf("🔄 Pulling %s...\n", yasInstance.Config().TrunkBranch)
+	if !c.SkipPull {
+		fmt.Printf("🔄 Pulling %s...\n", yasInstance.Config().TrunkBranch)
+	}
 
 	if err := yasInstance.UpdateTrunk(); err != nil {
 		return NewError(err.Error())
@@ -81,7 +80,7 @@ func (c *syncCmd) Execute(args []string) error {
 	if !c.SkipRestack {
 		fmt.Println("🔄 Restacking branches...")
 
-		if err := yasInstance.Restack(); err != nil {
+		if err := yasInstance.Restack(cmd.DryRun); err != nil {
 			return NewError(err.Error())
 		}
 	}

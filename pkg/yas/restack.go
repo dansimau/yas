@@ -19,7 +19,7 @@ func (yas *YAS) checkRestackInProgress() error {
 
 // Restack rebases all branches starting from trunk, including all descendants
 // and forks.
-func (yas *YAS) Restack() error {
+func (yas *YAS) Restack(dryRun bool) error {
 	// Check if a restack is already in progress
 	if err := yas.checkRestackInProgress(); err != nil {
 		return err
@@ -50,6 +50,16 @@ func (yas *YAS) Restack() error {
 
 		// No more work to do
 		if len(workQueue) == 0 {
+			break
+		}
+
+		if dryRun {
+			fmt.Printf("Would restack %d branches:\n", len(workQueue))
+
+			for _, work := range workQueue {
+				fmt.Printf("  - %s -> %s\n", work[0], work[1])
+			}
+
 			break
 		}
 

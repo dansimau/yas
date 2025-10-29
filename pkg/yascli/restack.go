@@ -4,7 +4,9 @@ import (
 	"github.com/dansimau/yas/pkg/yas"
 )
 
-type restackCmd struct{}
+type restackCmd struct {
+	DryRun bool `description:"Don't make any changes, just show what will happen" long:"dry-run"`
+}
 
 func (c *restackCmd) Execute(args []string) error {
 	yasInstance, err := yas.NewFromRepository(cmd.RepoDirectory)
@@ -12,5 +14,5 @@ func (c *restackCmd) Execute(args []string) error {
 		return NewError(err.Error())
 	}
 
-	return yasInstance.Restack()
+	return yasInstance.Restack(c.DryRun)
 }
