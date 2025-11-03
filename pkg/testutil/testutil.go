@@ -170,7 +170,10 @@ func WithEnv(vars ...string) func() {
 func WithTempWorkingDir(t *testing.T, fn func()) {
 	t.Helper()
 
-	tempDirPath := t.TempDir()
+	tempDirPath, err := os.MkdirTemp("", "yas-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	defer func() {
 		if !t.Failed() {

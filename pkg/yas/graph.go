@@ -6,6 +6,22 @@ import (
 	"github.com/heimdalr/dag"
 )
 
+// branchVisitor implements the dag.Visitor interface to collect branch names.
+type branchVisitor struct {
+	branches    *[]string
+	trunkBranch string
+}
+
+func (bv *branchVisitor) Visit(v dag.Vertexer) {
+	_, value := v.Vertex()
+	if branchName, ok := value.(string); ok {
+		// Skip trunk branch if present
+		if branchName != bv.trunkBranch {
+			*bv.branches = append(*bv.branches, branchName)
+		}
+	}
+}
+
 func (yas *YAS) graph() (*dag.DAG, error) {
 	graph := dag.NewDAG()
 
