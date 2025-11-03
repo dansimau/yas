@@ -26,7 +26,7 @@ jobs:
           set -o pipefail
           git config --global user.email "bob@example.com"
           git config --global user.name "Bob"
-          go test -json ./... -coverprofile=./cover.out -covermode=atomic -coverpkg=./... | tee test-results.json | python3 bin/colourise-go-test-output.py
+          go test -json ./... -coverprofile=./cover.out -covermode=atomic -coverpkg=./... | tee test-results.json | python3 bin/colourise-go-test-output.py >/dev/null
         shell: bash
 
       - name: Annotate
