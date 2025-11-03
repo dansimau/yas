@@ -774,3 +774,163 @@ func TestList_SortsByCreatedTimestamp(t *testing.T) {
 			"topic-a (created second) should appear before topic-b, but got positions: a=%d, b=%d", topicAPos, topicBPos)
 	})
 }
+
+func TestList_All_ShowsUntrackedBranches(t *testing.T) {
+	testutil.WithTempWorkingDir(t, func() {
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+
+			# main
+			touch main
+			git add main
+			git commit -m "main-0"
+
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
+
+			# Create a tracked branch
+			git checkout -b topic-a
+			touch a
+			git add a
+			git commit -m "topic-a-0"
+
+			# Create an untracked branch
+			git checkout main
+			git checkout -b untracked-b
+			touch b
+			git add b
+			git commit -m "untracked-b-0"
+
+			git checkout main
+		`)
+
+		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
+
+		// Without --all, should not show untracked branch
+		output := captureStdout(t, func() {
+			assert.Equal(t, yascli.Run("list"), 0)
+		})
+
+		assert.Assert(t, strings.Contains(output, "topic-a"), "List should contain topic-a")
+		assert.Assert(t, !strings.Contains(output, "untracked-b"), "List should not contain untracked-b without --all")
+
+		// With --all, should show untracked branch
+		outputAll := captureStdout(t, func() {
+			assert.Equal(t, yascli.Run("list", "--all"), 0)
+		})
+
+		assert.Assert(t, strings.Contains(outputAll, "topic-a"), "List --all should contain topic-a")
+		assert.Assert(t, strings.Contains(outputAll, "untracked-b"), "List --all should contain untracked-b")
+	})
+}
+
+func TestList_All_GreysOutUntrackedBranches(t *testing.T) {
+	testutil.WithTempWorkingDir(t, func() {
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+
+			# main
+			touch main
+			git add main
+			git commit -m "main-0"
+
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
+
+			# Create a tracked branch
+			git checkout -b topic-a
+			touch a
+			git add a
+			git commit -m "topic-a-0"
+
+			# Create an untracked branch
+			git checkout main
+			git checkout -b untracked-b
+			touch b
+			git add b
+			git commit -m "untracked-b-0"
+
+			git checkout main
+		`)
+
+		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
+
+		previousNoColor := color.NoColor
+		color.NoColor = false
+
+		defer func() { color.NoColor = previousNoColor }()
+
+		output := captureStdout(t, func() {
+			assert.Equal(t, yascli.Run("list", "--all"), 0)
+		})
+
+		// Check that untracked-b is greyed out
+		darkGray := color.New(color.FgHiBlack).Sprint("untracked-b")
+		assert.Assert(t, strings.Contains(output, darkGray),
+			"List --all should grey out untracked-b but got: %s", output)
+	})
+}
+
+func TestList_All_PlacesUntrackedBranchesInHierarchy(t *testing.T) {
+	testutil.WithTempWorkingDir(t, func() {
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+
+			# main
+			touch main
+			git add main
+			git commit -m "main-0"
+
+			# Set up remote tracking for main
+			git config branch.main.remote origin
+			git config branch.main.merge refs/heads/main
+
+			# Create a tracked branch
+			git checkout -b topic-a
+			touch a
+			git add a
+			git commit -m "topic-a-0"
+
+			# Create an untracked branch from topic-a
+			git checkout -b untracked-child
+			touch child
+			git add child
+			git commit -m "untracked-child-0"
+
+			git checkout main
+		`)
+
+		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
+
+		output := captureStdout(t, func() {
+			assert.Equal(t, yascli.Run("list", "--all"), 0)
+		})
+
+		// Find the line positions to verify hierarchy
+		lines := strings.Split(output, "\n")
+		topicAPos := -1
+		untrackedChildPos := -1
+
+		for i, line := range lines {
+			if strings.Contains(line, "topic-a") {
+				topicAPos = i
+			}
+
+			if strings.Contains(line, "untracked-child") {
+				untrackedChildPos = i
+			}
+		}
+
+		assert.Assert(t, topicAPos != -1, "topic-a should appear in list")
+		assert.Assert(t, untrackedChildPos != -1, "untracked-child should appear in list")
+
+		// untracked-child should come after topic-a (its parent)
+		assert.Assert(t, untrackedChildPos > topicAPos,
+			"untracked-child should appear after topic-a (its parent), but got positions: topic-a=%d, untracked-child=%d", topicAPos, untrackedChildPos)
+	})
+}
