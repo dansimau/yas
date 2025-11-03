@@ -806,7 +806,7 @@ func TestList_All_ShowsUntrackedBranches(t *testing.T) {
 		`)
 
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
 
 		// Without --all, should not show untracked branch
 		output := captureStdout(t, func() {
@@ -857,7 +857,7 @@ func TestList_All_GreysOutUntrackedBranches(t *testing.T) {
 		`)
 
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
 
 		previousNoColor := color.NoColor
 		color.NoColor = false
@@ -905,7 +905,7 @@ func TestList_All_PlacesUntrackedBranchesInHierarchy(t *testing.T) {
 		`)
 
 		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "--branch=topic-a", "--parent=main"), 0)
+		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
 
 		output := captureStdout(t, func() {
 			assert.Equal(t, yascli.Run("list", "--all"), 0)
