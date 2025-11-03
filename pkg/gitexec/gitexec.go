@@ -210,14 +210,16 @@ func (r *Repo) GetRemoteForBranch(branchNames ...string) (string, error) {
 }
 
 func (r *Repo) ForcePushBranch(origin string, branchName string) error {
-	return xexec.Command("git", "push", "--force-with-lease", origin, branchName).
+	return xexec.Command("git", "push", "--force-with-lease", "-q", origin, branchName).
 		WithEnvVars(CleanedGitEnv()).
 		WithWorkingDir(r.path).
+		WithStdout(nil).
+		WithStderr(nil).
 		Run()
 }
 
 func (r *Repo) FetchBranch(branchName string) error {
-	return r.run("git", "fetch", "origin", branchName)
+	return r.run("git", "fetch", "origin", branchName, "-q")
 }
 
 func (r *Repo) GetRemoteCommitHash(branchName string) (string, error) {

@@ -148,3 +148,11 @@ func (yas *YAS) RefreshPRStatus(branchNames ...string) error {
 
 	return nil
 }
+
+func (yas *YAS) prStateToYasState(pullRequestMetadata PullRequestMetadata) string {
+	if pullRequestMetadata.IsDraft {
+		return "DRAFT"
+	}
+
+	return pullRequestMetadata.State
+}
