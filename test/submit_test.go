@@ -320,9 +320,9 @@ func TestSubmit_StackSubmitsAllBranches(t *testing.T) {
 		assert.NilError(t, err)
 
 		// Verify all branches in stack were pushed
-		assert.Assert(t, wasCalled(commands, "git", "push", "--force-with-lease", "origin", "topic-a"), "topic-a should be pushed")
-		assert.Assert(t, wasCalled(commands, "git", "push", "--force-with-lease", "origin", "topic-b"), "topic-b should be pushed")
-		assert.Assert(t, wasCalled(commands, "git", "push", "--force-with-lease", "origin", "topic-c"), "topic-c should be pushed")
+		assert.Assert(t, wasCalled(commands, "git", "push", "--force-with-lease", "-q", "origin", "topic-a"), "topic-a should be pushed")
+		assert.Assert(t, wasCalled(commands, "git", "push", "--force-with-lease", "-q", "origin", "topic-b"), "topic-b should be pushed")
+		assert.Assert(t, wasCalled(commands, "git", "push", "--force-with-lease", "-q", "origin", "topic-c"), "topic-c should be pushed")
 
 		// Verify PRs were created for all branches
 		prCreateA := findCommand(commands, "gh", "pr", "create")
@@ -591,9 +591,9 @@ func TestSubmit_OutdatedSubmitsAllBranchesNeedingSubmit(t *testing.T) {
 		assert.NilError(t, err)
 
 		// Verify all branches were pushed
-		assert.Assert(t, wasCalled(commands, "git", "push", "--force-with-lease", "origin", "topic-a"), "topic-a should be pushed")
-		assert.Assert(t, wasCalled(commands, "git", "push", "--force-with-lease", "origin", "topic-b"), "topic-b should be pushed")
-		assert.Assert(t, wasCalled(commands, "git", "push", "--force-with-lease", "origin", "topic-c"), "topic-c should be pushed")
+		assert.Assert(t, wasCalled(commands, "git", "push", "--force-with-lease", "-q", "origin", "topic-a"), "topic-a should be pushed")
+		assert.Assert(t, wasCalled(commands, "git", "push", "--force-with-lease", "-q", "origin", "topic-b"), "topic-b should be pushed")
+		assert.Assert(t, wasCalled(commands, "git", "push", "--force-with-lease", "-q", "origin", "topic-c"), "topic-c should be pushed")
 
 		// Verify gh pr list was called for all branches (to check existing PRs)
 		assert.Assert(t, wasCalled(commands, "gh", "pr", "list"), "gh pr list should be called to check existing PRs")
