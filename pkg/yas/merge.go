@@ -160,7 +160,7 @@ func (yas *YAS) getPRTitleAndBody(prNumber string) (string, string, error) {
 		return "", "", err
 	}
 
-	parts := strings.Split(strings.TrimSpace(string(output)), "\n---SEPARATOR---\n")
+	parts := strings.Split(string(output), "\n---SEPARATOR---\n")
 	if len(parts) != 2 {
 		return "", "", errors.New("unexpected gh pr view output format")
 	}
