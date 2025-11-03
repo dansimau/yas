@@ -19,10 +19,14 @@ func (yas *YAS) checkRestackInProgress() error {
 
 // Restack rebases all branches starting from trunk, including all descendants
 // and forks.
-func (yas *YAS) Restack(dryRun bool) error {
+func (yas *YAS) Restack(branch string, dryRun bool) error {
 	// Check if a restack is already in progress
 	if err := yas.checkRestackInProgress(); err != nil {
 		return err
+	}
+
+	if branch == "" {
+		branch = yas.cfg.TrunkBranch
 	}
 
 	// Remember the starting branch
@@ -44,7 +48,25 @@ func (yas *YAS) Restack(dryRun bool) error {
 
 		// Build the work queue: a list of [child, parent] pairs to rebase
 		var workQueue [][2]string
-		if err := yas.buildRestackWorkQueue(graph, yas.cfg.TrunkBranch, &workQueue); err != nil {
+
+		// First, check if the starting branch itself needs rebasing (unless it's trunk)
+		if branch != yas.cfg.TrunkBranch {
+			metadata := yas.data.Branches.Get(branch)
+			if metadata.Parent != "" {
+				needsRebase, err := yas.needsRebase(branch, metadata.Parent)
+				if err != nil {
+					return err
+				}
+
+				if needsRebase {
+					// Add the starting branch to the work queue
+					workQueue = append(workQueue, [2]string{branch, metadata.Parent})
+				}
+			}
+		}
+
+		// Then add all descendants of the starting branch
+		if err := yas.buildRestackWorkQueue(graph, branch, &workQueue); err != nil {
 			return err
 		}
 

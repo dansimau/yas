@@ -80,7 +80,7 @@ func (c *syncCmd) Execute(args []string) error {
 	if !c.SkipRestack {
 		fmt.Println("🔄 Restacking branches...")
 
-		if err := yasInstance.Restack(cmd.DryRun); err != nil {
+		if err := yasInstance.Restack(yasInstance.Config().TrunkBranch, cmd.DryRun); err != nil {
 			return NewError(err.Error())
 		}
 	}
