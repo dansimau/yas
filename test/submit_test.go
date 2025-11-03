@@ -2,6 +2,7 @@ package test
 
 import (
 	"bufio"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,7 +37,10 @@ func setupMockCommandsWithPR(t *testing.T, pr mockPROptions) (cmdLogFile string,
 	t.Helper()
 
 	// Create temp directory for mock commands
-	tmpDir := t.TempDir()
+	tmpDir, err := os.MkdirTemp("", "yas-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Create command log file
 	cmdLogFile = filepath.Join(tmpDir, "commands.log")
@@ -97,9 +101,13 @@ func setupMockCommandsWithPR(t *testing.T, pr mockPROptions) (cmdLogFile string,
 	}
 
 	cleanup = func() {
-		// Note: t.Setenv() automatically handles environment variable cleanup
-		// Only need to clean up temp directory and files
-		assert.NilError(t, os.RemoveAll(tmpDir))
+		if !t.Failed() {
+			if err := os.RemoveAll(tmpDir); err != nil {
+				log.Println("failed to remove temporary directory", tmpDir)
+			}
+		} else {
+			log.Println("test failed, not cleaning up temporary directory", tmpDir)
+		}
 
 		// Clean up temp PR files
 		files, _ := filepath.Glob("/tmp/yas-test-pr-created-*")
