@@ -39,6 +39,5 @@ linters:
     - unconvert
     - unparam
     - usestdlibvars
-    - usetesting
     - whitespace
     - wsl_v5

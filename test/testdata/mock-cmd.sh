@@ -7,11 +7,18 @@ CMD_NAME=$(basename "$0")
 
 # Log the command and all arguments (one per line)
 if [ -n "$YAS_TEST_CMD_LOG" ]; then
-    echo "$CMD_NAME" >> "$YAS_TEST_CMD_LOG"
-    for arg in "$@"; do
-        echo "  $arg" >> "$YAS_TEST_CMD_LOG"
-    done
-    echo "" >> "$YAS_TEST_CMD_LOG"
+    # Use an atomic append with a temp file to avoid lock dependencies (cross-platform friendly)
+    tmpfile="${YAS_TEST_CMD_LOG}.tmp.$$"
+    {
+        echo "$CMD_NAME"
+        for arg in "$@"; do
+            echo "  $arg"
+        done
+        echo ""
+    } > "$tmpfile"
+    # Atomically append to the log
+    cat "$tmpfile" >> "$YAS_TEST_CMD_LOG"
+    rm -f "$tmpfile"
 fi
 
 # Simulate specific command behaviors
