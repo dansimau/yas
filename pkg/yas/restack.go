@@ -97,7 +97,7 @@ func (yas *YAS) Restack(dryRun bool) error {
 				fmt.Printf("  - %s\n", branchName)
 			}
 
-			fmt.Printf("\nRun 'yas submit --stack' to update the PRs with the rebased commits.\n")
+			fmt.Printf("\nRun 'yas submit --outdated' to update the PRs with the rebased commits.\n")
 		}
 	}
 
@@ -425,7 +425,7 @@ func (yas *YAS) Continue() error {
 				fmt.Printf("  - %s\n", branchName)
 			}
 
-			fmt.Printf("\nRun 'yas submit --stack' to update the PRs with the rebased commits.\n")
+			fmt.Printf("\nRun 'yas submit --outdated' to update the PRs with the rebased commits.\n")
 		}
 	}
 
