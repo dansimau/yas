@@ -341,7 +341,7 @@ func TestRestack_OnlyRebasesWhenNeeded(t *testing.T) {
 		assert.NilError(t, err)
 
 		// Run restack
-		err = y.Restack(false)
+		err = y.Restack("main", false)
 		assert.NilError(t, err)
 
 		// Parse the command log
@@ -422,7 +422,7 @@ func TestRestack_SkipsRebasingWhenNotNeeded(t *testing.T) {
 		assert.NilError(t, err)
 
 		// Run restack - nothing should be rebased since everything is up to date
-		err = y.Restack(false)
+		err = y.Restack("main", false)
 		assert.NilError(t, err)
 
 		// Parse the command log
@@ -577,7 +577,7 @@ func TestRestack_WithDeletedParentBranch(t *testing.T) {
 
 		// Restack should succeed by reparenting topic-b to trunk
 		// and then restacking topic-c onto topic-b
-		err = y.Restack(false)
+		err = y.Restack("main", false)
 		assert.NilError(t, err)
 
 		// Verify that topic-b and topic-c are now based on main (not topic-a)
