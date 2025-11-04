@@ -5,7 +5,12 @@ import (
 )
 
 type restackCmd struct {
+	All    bool `description:"Restack all branches" long:"all"`
 	DryRun bool `description:"Don't make any changes, just show what will happen" long:"dry-run"`
+
+	Args struct {
+		Branch string `positional-arg-name:"branch" description:"The name of the branch to restack (default: current)"`
+	} `positional-args:"true"`
 }
 
 func (c *restackCmd) Execute(args []string) error {
@@ -14,5 +19,13 @@ func (c *restackCmd) Execute(args []string) error {
 		return NewError(err.Error())
 	}
 
-	return yasInstance.Restack(c.DryRun)
+	if c.All {
+		if c.Args.Branch != "" {
+			return NewError("specifying a branch is incompatible with --all")
+		}
+
+		c.Args.Branch = yasInstance.Config().TrunkBranch
+	}
+
+	return yasInstance.Restack(c.Args.Branch, c.DryRun)
 }
