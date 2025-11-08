@@ -13,9 +13,10 @@ import (
 type BranchMetadata struct {
 	Name              string
 	GitHubPullRequest PullRequestMetadata
-	Parent            string    `json:",omitempty"`
-	BranchPoint       string    `json:",omitempty"` // Commit SHA where this branch diverged from parent
-	Created           time.Time `json:",omitempty"` // Timestamp when this branch was first tracked
+	Parent            string     `json:",omitempty"`
+	BranchPoint       string     `json:",omitempty"` // Commit SHA where this branch diverged from parent
+	Created           time.Time  `json:",omitempty"` // Timestamp when this branch was first tracked
+	Deleted           *time.Time `json:",omitempty"` // Timestamp when this branch was deleted
 }
 
 type StatusCheck struct {
@@ -106,6 +107,12 @@ func (b *Branches) Set(data BranchMetadata) {
 	n = append(n, data)
 
 	*b = n
+}
+
+func (b Branches) NotDeleted() Branches {
+	return b.filter(func(bm BranchMetadata) bool {
+		return bm.Deleted == nil
+	})
 }
 
 func (b Branches) WithCreatedDateBefore(ts time.Time) Branches {
