@@ -2,6 +2,7 @@ package test
 
 import (
 	"bufio"
+	"encoding/json"
 	"log"
 	"os"
 	"path/filepath"
@@ -121,39 +122,35 @@ func setupMockCommandsWithPR(t *testing.T, pr mockPROptions) (cmdLogFile string,
 
 // parseCmdLog parses the command log file and returns a list of commands.
 func parseCmdLog(logFile string) ([][]string, error) {
-	data, err := os.ReadFile(logFile)
+	f, err := os.Open(logFile)
 	if err != nil {
 		return nil, err
 	}
+	defer f.Close()
 
-	var (
-		commands   [][]string
-		currentCmd []string
-	)
+	type cmdEntry struct {
+		Script string   `json:"script"`
+		Args   []string `json:"args"`
+	}
 
-	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	var commands [][]string
+
+	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		line := scanner.Text()
-		switch {
-		case line == "":
-			if len(currentCmd) > 0 {
-				commands = append(commands, currentCmd)
-				currentCmd = nil
-			}
-		case strings.HasPrefix(line, "  "):
-			// Argument
-			currentCmd = append(currentCmd, strings.TrimPrefix(line, "  "))
-		default:
-			// Command name
-			currentCmd = []string{line}
+		var entry cmdEntry
+		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
+			return nil, err
 		}
+
+		cmd := append([]string{entry.Script}, entry.Args...)
+		commands = append(commands, cmd)
 	}
 
-	if len(currentCmd) > 0 {
-		commands = append(commands, currentCmd)
+	if err := scanner.Err(); err != nil {
+		return nil, err
 	}
 
-	return commands, scanner.Err()
+	return commands, nil
 }
 
 // findCommand finds a command in the log and returns it.
