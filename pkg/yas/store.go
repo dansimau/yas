@@ -3,6 +3,7 @@ package yas
 import (
 	"encoding/json"
 	"os"
+	"path"
 	"sync"
 	"time"
 
@@ -21,6 +22,11 @@ type yasDatabase struct {
 func (d *yasDatabase) Save() error {
 	b, err := json.MarshalIndent(d.yasData, "", "  ")
 	if err != nil {
+		return err
+	}
+
+	// Ensure the directory exists
+	if err := os.MkdirAll(path.Dir(d.filePath), 0o755); err != nil {
 		return err
 	}
 

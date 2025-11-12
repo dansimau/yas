@@ -9,7 +9,7 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-const configFilename = ".git/yas.yaml"
+var configFilenames = []string{".yas/yas.yaml", ".git/yas.yaml"}
 
 type Config struct {
 	RepoDirectory    string `yaml:"-"`
@@ -17,8 +17,21 @@ type Config struct {
 	AutoPrefixBranch bool   `yaml:"autoPrefixBranch"`
 }
 
+// resolveConfigPath returns the first config path that exists, or the first
+// path if none exist (for writing to the new location).
+func resolveConfigPath(repoDir string) string {
+	for _, filename := range configFilenames {
+		fullPath := path.Join(repoDir, filename)
+		if fsutil.FileExists(fullPath) {
+			return fullPath
+		}
+	}
+	// No file exists - use first (new) path for writing
+	return path.Join(repoDir, configFilenames[0])
+}
+
 func IsConfigured(repoDirectory string) bool {
-	return fsutil.FileExists(path.Join(repoDirectory, configFilename))
+	return fsutil.FileExists(resolveConfigPath(repoDirectory))
 }
 
 func ReadConfig(repoDirectory string) (*Config, error) {
@@ -26,7 +39,7 @@ func ReadConfig(repoDirectory string) (*Config, error) {
 		return nil, errors.New("repository not configured (hint: run `yas init`)")
 	}
 
-	yamlBytes, err := os.ReadFile(path.Join(repoDirectory, configFilename))
+	yamlBytes, err := os.ReadFile(resolveConfigPath(repoDirectory))
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +65,13 @@ func WriteConfig(cfg Config) (string, error) {
 		return "", err
 	}
 
-	configFilePath := path.Join(cfg.RepoDirectory, configFilename)
+	configFilePath := resolveConfigPath(cfg.RepoDirectory)
+
+	// Ensure the directory exists
+	if err := os.MkdirAll(path.Dir(configFilePath), 0o755); err != nil {
+		return "", err
+	}
+
 	if err := os.WriteFile(configFilePath, yamlBytes, 0o644); err != nil {
 		return "", err
 	}

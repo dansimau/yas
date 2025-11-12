@@ -155,7 +155,7 @@ func TestConfigSet_AutoPrefixBranch(t *testing.T) {
 
 		// Verify config was written correctly
 		testutil.ExecOrFail(t, `
-			grep -q "autoPrefixBranch: true" .git/yas.yaml
+			grep -q "autoPrefixBranch: true" .yas/yas.yaml
 		`)
 
 		// Set auto-prefix to false
@@ -163,7 +163,7 @@ func TestConfigSet_AutoPrefixBranch(t *testing.T) {
 
 		// Verify config was updated correctly
 		testutil.ExecOrFail(t, `
-			grep -q "autoPrefixBranch: false" .git/yas.yaml
+			grep -q "autoPrefixBranch: false" .yas/yas.yaml
 		`)
 	})
 }

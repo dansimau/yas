@@ -19,7 +19,7 @@ type yasState struct {
 func readStateFile(t *testing.T) yasState {
 	t.Helper()
 
-	data, err := os.ReadFile(".git/.yasstate")
+	data, err := os.ReadFile(".yas/yas.state.json")
 	assert.NilError(t, err)
 
 	var state yasState
@@ -34,7 +34,8 @@ func writeStateFile(t *testing.T, state yasState) {
 	data, err := json.Marshal(state)
 	assert.NilError(t, err)
 
-	assert.NilError(t, os.WriteFile(".git/.yasstate", data, 0o644))
+	assert.NilError(t, os.MkdirAll(".yas", 0o755))
+	assert.NilError(t, os.WriteFile(".yas/yas.state.json", data, 0o644))
 }
 
 func TestPrunesBranchesMissingLocally(t *testing.T) {

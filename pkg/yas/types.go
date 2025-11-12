@@ -7,8 +7,24 @@ import (
 	"slices"
 	"time"
 
+	"github.com/dansimau/yas/pkg/fsutil"
 	"github.com/dansimau/yas/pkg/sliceutil"
 )
+
+var restackStateFiles = []string{".yas/yas.restack.json", ".git/.yasrestack"}
+
+// resolveRestackStatePath returns the first restack state path that exists,
+// or the first path if none exist (for writing to the new location).
+func resolveRestackStatePath(repoDir string) string {
+	for _, filename := range restackStateFiles {
+		fullPath := path.Join(repoDir, filename)
+		if fsutil.FileExists(fullPath) {
+			return fullPath
+		}
+	}
+	// No file exists - use first (new) path for writing
+	return path.Join(repoDir, restackStateFiles[0])
+}
 
 type BranchMetadata struct {
 	Name              string
@@ -149,10 +165,15 @@ type RestackState struct {
 
 // SaveRestackState saves the restack state to disk.
 func SaveRestackState(repoDir string, state *RestackState) error {
-	filePath := path.Join(repoDir, restackStateFile)
+	filePath := resolveRestackStatePath(repoDir)
 
 	b, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
+		return err
+	}
+
+	// Ensure the directory exists
+	if err := os.MkdirAll(path.Dir(filePath), 0o755); err != nil {
 		return err
 	}
 
@@ -161,7 +182,7 @@ func SaveRestackState(repoDir string, state *RestackState) error {
 
 // LoadRestackState loads the restack state from disk.
 func LoadRestackState(repoDir string) (*RestackState, error) {
-	filePath := path.Join(repoDir, restackStateFile)
+	filePath := resolveRestackStatePath(repoDir)
 
 	b, err := os.ReadFile(filePath)
 	if err != nil {
@@ -178,7 +199,7 @@ func LoadRestackState(repoDir string) (*RestackState, error) {
 
 // DeleteRestackState removes the restack state file.
 func DeleteRestackState(repoDir string) error {
-	filePath := path.Join(repoDir, restackStateFile)
+	filePath := resolveRestackStatePath(repoDir)
 
 	err := os.Remove(filePath)
 	if err != nil && !os.IsNotExist(err) {
@@ -190,7 +211,7 @@ func DeleteRestackState(repoDir string) error {
 
 // RestackStateExists checks if a restack state file exists.
 func RestackStateExists(repoDir string) bool {
-	filePath := path.Join(repoDir, restackStateFile)
+	filePath := resolveRestackStatePath(repoDir)
 	_, err := os.Stat(filePath)
 
 	return err == nil
