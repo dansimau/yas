@@ -126,7 +126,12 @@ func parseCmdLog(logFile string) ([][]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+
+	defer func() {
+		if cerr := f.Close(); cerr != nil {
+			log.Println("failed to close command log file:", cerr)
+		}
+	}()
 
 	type cmdEntry struct {
 		Script string   `json:"script"`
