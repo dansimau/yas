@@ -553,7 +553,7 @@ func TestRestack_WithDeletedParentBranch(t *testing.T) {
 		// Simulate metadata pruning by removing topic-a from the branch map
 		// This simulates what happens when an old merged branch is pruned after 7 days
 		// We need to manipulate the database file directly since the data field is private
-		dataPath := ".git/.yasstate"
+		dataPath := ".yas/yas.state.json"
 		dataBytes, err := os.ReadFile(dataPath)
 		assert.NilError(t, err)
 

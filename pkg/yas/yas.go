@@ -7,6 +7,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/dansimau/yas/pkg/fsutil"
 	"github.com/dansimau/yas/pkg/gitexec"
 	"github.com/go-git/go-git/v5"
 	"github.com/hashicorp/go-version"
@@ -14,10 +15,20 @@ import (
 
 var minimumRequiredGitVersion = version.Must(version.NewVersion("2.38"))
 
-const (
-	yasStateFile     = ".git/.yasstate"
-	restackStateFile = ".git/.yasrestack"
-)
+var yasStateFiles = []string{".yas/yas.state.json", ".git/.yasstate"}
+
+// resolveStatePath returns the first state path that exists, or the first
+// path if none exist (for writing to the new location).
+func resolveStatePath(repoDir string) string {
+	for _, filename := range yasStateFiles {
+		fullPath := path.Join(repoDir, filename)
+		if fsutil.FileExists(fullPath) {
+			return fullPath
+		}
+	}
+	// No file exists - use first (new) path for writing
+	return path.Join(repoDir, yasStateFiles[0])
+}
 
 type YAS struct {
 	cfg  Config
@@ -32,7 +43,7 @@ func New(cfg Config) (*YAS, error) {
 		return nil, fmt.Errorf("failed to open git repo: %w", err)
 	}
 
-	data, err := loadData(path.Join(cfg.RepoDirectory, yasStateFile))
+	data, err := loadData(resolveStatePath(cfg.RepoDirectory))
 	if err != nil {
 		return nil, fmt.Errorf("failed to load YAS state: %w", err)
 	}
