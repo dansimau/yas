@@ -1,292 +1,274 @@
-#!/bin/bash
-# Mock script for git and gh commands
-# Logs commands to a file specified by YAS_TEST_CMD_LOG env var
+#!/usr/bin/env python3
+"""Mock git/gh wrapper used by tests without depending on jq."""
 
-# Get the command name (git or gh)
-CMD_NAME=$(basename "$0")
+from __future__ import annotations
 
-# Log the command and all arguments (one per line)
-if [ -n "$YAS_TEST_CMD_LOG" ]; then
-    if ! command -v jq >/dev/null 2>&1; then
-        echo "jq is required for tests to run" >&2
-        exit 1
-    fi
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import List, Sequence, NoReturn
 
-    # Use an atomic append with a temp file to avoid lock dependencies (cross-platform friendly)
-    tmpfile="${YAS_TEST_CMD_LOG}.tmp.$$"
+CMD_NAME = Path(sys.argv[0]).name
+TMP_DIR = Path("/tmp")
 
-    if [ "$#" -gt 0 ]; then
-        json_args="$(printf '%s\0' "$@" | jq -R -s -c 'split("\u0000")[:-1]')"
-    else
-        json_args="[]"
-    fi
 
-    jq -nc \
-        --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-        --arg pid "$$" \
-        --arg script "$CMD_NAME" \
-        --arg cwd "$PWD" \
-        --argjson args "$json_args" \
-        '{ts:$ts, pid:($pid|tonumber), script:$script, cwd:$cwd, args:$args}' > "$tmpfile"
+def real_git_path() -> str:
+    return os.environ.get("YAS_TEST_REAL_GIT") or "/usr/bin/git"
 
-    # Atomically append to the log
-    cat "$tmpfile" >> "$YAS_TEST_CMD_LOG"
-    rm -f "$tmpfile"
-fi
 
-# Simulate specific command behaviors
-case "$CMD_NAME" in
-    git)
-        # Handle git commands
-        case "$1" in
-            push)
-                # Track which branch was pushed
-                branch_name=""
-                for arg in "$@"; do
-                    if [[ "$arg" != -* && "$arg" != "origin" && "$arg" != "push" ]]; then
-                        branch_name="$arg"
-                        break
-                    fi
-                done
-                # Mark this branch as pushed and save its hash
-                if [ -n "$branch_name" ]; then
-                    echo "pushed" > "/tmp/yas-test-pushed-$branch_name"
-                    # Save the current hash of the branch being pushed
-                    if [ -n "$YAS_TEST_REAL_GIT" ]; then
-                        "$YAS_TEST_REAL_GIT" rev-parse "$branch_name" > "/tmp/yas-test-pushed-hash-$branch_name" 2>/dev/null
-                    else
-                        /usr/bin/git rev-parse "$branch_name" > "/tmp/yas-test-pushed-hash-$branch_name" 2>/dev/null
-                    fi
-                fi
-                # Simulate successful push
-                exit 0
-                ;;
-            show-ref)
-                # Handle show-ref for remote branches
-                if [[ "$2" == refs/remotes/origin/* ]]; then
-                    branch_name="${2#refs/remotes/origin/}"
-                    # Check if this branch was pushed
-                    if [ -f "/tmp/yas-test-pushed-$branch_name" ]; then
-                        # Return success (branch exists remotely)
-                        exit 0
-                    fi
-                    # Branch not pushed, return exit code 1
-                    exit 1
-                fi
-                # For other show-ref commands, call real git
-                if [ -n "$YAS_TEST_REAL_GIT" ]; then
-                    exec "$YAS_TEST_REAL_GIT" "$@"
-                else
-                    exec /usr/bin/git "$@"
-                fi
-                ;;
-            rev-parse)
-                # Check if they're asking for origin/branch
-                if [[ "$2" == origin/* ]]; then
-                    branch_name="${2#origin/}"
-                    # Check if this branch was pushed
-                    if [ -f "/tmp/yas-test-pushed-$branch_name" ]; then
-                        # Return the saved hash from when branch was pushed
-                        if [ -f "/tmp/yas-test-pushed-hash-$branch_name" ]; then
-                            cat "/tmp/yas-test-pushed-hash-$branch_name"
-                            exit 0
-                        fi
-                        # Fallback to local branch hash if no saved hash
-                        if [ -n "$YAS_TEST_REAL_GIT" ]; then
-                            "$YAS_TEST_REAL_GIT" rev-parse "$branch_name" 2>/dev/null && exit 0
-                        else
-                            /usr/bin/git rev-parse "$branch_name" 2>/dev/null && exit 0
-                        fi
-                    fi
-                fi
-                # For other rev-parse commands, call real git
-                if [ -n "$YAS_TEST_REAL_GIT" ]; then
-                    exec "$YAS_TEST_REAL_GIT" "$@"
-                else
-                    exec /usr/bin/git "$@"
-                fi
-                ;;
-            checkout)
-                # Handle checkout of remote branches
-                # If checking out a branch that doesn't exist locally but was pushed,
-                # simulate git's remote branch checkout behavior
-                if [[ "$2" != -* ]]; then
-                    branch_name="$2"
-                    # Check if branch exists locally
-                    if [ -n "$YAS_TEST_REAL_GIT" ]; then
-                        "$YAS_TEST_REAL_GIT" show-ref refs/heads/"$branch_name" >/dev/null 2>&1
-                        local_exists=$?
-                    else
-                        /usr/bin/git show-ref refs/heads/"$branch_name" >/dev/null 2>&1
-                        local_exists=$?
-                    fi
+def log_command(args: Sequence[str]) -> None:
+    log_path = os.environ.get("YAS_TEST_CMD_LOG")
+    if not log_path:
+        return
 
-                    # If doesn't exist locally but was pushed, create it from the pushed hash
-                    if [ $local_exists -ne 0 ] && [ -f "/tmp/yas-test-pushed-$branch_name" ]; then
-                        if [ -f "/tmp/yas-test-pushed-hash-$branch_name" ]; then
-                            pushed_hash=$(cat "/tmp/yas-test-pushed-hash-$branch_name")
-                            # Create the branch from the pushed hash
-                            if [ -n "$YAS_TEST_REAL_GIT" ]; then
-                                "$YAS_TEST_REAL_GIT" checkout -b "$branch_name" "$pushed_hash"
-                            else
-                                /usr/bin/git checkout -b "$branch_name" "$pushed_hash"
-                            fi
-                            exit $?
-                        fi
-                    fi
-                fi
-                # For all other checkout commands, call real git
-                if [ -n "$YAS_TEST_REAL_GIT" ]; then
-                    exec "$YAS_TEST_REAL_GIT" "$@"
-                else
-                    exec /usr/bin/git "$@"
-                fi
-                ;;
-            --version)
-                echo "git version 2.40.0"
-                exit 0
-                ;;
-            *)
-                # For other git commands, call real git
-                if [ -n "$YAS_TEST_REAL_GIT" ]; then
-                    exec "$YAS_TEST_REAL_GIT" "$@"
-                else
-                    exec /usr/bin/git "$@"
-                fi
-                ;;
-        esac
-        ;;
-    gh)
-        # Handle gh commands
-        if [[ "$1" == "pr" && "$2" == "list" ]]; then
-            # Extract the branch from --head argument
-            head_branch=""
-            for ((i=1; i<=$#; i++)); do
-                if [[ "${!i}" == "--head" ]]; then
-                    ((i++))
-                    head_branch="${!i}"
+    event = {
+        "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "pid": os.getpid(),
+        "script": CMD_NAME,
+        "cwd": os.getcwd(),
+        "args": list(args),
+    }
+
+    line = json.dumps(event, separators=(",", ":"))
+    with open(log_path, "a", encoding="utf-8") as handle:
+        handle.write(line)
+        handle.write("\n")
+
+
+def exec_real_git(args: List[str]) -> NoReturn:
+    real_git = real_git_path()
+    os.execvp(real_git, [real_git, *args])
+
+
+def run_git(args: List[str], **kwargs) -> subprocess.CompletedProcess:
+    real_git = real_git_path()
+    return subprocess.run([real_git, *args], **kwargs)
+
+
+def pushed_marker(branch: str) -> Path:
+    return TMP_DIR / f"yas-test-pushed-{branch}"
+
+
+def pushed_hash_path(branch: str) -> Path:
+    return TMP_DIR / f"yas-test-pushed-hash-{branch}"
+
+
+def pr_created_path(branch: str) -> Path:
+    return TMP_DIR / f"yas-test-pr-created-{branch}"
+
+
+def pr_base_path(branch: str) -> Path:
+    return TMP_DIR / f"yas-test-pr-base-{branch}"
+
+
+def capture_branch_hash(branch: str) -> str:
+    try:
+        proc = run_git(["rev-parse", branch], capture_output=True, text=True)
+    except FileNotFoundError:
+        return ""
+    if proc.returncode != 0:
+        return ""
+    return proc.stdout
+
+
+def handle_git(args: List[str]) -> int:
+    if not args:
+        exec_real_git(args)
+
+    subcommand = args[0]
+
+    if subcommand == "push":
+        branch_name = None
+        for arg in args:
+            if arg in {"push", "origin"} or arg.startswith("-"):
+                continue
+            branch_name = arg
+            break
+
+        if branch_name:
+            marker = pushed_marker(branch_name)
+            marker.write_text("pushed\n", encoding="utf-8")
+            pushed_hash_path(branch_name).write_text(capture_branch_hash(branch_name), encoding="utf-8")
+        return 0
+
+    if subcommand == "show-ref" and len(args) > 1:
+        ref = args[1]
+        if ref.startswith("refs/remotes/origin/"):
+            branch_name = ref.split("refs/remotes/origin/", 1)[1]
+            return 0 if pushed_marker(branch_name).exists() else 1
+        exec_real_git(args)
+
+    if subcommand == "rev-parse" and len(args) > 1:
+        ref = args[1]
+        if ref.startswith("origin/"):
+            branch_name = ref.split("origin/", 1)[1]
+            if pushed_marker(branch_name).exists():
+                hash_path = pushed_hash_path(branch_name)
+                if hash_path.exists():
+                    sys.stdout.write(hash_path.read_text(encoding="utf-8"))
+                    return 0
+                local_hash = capture_branch_hash(branch_name)
+                if local_hash:
+                    sys.stdout.write(local_hash)
+                    return 0
+        exec_real_git(args)
+
+    if subcommand == "checkout" and len(args) > 1 and not args[1].startswith("-"):
+        branch_name = args[1]
+        result = run_git(
+            ["show-ref", f"refs/heads/{branch_name}"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if result.returncode != 0 and pushed_marker(branch_name).exists():
+            hash_path = pushed_hash_path(branch_name)
+            if hash_path.exists():
+                pushed_hash = hash_path.read_text(encoding="utf-8").strip()
+                checkout = run_git(["checkout", "-b", branch_name, pushed_hash])
+                return checkout.returncode
+        exec_real_git(args)
+
+    if subcommand == "--version":
+        print("git version 2.40.0")
+        return 0
+
+    exec_real_git(args)
+
+
+def bool_env(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None or value == "":
+        return default
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        parsed = value
+    if isinstance(parsed, bool):
+        return parsed
+    return str(value).lower() in {"1", "true", "yes", "on"}
+
+
+def json_env(name: str, default):
+    value = os.environ.get(name)
+    if not value:
+        return default
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return default
+
+
+def handle_gh(args: List[str]) -> int:
+    if len(args) >= 2 and args[0] == "pr" and args[1] == "list":
+        head_branch = ""
+        idx = 0
+        while idx < len(args):
+            if args[idx] == "--head" and idx + 1 < len(args):
+                head_branch = args[idx + 1]
+                break
+            idx += 1
+
+        existing_pr = os.environ.get("YAS_TEST_EXISTING_PR_ID")
+        if existing_pr:
+            response = {
+                "id": existing_pr,
+                "state": os.environ.get("YAS_TEST_PR_STATE", "OPEN"),
+                "url": os.environ.get("YAS_TEST_PR_URL", "https://github.com/test/test/pull/1"),
+                "isDraft": bool_env("YAS_TEST_PR_IS_DRAFT", False),
+                "baseRefName": os.environ.get("YAS_TEST_PR_BASE_REF", "main"),
+            }
+            review_decision = os.environ.get("YAS_TEST_PR_REVIEW_DECISION")
+            if review_decision:
+                response["reviewDecision"] = review_decision
+            response["statusCheckRollup"] = json_env("YAS_TEST_PR_STATUS_CHECK_ROLLUP", [])
+            print(json.dumps([response]))
+            return 0
+
+        if head_branch:
+            created = pr_created_path(head_branch)
+            if created.exists():
+                pr_url = created.read_text(encoding="utf-8").strip()
+                base_file = pr_base_path(head_branch)
+                base = base_file.read_text(encoding="utf-8").strip() if base_file.exists() else "main"
+                payload = {
+                    "id": "PR_CREATED",
+                    "state": "OPEN",
+                    "url": pr_url,
+                    "isDraft": True,
+                    "baseRefName": base,
+                    "statusCheckRollup": [],
+                }
+                print(json.dumps([payload]))
+                return 0
+
+        print("[]")
+        return 0
+
+    if len(args) >= 2 and args[0] == "pr" and args[1] == "create":
+        head_branch = ""
+        base_branch = "main"
+        idx = 0
+        while idx < len(args):
+            if args[idx] == "--head" and idx + 1 < len(args):
+                head_branch = args[idx + 1]
+                idx += 1
+            elif args[idx] == "--base" and idx + 1 < len(args):
+                base_branch = args[idx + 1]
+                idx += 1
+            idx += 1
+
+        pr_url = "https://github.com/test/test/pull/1"
+        print(pr_url)
+        if head_branch:
+            pr_created_path(head_branch).write_text(f"{pr_url}\n", encoding="utf-8")
+            pr_base_path(head_branch).write_text(f"{base_branch}\n", encoding="utf-8")
+        return 0
+
+    if len(args) >= 2 and args[0] == "pr" and args[1] == "view":
+        has_json = any(arg == "--json" for arg in args)
+        if has_json:
+            query = ""
+            idx = 0
+            while idx < len(args):
+                if args[idx] == "-q" and idx + 1 < len(args):
+                    query = args[idx + 1]
                     break
-                fi
-            done
+                idx += 1
+            title = "Mock PR Title"
+            body = "This is the original PR description."
+            if "---SEPARATOR---" in query:
+                print(title)
+                print("---SEPARATOR---")
+                print(body)
+            else:
+                print(body)
+        else:
+            print("This is the original PR description.")
+        return 0
 
-            # Check if we should return an existing PR
-            if [ -n "$YAS_TEST_EXISTING_PR_ID" ]; then
-                state="${YAS_TEST_PR_STATE:-OPEN}"
-                url="${YAS_TEST_PR_URL:-https://github.com/test/test/pull/1}"
-                isDraft="${YAS_TEST_PR_IS_DRAFT:-false}"
-                baseRefName="${YAS_TEST_PR_BASE_REF:-main}"
-                reviewDecision="${YAS_TEST_PR_REVIEW_DECISION:-}"
-                statusCheckRollup="${YAS_TEST_PR_STATUS_CHECK_ROLLUP:-}"
+    if len(args) >= 2 and args[0] == "pr" and args[1] == "merge":
+        print("✓ Merged pull request")
+        return 0
 
-                # Build JSON with optional fields
-                json="{\"id\":\"$YAS_TEST_EXISTING_PR_ID\",\"state\":\"$state\",\"url\":\"$url\",\"isDraft\":$isDraft,\"baseRefName\":\"$baseRefName\""
-                if [ -n "$reviewDecision" ]; then
-                    json="$json,\"reviewDecision\":\"$reviewDecision\""
-                fi
-                if [ -n "$statusCheckRollup" ]; then
-                    json="$json,\"statusCheckRollup\":$statusCheckRollup"
-                else
-                    json="$json,\"statusCheckRollup\":[]"
-                fi
-                json="$json}"
-                echo "[$json]"
-            elif [ -f "/tmp/yas-test-pr-created-$head_branch" ]; then
-                # PR was created in this test session
-                pr_url=$(cat "/tmp/yas-test-pr-created-$head_branch")
-                base_ref=$(cat "/tmp/yas-test-pr-base-$head_branch" 2>/dev/null || echo "main")
-                echo "[{\"id\":\"PR_CREATED\",\"state\":\"OPEN\",\"url\":\"$pr_url\",\"isDraft\":true,\"baseRefName\":\"$base_ref\",\"statusCheckRollup\":[]}]"
-            else
-                echo "[]"
-            fi
-            exit 0
-        elif [[ "$1" == "pr" && "$2" == "create" ]]; then
-            # Extract the branch from --head and --base arguments
-            head_branch=""
-            base_branch="main"
-            for ((i=1; i<=$#; i++)); do
-                if [[ "${!i}" == "--head" ]]; then
-                    ((i++))
-                    head_branch="${!i}"
-                elif [[ "${!i}" == "--base" ]]; then
-                    ((i++))
-                    base_branch="${!i}"
-                fi
-            done
+    if len(args) >= 2 and args[0] == "pr" and args[1] == "edit":
+        return 0
 
-            # Simulate successful PR creation
-            pr_url="https://github.com/test/test/pull/1"
-            echo "$pr_url"
+    return 0
 
-            # Save that we created a PR for this branch
-            if [ -n "$head_branch" ]; then
-                echo "$pr_url" > "/tmp/yas-test-pr-created-$head_branch"
-                echo "$base_branch" > "/tmp/yas-test-pr-base-$head_branch"
-            fi
-            exit 0
-        elif [[ "$1" == "pr" && "$2" == "view" ]]; then
-            # Check if they want JSON output with title and body
-            has_json=false
-            for arg in "$@"; do
-                if [[ "$arg" == "--json" ]]; then
-                    has_json=true
-                    break
-                fi
-            done
 
-            if $has_json; then
-                # Extract the query to determine what fields to return
-                query=""
-                for ((i=1; i<=$#; i++)); do
-                    if [[ "${!i}" == "-q" ]]; then
-                        ((i++))
-                        query="${!i}"
-                        break
-                    fi
-                done
+def main() -> int:
+    args = sys.argv[1:]
+    log_command(args)
 
-                # Mock PR title and body
-                title="Mock PR Title"
-                body="This is the original PR description."
+    if CMD_NAME == "git":
+        return handle_git(args)
+    if CMD_NAME == "gh":
+        return handle_gh(args)
+    return 0
 
-                # If the query contains the separator, return title and body separated
-                if [[ "$query" == *"---SEPARATOR---"* ]]; then
-                    echo "$title"
-                    echo "---SEPARATOR---"
-                    echo "$body"
-                else
-                    # Otherwise just return the body (for backwards compatibility)
-                    echo "$body"
-                fi
-            else
-                # Return mock PR body (plain text)
-                echo "This is the original PR description."
-            fi
-            exit 0
-        elif [[ "$1" == "pr" && "$2" == "merge" ]]; then
-            # Simulate successful merge
-            echo "✓ Merged pull request"
-            exit 0
-        elif [[ "$1" == "pr" && "$2" == "edit" ]]; then
-            # Extract PR number and base argument
-            pr_number=""
-            new_base=""
-            for ((i=3; i<=$#; i++)); do
-                arg="${!i}"
-                if [[ "$arg" != --* ]]; then
-                    pr_number="$arg"
-                elif [[ "$arg" == "--base" ]]; then
-                    ((i++))
-                    new_base="${!i}"
-                fi
-            done
 
-            # If updating base, save it for the head branch
-            # We need to find which branch this PR is for
-            # For now, we'll just simulate success
-            # In a real test, you might track PR number to branch mapping
-            exit 0
-        fi
-        ;;
-esac
-
-exit 0
+if __name__ == "__main__":
+    sys.exit(main())
