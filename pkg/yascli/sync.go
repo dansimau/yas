@@ -7,7 +7,7 @@ import (
 )
 
 type syncCmd struct {
-	SkipPull    bool `description:"Skip pulling the trunk branch" long:"skip-pull"`
+	SkipPull    bool `description:"Skip pulling the trunk branch"       long:"skip-pull"`
 	SkipRestack bool `description:"Skip restacking branches after sync" long:"skip-restack"`
 
 	yasInstance *yas.YAS

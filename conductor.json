@@ -1,6 +1,6 @@
 {
     "scripts": {
         "setup": "",
-        "run": "make test >/dev/null"
+        "run": "make lint && make test >/dev/null"
     }
 }

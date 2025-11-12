@@ -599,6 +599,7 @@ func TestMerge_WithBranchNameReturnsToOriginalBranch(t *testing.T) {
 
 		// Submit topic-a
 		testutil.ExecOrFail(t, "git checkout topic-a")
+
 		err = y.Submit(false)
 		assert.NilError(t, err)
 
