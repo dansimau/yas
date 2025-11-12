@@ -5,11 +5,11 @@ import (
 )
 
 type restackCmd struct {
-	All    bool `description:"Restack all branches" long:"all"`
+	All    bool `description:"Restack all branches"                               long:"all"`
 	DryRun bool `description:"Don't make any changes, just show what will happen" long:"dry-run"`
 
 	Args struct {
-		Branch string `positional-arg-name:"branch" description:"The name of the branch to restack (default: current)"`
+		Branch string `description:"The name of the branch to restack (default: current)" positional-arg-name:"branch"`
 	} `positional-args:"true"`
 }
 

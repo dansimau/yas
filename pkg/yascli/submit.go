@@ -7,7 +7,7 @@ import (
 type submitCmd struct {
 	Stack    bool `description:"Submit all branches in the current stack" long:"stack"`
 	Outdated bool `description:"Submit all branches that need submitting" long:"outdated"`
-	Draft    bool `description:"Create new PRs as draft" long:"draft"`
+	Draft    bool `description:"Create new PRs as draft"                  long:"draft"`
 }
 
 func (c *submitCmd) Execute(args []string) error {

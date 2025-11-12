@@ -558,6 +558,7 @@ func TestRestack_WithDeletedParentBranch(t *testing.T) {
 		assert.NilError(t, err)
 
 		var data map[string]interface{}
+
 		err = json.Unmarshal(dataBytes, &data)
 		assert.NilError(t, err)
 

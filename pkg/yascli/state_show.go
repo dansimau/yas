@@ -8,7 +8,7 @@ import (
 type stateShowCmd struct {
 	All  bool `description:"Show metadata for all branches" long:"all"`
 	Args struct {
-		Branches []string `positional-arg-name:"branch" description:"Branch name(s) to show metadata for"`
+		Branches []string `description:"Branch name(s) to show metadata for" positional-arg-name:"branch"`
 	} `positional-args:"yes"`
 }
 

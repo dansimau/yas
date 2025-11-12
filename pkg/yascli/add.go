@@ -9,7 +9,7 @@ type addCmd struct {
 	BranchPoint string `description:"Commit SHA where branch diverged from parent (default: autodetect)" long:"branch-point" required:"false"`
 
 	Args struct {
-		Branch string `positional-arg-name:"branch" description:"The name of the branch to add to stack (default: current)"`
+		Branch string `description:"The name of the branch to add to stack (default: current)" positional-arg-name:"branch"`
 	} `positional-args:"true"`
 }
 
