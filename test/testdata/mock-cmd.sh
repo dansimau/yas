@@ -7,15 +7,28 @@ CMD_NAME=$(basename "$0")
 
 # Log the command and all arguments (one per line)
 if [ -n "$YAS_TEST_CMD_LOG" ]; then
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "jq is required for tests to run" >&2
+        exit 1
+    fi
+
     # Use an atomic append with a temp file to avoid lock dependencies (cross-platform friendly)
     tmpfile="${YAS_TEST_CMD_LOG}.tmp.$$"
-    {
-        echo "$CMD_NAME"
-        for arg in "$@"; do
-            echo "  $arg"
-        done
-        echo ""
-    } > "$tmpfile"
+
+    if [ "$#" -gt 0 ]; then
+        json_args="$(printf '%s\0' "$@" | jq -R -s -c 'split("\u0000")[:-1]')"
+    else
+        json_args="[]"
+    fi
+
+    jq -nc \
+        --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --arg pid "$$" \
+        --arg script "$CMD_NAME" \
+        --arg cwd "$PWD" \
+        --argjson args "$json_args" \
+        '{ts:$ts, pid:($pid|tonumber), script:$script, cwd:$cwd, args:$args}' > "$tmpfile"
+
     # Atomically append to the log
     cat "$tmpfile" >> "$YAS_TEST_CMD_LOG"
     rm -f "$tmpfile"
