@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dansimau/yas/pkg/gitexec"
 	"github.com/go-git/go-git/v5/plumbing"
 )
 
@@ -268,7 +269,86 @@ func (yas *YAS) SwitchBranch(branchName string) error {
 		return fmt.Errorf("failed to check if branch exists locally: %w", err)
 	}
 
-	// Call on git to switch to the branch
+	// Check if the branch has a worktree
+	worktreePath, err := yas.git.WorktreeFindByBranch(branchName)
+	if err != nil {
+		// If we can't check for worktrees, just continue with normal checkout
+		// (this might happen if git version is too old or other issues)
+		fmt.Fprintf(os.Stderr, "WARNING: failed to check for worktrees: %v\n", err)
+	} else if worktreePath != "" {
+		// Branch has a worktree - switch to it using shell exec
+		shellExec, err := NewShellExecWriter()
+		if err != nil {
+			return err
+		}
+
+		defer func() {
+			if closeErr := shellExec.Close(); closeErr != nil {
+				fmt.Fprintf(os.Stderr, "WARNING: failed to close shell exec file: %v\n", closeErr)
+			}
+		}()
+
+		// Write cd command to change to worktree directory
+		if err := shellExec.WriteCommand("cd", worktreePath); err != nil {
+			return fmt.Errorf("failed to write cd command: %w", err)
+		}
+
+		// Write echo message to show successful switch
+		message := fmt.Sprintf("Switched to branch '%s' in worktree: %s", branchName, worktreePath)
+		if err := shellExec.WriteCommand("echo", message); err != nil {
+			return fmt.Errorf("failed to write echo command: %w", err)
+		}
+
+		return nil
+	}
+
+	// Check if we're currently in a worktree
+	// We need to check based on the current working directory, not the repo directory
+	// because the repo directory may have been resolved to the primary repo
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: failed to get current directory: %v\n", err)
+	}
+
+	cwdRepo := gitexec.WithRepo(cwd)
+
+	inWorktree, err := cwdRepo.IsWorktree()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: failed to check if in worktree: %v\n", err)
+	} else if inWorktree {
+		// We're in a worktree but target branch doesn't have one
+		// Switch back to primary repo and run checkout there
+		shellExec, err := NewShellExecWriter()
+		if err != nil {
+			return err
+		}
+
+		defer func() {
+			if closeErr := shellExec.Close(); closeErr != nil {
+				fmt.Fprintf(os.Stderr, "WARNING: failed to close shell exec file: %v\n", closeErr)
+			}
+		}()
+
+		// Get primary repo working directory
+		primaryRepoPath, err := yas.git.WorktreeGetPrimaryRepoWorkingDirPath()
+		if err != nil {
+			return fmt.Errorf("failed to get primary repo path: %w", err)
+		}
+
+		// Write cd command to change to primary repo
+		if err := shellExec.WriteCommand("cd", primaryRepoPath); err != nil {
+			return fmt.Errorf("failed to write cd command: %w", err)
+		}
+
+		// Write command to run yas branch switch in primary repo
+		if err := shellExec.WriteCommand("yas", "br", branchName); err != nil {
+			return fmt.Errorf("failed to write yas command: %w", err)
+		}
+
+		return nil
+	}
+
+	// We're in primary repo and target has no worktree - proceed with normal checkout
 	if err := yas.git.Checkout(branchName); err != nil {
 		return fmt.Errorf("failed to checkout branch: %w", err)
 	}
