@@ -8,6 +8,7 @@ import (
 	"path"
 
 	"github.com/dansimau/yas/pkg/fsutil"
+	"github.com/dansimau/yas/pkg/gitexec"
 	"github.com/jessevdk/go-flags"
 )
 
@@ -27,6 +28,12 @@ func mustAddCommand(f *flags.Command, err error) *flags.Command {
 	return f
 }
 
+// SkipRepoCheck is an interface that commands can implement to skip the
+// repository check in the CommandHandler.
+type SkipRepoCheck interface {
+	SkipRepoCheck() bool
+}
+
 // Run executes the program with the specified arguments and returns the code
 // the process should exit with.
 func Run(args ...string) (exitCode int) {
@@ -37,14 +44,30 @@ func Run(args ...string) (exitCode int) {
 	parser := flags.NewParser(cmd, flags.HelpFlag)
 
 	parser.CommandHandler = func(command flags.Commander, args []string) error {
+		// Check if this command needs a repo check
+		skipRepo := false
+		if checker, ok := command.(SkipRepoCheck); ok {
+			skipRepo = checker.SkipRepoCheck()
+		}
+
 		// Apply defaults to cmd
-		if cmd.RepoDirectory == "" {
+		if !skipRepo && cmd.RepoDirectory == "" {
 			gitDir, err := fsutil.SearchParentsForPathFromCwd(".git")
 			if err != nil {
 				return NewError("cannot find repository (.git directory) (hint: specify --repo or run yas from inside repostory)")
 			}
 
 			repoDir := path.Dir(gitDir)
+
+			// If we're in a worktree, resolve to the primary repo directory
+			// to ensure config and state files are found correctly
+			repo := gitexec.WithRepo(repoDir)
+			if isWorktree, err := repo.IsWorktree(); err == nil && isWorktree {
+				if primaryPath, err := repo.WorktreeGetPrimaryRepoWorkingDirPath(); err == nil {
+					repoDir = primaryPath
+				}
+			}
+
 			cmd.RepoDirectory = repoDir
 		}
 
@@ -68,6 +91,7 @@ func Run(args ...string) (exitCode int) {
 	mustAddCommand(parser.AddCommand("branch", "Work with branches", branchCmdLongHelp, &branchCmd{})).Aliases = []string{"nb", "br"}
 	mustAddCommand(parser.AddCommand("config", "Manage repository-specific configuration", "", &configCmd{}))
 	mustAddCommand(parser.AddCommand("continue", "Continue a restack operation after fixing conflicts", "", &continueCmd{}))
+	mustAddCommand(parser.AddCommand("hook", "Print shell integration hook for bash or zsh", "", &hookCmd{}))
 	mustAddCommand(parser.AddCommand("init", "Set up initial configuration", "", &initCmd{}))
 	mustAddCommand(parser.AddCommand("list", "List stacks", "", &listCmd{})).Aliases = []string{"ls"}
 	mustAddCommand(parser.AddCommand("merge", "Merge PR for current branch", "", &mergeCmd{}))
