@@ -12,7 +12,12 @@ import (
 type initCmd struct{}
 
 func (c *initCmd) Execute(args []string) error {
-	isNewConfig := !yas.IsConfigured(cmd.RepoDirectory)
+	isConfigured, err := yas.IsConfigured(cmd.RepoDirectory)
+	if err != nil {
+		return NewError(err.Error())
+	}
+
+	isNewConfig := !isConfigured
 
 	cfg := &yas.Config{
 		RepoDirectory:    cmd.RepoDirectory,

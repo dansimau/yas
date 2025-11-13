@@ -17,7 +17,12 @@ func (c *configSetCmd) Execute(args []string) error {
 		RepoDirectory: cmd.RepoDirectory,
 	}
 
-	if yas.IsConfigured(cmd.RepoDirectory) {
+	isConfigured, err := yas.IsConfigured(cmd.RepoDirectory)
+	if err != nil {
+		return NewError(err.Error())
+	}
+
+	if isConfigured {
 		_cfg, err := yas.ReadConfig(cmd.RepoDirectory)
 		if err != nil {
 			return NewError(err.Error())

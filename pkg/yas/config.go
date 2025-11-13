@@ -19,27 +19,48 @@ type Config struct {
 
 // resolveConfigPath returns the first config path that exists, or the first
 // path if none exist (for writing to the new location).
-func resolveConfigPath(repoDir string) string {
+func resolveConfigPath(repoDir string) (string, error) {
 	for _, filename := range configFilenames {
 		fullPath := path.Join(repoDir, filename)
-		if fsutil.FileExists(fullPath) {
-			return fullPath
+
+		exists, err := fsutil.FileExists(fullPath)
+		if err != nil {
+			return "", err
+		}
+
+		if exists {
+			return fullPath, nil
 		}
 	}
 	// No file exists - use first (new) path for writing
-	return path.Join(repoDir, configFilenames[0])
+	return path.Join(repoDir, configFilenames[0]), nil
 }
 
-func IsConfigured(repoDirectory string) bool {
-	return fsutil.FileExists(resolveConfigPath(repoDirectory))
+func IsConfigured(repoDirectory string) (bool, error) {
+	configPath, err := resolveConfigPath(repoDirectory)
+	if err != nil {
+		return false, err
+	}
+
+	return fsutil.FileExists(configPath)
 }
 
 func ReadConfig(repoDirectory string) (*Config, error) {
-	if !IsConfigured(repoDirectory) {
+	isConfigured, err := IsConfigured(repoDirectory)
+	if err != nil {
+		return nil, err
+	}
+
+	if !isConfigured {
 		return nil, errors.New("repository not configured (hint: run `yas init`)")
 	}
 
-	yamlBytes, err := os.ReadFile(resolveConfigPath(repoDirectory))
+	configPath, err := resolveConfigPath(repoDirectory)
+	if err != nil {
+		return nil, err
+	}
+
+	yamlBytes, err := os.ReadFile(configPath)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +86,10 @@ func WriteConfig(cfg Config) (string, error) {
 		return "", err
 	}
 
-	configFilePath := resolveConfigPath(cfg.RepoDirectory)
+	configFilePath, err := resolveConfigPath(cfg.RepoDirectory)
+	if err != nil {
+		return "", err
+	}
 
 	// Ensure the directory exists
 	if err := os.MkdirAll(path.Dir(configFilePath), 0o755); err != nil {

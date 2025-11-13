@@ -7,8 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dansimau/yas/pkg/fsutil"
 	"github.com/dansimau/yas/pkg/gitexec"
 	"github.com/dansimau/yas/pkg/xexec"
+	"github.com/dansimau/yas/pkg/yas"
 	"gotest.tools/v3/assert"
 )
 
@@ -66,4 +68,26 @@ func captureStdout(t *testing.T, f func()) string {
 	}
 
 	return buf.String()
+}
+
+// assertFileExists is a test helper that calls fsutil.FileExists and asserts
+// that no error occurred, returning the boolean result.
+func assertFileExists(t *testing.T, path string) bool {
+	t.Helper()
+
+	exists, err := fsutil.FileExists(path)
+	assert.NilError(t, err, "FileExists should not error")
+
+	return exists
+}
+
+// assertRestackStateExists is a test helper that calls yas.RestackStateExists
+// and asserts that no error occurred, returning the boolean result.
+func assertRestackStateExists(t *testing.T, repoDir string) bool {
+	t.Helper()
+
+	exists, err := yas.RestackStateExists(repoDir)
+	assert.NilError(t, err, "RestackStateExists should not error")
+
+	return exists
 }

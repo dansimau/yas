@@ -49,14 +49,14 @@ func TestAbort_AbortsRebaseAndResetsBranch(t *testing.T) {
 		assert.Equal(t, exitCode, 1, "restack should fail due to conflict")
 
 		// Verify that restack state was saved
-		assert.Assert(t, yas.RestackStateExists("."), "restack state should be saved")
+		assert.Assert(t, assertRestackStateExists(t, "."), "restack state should be saved")
 
 		// Run abort to cancel the restack
 		exitCode = yascli.Run("abort")
 		assert.Equal(t, exitCode, 0, "abort should succeed")
 
 		// Verify that restack state was cleaned up
-		assert.Assert(t, !yas.RestackStateExists("."), "restack state should be cleaned up")
+		assert.Assert(t, !assertRestackStateExists(t, "."), "restack state should be cleaned up")
 
 		// Verify we're on topic-a
 		equalLines(t, mustExecOutput("git", "branch", "--show-current"), "topic-a")
@@ -119,7 +119,8 @@ func TestAbort_ReturnsToStartingBranch(t *testing.T) {
 
 		// During a rebase conflict, we're in detached HEAD state
 		// The restack state should indicate we're rebasing topic-a
-		assert.Assert(t, yas.RestackStateExists("."), "restack state should exist")
+		assert.Assert(t, assertRestackStateExists(t, "."), "restack state should exist")
+
 		state, err := yas.LoadRestackState(".")
 		assert.NilError(t, err)
 		assert.Equal(t, state.CurrentBranch, "topic-a", "state should show rebasing topic-a")
@@ -177,7 +178,8 @@ func TestAbort_LeavesRebasedBranchesIntact(t *testing.T) {
 		assert.Equal(t, exitCode, 1, "restack should fail due to conflict on topic-b")
 
 		// Verify restack state exists and shows the correct branch
-		assert.Assert(t, yas.RestackStateExists("."), "restack state should exist")
+		assert.Assert(t, assertRestackStateExists(t, "."), "restack state should exist")
+
 		state, err := yas.LoadRestackState(".")
 		assert.NilError(t, err)
 		assert.Equal(t, state.CurrentBranch, "topic-b", "state should show rebasing topic-b")

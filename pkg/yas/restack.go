@@ -10,7 +10,12 @@ import (
 
 // checkRestackInProgress returns an error if a restack operation is in progress.
 func (yas *YAS) checkRestackInProgress() error {
-	if RestackStateExists(yas.cfg.RepoDirectory) {
+	exists, err := RestackStateExists(yas.cfg.RepoDirectory)
+	if err != nil {
+		return err
+	}
+
+	if exists {
 		return errors.New("a restack operation is already in progress\n\nRun 'yas continue' to resume or 'yas abort' to cancel")
 	}
 
@@ -314,7 +319,12 @@ func (yas *YAS) processRestackWorkQueue(startingBranch string, workQueue [][2]st
 // Continue resumes a restack operation that was interrupted by conflicts.
 func (yas *YAS) Continue() error {
 	// Check if there's a saved restack state
-	if !RestackStateExists(yas.cfg.RepoDirectory) {
+	exists, err := RestackStateExists(yas.cfg.RepoDirectory)
+	if err != nil {
+		return fmt.Errorf("failed to check restack state: %w", err)
+	}
+
+	if !exists {
 		return errors.New("no restack operation in progress (no saved state found)")
 	}
 
@@ -460,7 +470,12 @@ func (yas *YAS) Continue() error {
 // to its state before the rebase started.
 func (yas *YAS) Abort() error {
 	// Check if there's a saved restack state
-	if !RestackStateExists(yas.cfg.RepoDirectory) {
+	exists, err := RestackStateExists(yas.cfg.RepoDirectory)
+	if err != nil {
+		return fmt.Errorf("failed to check restack state: %w", err)
+	}
+
+	if !exists {
 		return errors.New("no restack operation in progress (no saved state found)")
 	}
 

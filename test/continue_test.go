@@ -52,7 +52,7 @@ func TestContinue_ResumeAfterConflict(t *testing.T) {
 		assert.Equal(t, exitCode, 1, "restack should fail due to conflict")
 
 		// Verify that restack state was saved
-		assert.Assert(t, yas.RestackStateExists("."), "restack state should be saved")
+		assert.Assert(t, assertRestackStateExists(t, "."), "restack state should be saved")
 
 		// Load and verify the state
 		state, err := yas.LoadRestackState(".")
@@ -75,7 +75,7 @@ func TestContinue_ResumeAfterConflict(t *testing.T) {
 		assert.Equal(t, exitCode, 0, "continue should succeed")
 
 		// Verify that restack state was cleaned up
-		assert.Assert(t, !yas.RestackStateExists("."), "restack state should be cleaned up")
+		assert.Assert(t, !assertRestackStateExists(t, "."), "restack state should be cleaned up")
 
 		// Verify we're back on topic-b
 		equalLines(t, mustExecOutput("git", "branch", "--show-current"), "topic-b")
@@ -149,7 +149,7 @@ func TestContinue_UserAlreadyCompletedRebase(t *testing.T) {
 		assert.Equal(t, exitCode, 1, "restack should fail due to conflict")
 
 		// Verify that restack state was saved
-		assert.Assert(t, yas.RestackStateExists("."), "restack state should be saved")
+		assert.Assert(t, assertRestackStateExists(t, "."), "restack state should be saved")
 
 		// User fixes conflicts and completes the rebase manually
 		testutil.ExecOrFail(t, `
@@ -166,7 +166,7 @@ func TestContinue_UserAlreadyCompletedRebase(t *testing.T) {
 		assert.Equal(t, exitCode, 0, "continue should succeed even if user already completed rebase")
 
 		// Verify that restack state was cleaned up
-		assert.Assert(t, !yas.RestackStateExists("."), "restack state should be cleaned up")
+		assert.Assert(t, !assertRestackStateExists(t, "."), "restack state should be cleaned up")
 
 		// Verify the final state
 		output := mustExecOutput("git", "log", "--pretty=%s")
@@ -210,7 +210,7 @@ func TestContinue_ErrorsWhenRebaseAborted(t *testing.T) {
 		assert.Equal(t, exitCode, 1, "restack should fail due to conflict")
 
 		// Verify that restack state was saved
-		assert.Assert(t, yas.RestackStateExists("."), "restack state should be saved")
+		assert.Assert(t, assertRestackStateExists(t, "."), "restack state should be saved")
 
 		// User aborts the rebase
 		testutil.ExecOrFail(t, `git rebase --abort`)
@@ -220,7 +220,7 @@ func TestContinue_ErrorsWhenRebaseAborted(t *testing.T) {
 		assert.Equal(t, exitCode, 1, "continue should fail when rebase was aborted")
 
 		// Verify that restack state still exists (wasn't cleaned up on error)
-		assert.Assert(t, yas.RestackStateExists("."), "restack state should still exist after abort detection")
+		assert.Assert(t, assertRestackStateExists(t, "."), "restack state should still exist after abort detection")
 
 		// Verify we're still on topic-a
 		equalLines(t, mustExecOutput("git", "branch", "--show-current"), "topic-a")
@@ -296,7 +296,7 @@ func TestContinue_MultipleConflicts(t *testing.T) {
 
 		if exitCode == 0 {
 			// All conflicts resolved successfully
-			assert.Assert(t, !yas.RestackStateExists("."), "restack state should be cleaned up")
+			assert.Assert(t, !assertRestackStateExists(t, "."), "restack state should be cleaned up")
 
 			// Verify final state - all branches should be successfully rebased
 			testutil.ExecOrFail(t, "git checkout topic-c")
@@ -309,7 +309,7 @@ func TestContinue_MultipleConflicts(t *testing.T) {
 			assert.Assert(t, strings.Contains(output, "main-1"), "main-1 commit should exist after rebase")
 		} else {
 			// Another conflict occurred - state should still exist
-			assert.Assert(t, yas.RestackStateExists("."), "restack state should still exist on another conflict")
+			assert.Assert(t, assertRestackStateExists(t, "."), "restack state should still exist on another conflict")
 		}
 	})
 }

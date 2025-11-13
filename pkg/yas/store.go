@@ -68,7 +68,12 @@ func loadData(filePath string) (*yasDatabase, error) {
 		},
 	}
 
-	if !fsutil.FileExists(filePath) {
+	exists, err := fsutil.FileExists(filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	if !exists {
 		return db, nil
 	}
 

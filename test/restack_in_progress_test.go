@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/dansimau/yas/pkg/testutil"
-	"github.com/dansimau/yas/pkg/yas"
 	"github.com/dansimau/yas/pkg/yascli"
 	"gotest.tools/v3/assert"
 )
@@ -44,7 +43,7 @@ func TestRestack_RefusesWhenRestackInProgress(t *testing.T) {
 		assert.Equal(t, exitCode, 1, "restack should fail due to conflict")
 
 		// Verify that restack state was saved
-		assert.Assert(t, yas.RestackStateExists("."), "restack state should be saved")
+		assert.Assert(t, assertRestackStateExists(t, "."), "restack state should be saved")
 
 		// Try to run restack again - should be refused
 		exitCode = yascli.Run("restack")
@@ -91,7 +90,7 @@ func TestSubmit_RefusesWhenRestackInProgress(t *testing.T) {
 		assert.Equal(t, exitCode, 1, "restack should fail due to conflict")
 
 		// Verify that restack state was saved
-		assert.Assert(t, yas.RestackStateExists("."), "restack state should be saved")
+		assert.Assert(t, assertRestackStateExists(t, "."), "restack state should be saved")
 
 		// Try to run submit - should be refused
 		exitCode = yascli.Run("submit")
@@ -138,7 +137,7 @@ func TestSync_RefusesWhenRestackInProgress(t *testing.T) {
 		assert.Equal(t, exitCode, 1, "restack should fail due to conflict")
 
 		// Verify that restack state was saved
-		assert.Assert(t, yas.RestackStateExists("."), "restack state should be saved")
+		assert.Assert(t, assertRestackStateExists(t, "."), "restack state should be saved")
 
 		// Try to run sync - should be refused
 		exitCode = yascli.Run("sync")

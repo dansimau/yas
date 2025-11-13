@@ -124,7 +124,7 @@ func TestMove_WithConflicts(t *testing.T) {
 		assert.Equal(t, exitCode, 1, "move should fail due to conflicts")
 
 		// Verify restack state was saved
-		assert.Assert(t, yas.RestackStateExists("."), "restack state should be saved")
+		assert.Assert(t, assertRestackStateExists(t, "."), "restack state should be saved")
 
 		// Verify we're in the middle of a rebase
 		testutil.ExecOrFail(t, "test -d .git/rebase-merge || test -d .git/rebase-apply")
@@ -142,7 +142,7 @@ func TestMove_WithConflicts(t *testing.T) {
 		assert.Equal(t, exitCode, 0, "continue should succeed")
 
 		// Verify restack state was cleaned up
-		assert.Assert(t, !yas.RestackStateExists("."), "restack state should be cleaned up")
+		assert.Assert(t, !assertRestackStateExists(t, "."), "restack state should be cleaned up")
 
 		// Verify feature-a is now based on topic-b
 		logOutput := mustExecOutput("git", "log", "--pretty=%s")
@@ -192,14 +192,14 @@ func TestMove_Abort(t *testing.T) {
 		assert.Equal(t, exitCode, 1, "move should fail due to conflicts")
 
 		// Verify restack state was saved
-		assert.Assert(t, yas.RestackStateExists("."), "restack state should be saved")
+		assert.Assert(t, assertRestackStateExists(t, "."), "restack state should be saved")
 
 		// Abort the move
 		exitCode = yascli.Run("abort")
 		assert.Equal(t, exitCode, 0, "abort should succeed")
 
 		// Verify restack state was cleaned up
-		assert.Assert(t, !yas.RestackStateExists("."), "restack state should be cleaned up")
+		assert.Assert(t, !assertRestackStateExists(t, "."), "restack state should be cleaned up")
 
 		// Verify we're on feature-a
 		equalLines(t, mustExecOutput("git", "branch", "--show-current"), "feature-a")
@@ -257,7 +257,7 @@ func TestMove_FatalError(t *testing.T) {
 		assert.Equal(t, exitCode, 1, "move should fail due to unstashed changes")
 
 		// Verify that restack state was NOT saved (fatal error, not conflict)
-		assert.Assert(t, !yas.RestackStateExists("."), "restack state should NOT be saved for fatal errors")
+		assert.Assert(t, !assertRestackStateExists(t, "."), "restack state should NOT be saved for fatal errors")
 
 		// Verify we're still on feature-a
 		equalLines(t, mustExecOutput("git", "branch", "--show-current"), "feature-a")

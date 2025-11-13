@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/dansimau/yas/pkg/testutil"
-	"github.com/dansimau/yas/pkg/yas"
 	"github.com/dansimau/yas/pkg/yascli"
 	"gotest.tools/v3/assert"
 )
@@ -50,7 +49,7 @@ func TestRestack_FatalErrorDoesNotSaveState(t *testing.T) {
 		assert.Equal(t, exitCode, 1, "restack should fail due to unstashed changes")
 
 		// Verify that restack state was NOT saved (fatal error, not conflict)
-		assert.Assert(t, !yas.RestackStateExists("."), "restack state should NOT be saved for fatal errors")
+		assert.Assert(t, !assertRestackStateExists(t, "."), "restack state should NOT be saved for fatal errors")
 
 		// Verify we're still on topic-a
 		equalLines(t, mustExecOutput("git", "branch", "--show-current"), "topic-a")

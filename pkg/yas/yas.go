@@ -19,15 +19,21 @@ var yasStateFiles = []string{".yas/yas.state.json", ".git/.yasstate"}
 
 // resolveStatePath returns the first state path that exists, or the first
 // path if none exist (for writing to the new location).
-func resolveStatePath(repoDir string) string {
+func resolveStatePath(repoDir string) (string, error) {
 	for _, filename := range yasStateFiles {
 		fullPath := path.Join(repoDir, filename)
-		if fsutil.FileExists(fullPath) {
-			return fullPath
+
+		exists, err := fsutil.FileExists(fullPath)
+		if err != nil {
+			return "", err
+		}
+
+		if exists {
+			return fullPath, nil
 		}
 	}
 	// No file exists - use first (new) path for writing
-	return path.Join(repoDir, yasStateFiles[0])
+	return path.Join(repoDir, yasStateFiles[0]), nil
 }
 
 type YAS struct {
@@ -43,7 +49,12 @@ func New(cfg Config) (*YAS, error) {
 		return nil, fmt.Errorf("failed to open git repo: %w", err)
 	}
 
-	data, err := loadData(resolveStatePath(cfg.RepoDirectory))
+	statePath, err := resolveStatePath(cfg.RepoDirectory)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve state path: %w", err)
+	}
+
+	data, err := loadData(statePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load YAS state: %w", err)
 	}
