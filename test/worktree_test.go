@@ -312,3 +312,171 @@ func TestWorktree_SwitchFromWorktreeToAnotherNonWorktreeBranch(t *testing.T) {
 	assert.Assert(t, cmp.Contains(contentStr, "br"))
 	assert.Assert(t, cmp.Contains(contentStr, "feature-b"))
 }
+
+func TestWorktree_CreateBranchWithWorktreeFlag(t *testing.T) {
+	testutil.WithTempWorkingDir(t, func() {
+		// Create main repo
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+			touch main
+			git add main
+			git commit -m "main-0"
+		`)
+
+		// Initialize yas
+		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
+
+		// Set up shell exec env
+		tempFile := filepath.Join(t.TempDir(), "shell-exec")
+		t.Setenv("YAS_SHELL_EXEC", tempFile)
+
+		// Create a new branch with --worktree flag
+		assert.Equal(t, yascli.Run("branch", "feature-a", "--worktree"), 0)
+
+		// Verify the worktree was created at the correct path
+		worktreePath := filepath.Join(".", ".yas", "worktrees", "feature-a")
+		info, err := os.Stat(worktreePath)
+		assert.NilError(t, err)
+		assert.Assert(t, info.IsDir())
+
+		// Verify the branch was created
+		output := mustExecOutput("git", "branch", "--list", "feature-a")
+		assert.Assert(t, cmp.Contains(output, "feature-a"))
+
+		// Verify the shell exec file contains cd command to the worktree
+		content, err := os.ReadFile(tempFile)
+		assert.NilError(t, err)
+
+		contentStr := string(content)
+		assert.Assert(t, cmp.Contains(contentStr, "cd "))
+		assert.Assert(t, cmp.Contains(contentStr, ".yas/worktrees/feature-a"))
+	})
+}
+
+func TestWorktree_CreateBranchWithWorktreeFlagAndPrefix(t *testing.T) {
+	testutil.WithTempWorkingDir(t, func() {
+		// Create main repo
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+			git config user.email "testuser@example.com"
+			touch main
+			git add main
+			git commit -m "main-0"
+		`)
+
+		// Initialize yas with AutoPrefixBranch enabled
+		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main", "--auto-prefix-branch"), 0)
+
+		// Set up shell exec env
+		tempFile := filepath.Join(t.TempDir(), "shell-exec")
+		t.Setenv("YAS_SHELL_EXEC", tempFile)
+
+		// Create a new branch with --worktree flag
+		assert.Equal(t, yascli.Run("branch", "feature-a", "--worktree"), 0)
+
+		// Verify the worktree was created with unprefixed name
+		worktreePath := filepath.Join(".", ".yas", "worktrees", "feature-a")
+		info, err := os.Stat(worktreePath)
+		assert.NilError(t, err)
+		assert.Assert(t, info.IsDir())
+
+		// Verify the branch was created with prefix
+		output := mustExecOutput("git", "branch", "--list", "testuser/feature-a")
+		assert.Assert(t, cmp.Contains(output, "testuser/feature-a"))
+
+		// Verify the parent relationship was tracked
+		assert.Equal(t, yascli.Run("stack"), 0)
+	})
+}
+
+func TestWorktree_CreateBranchWithWorktreeAndStagedChanges(t *testing.T) {
+	testutil.WithTempWorkingDir(t, func() {
+		// Create main repo
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+			touch main
+			git add main
+			git commit -m "main-0"
+		`)
+
+		// Initialize yas
+		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
+
+		// Set up shell exec env
+		tempFile := filepath.Join(t.TempDir(), "shell-exec")
+		t.Setenv("YAS_SHELL_EXEC", tempFile)
+
+		// Create a staged change
+		testutil.ExecOrFail(t, `
+			touch staged-file
+			git add staged-file
+		`)
+
+		// Create a new branch with --worktree flag
+		assert.Equal(t, yascli.Run("branch", "feature-a", "--worktree"), 0)
+
+		// Verify the worktree was created at the correct path
+		worktreePath := filepath.Join(".", ".yas", "worktrees", "feature-a")
+		info, err := os.Stat(worktreePath)
+		assert.NilError(t, err)
+		assert.Assert(t, info.IsDir())
+
+		// Verify the branch was created
+		output := mustExecOutput("git", "branch", "--list", "feature-a")
+		assert.Assert(t, cmp.Contains(output, "feature-a"))
+
+		// Verify the staged changes were committed
+		output = mustExecOutput("git", "log", "--oneline", "feature-a")
+		assert.Assert(t, cmp.Contains(output, "Add staged changes"))
+
+		// Verify the shell exec file contains cd command to the worktree
+		content, err := os.ReadFile(tempFile)
+		assert.NilError(t, err)
+		contentStr := string(content)
+		assert.Assert(t, cmp.Contains(contentStr, "cd "))
+		assert.Assert(t, cmp.Contains(contentStr, ".yas/worktrees/feature-a"))
+	})
+}
+
+func TestWorktree_CreateWorktreeForExistingBranch(t *testing.T) {
+	testutil.WithTempWorkingDir(t, func() {
+		// Create main repo with an existing branch
+		testutil.ExecOrFail(t, `
+			git init --initial-branch=main
+			touch main
+			git add main
+			git commit -m "main-0"
+
+			git checkout -b feature-a
+			touch a
+			git add a
+			git commit -m "feature-a-0"
+
+			git checkout main
+		`)
+
+		// Initialize yas
+		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
+		assert.Equal(t, yascli.Run("add", "feature-a", "--parent=main"), 0)
+
+		// Set up shell exec env
+		tempFile := filepath.Join(t.TempDir(), "shell-exec")
+		t.Setenv("YAS_SHELL_EXEC", tempFile)
+
+		// Create worktree for existing branch with --worktree flag
+		assert.Equal(t, yascli.Run("branch", "feature-a", "--worktree"), 0)
+
+		// Verify worktree WAS created
+		worktreePath := filepath.Join(".", ".yas", "worktrees", "feature-a")
+		info, err := os.Stat(worktreePath)
+		assert.NilError(t, err)
+		assert.Assert(t, info.IsDir())
+
+		// Verify the shell exec file contains cd command to the worktree
+		content, err := os.ReadFile(tempFile)
+		assert.NilError(t, err)
+		contentStr := string(content)
+		assert.Assert(t, cmp.Contains(contentStr, "cd "))
+		assert.Assert(t, cmp.Contains(contentStr, ".yas/worktrees/feature-a"))
+	})
+}
