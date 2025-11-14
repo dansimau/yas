@@ -115,3 +115,13 @@ func (r *Repo) IsWorktree() (bool, error) {
 	// If they differ, we're in a worktree
 	return gitDir != gitCommonDir, nil
 }
+
+// WorktreeAdd creates a new worktree at the specified path with a new branch.
+func (r *Repo) WorktreeAdd(path, branchName, startPoint string) error {
+	return r.run("git", "worktree", "add", "-b", branchName, path, startPoint)
+}
+
+// WorktreeAddExisting creates a worktree for an existing branch.
+func (r *Repo) WorktreeAddExisting(path, branchName string) error {
+	return r.run("git", "worktree", "add", path, branchName)
+}
