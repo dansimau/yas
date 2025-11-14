@@ -1,6 +1,8 @@
 package yascli
 
 import (
+	"fmt"
+
 	"github.com/dansimau/yas/pkg/yas"
 )
 
@@ -17,7 +19,8 @@ type branchCmd struct {
 		BranchName string `description:"Branch name" positional-args:"true"`
 	} `positional-args:"true"`
 
-	Parent string `description:"Parent branch name (default: current branch)" long:"parent" required:"false"`
+	Parent   string `description:"Parent branch name (default: current branch)" long:"parent"   required:"false"`
+	Worktree bool   `description:"Create branch in a new worktree"              long:"worktree"`
 }
 
 func (c *branchCmd) Execute(args []string) error {
@@ -41,14 +44,29 @@ func (c *branchCmd) Execute(args []string) error {
 		return NewError(err.Error())
 	}
 
-	// If the branch exists, switch to it
+	var actualBranchName string
+
+	// If the branch exists, switch to it (unless using --worktree, then skip for now)
 	if branchExists {
-		if err := yasInstance.SwitchBranch(c.Arguments.BranchName); err != nil {
-			return NewError(err.Error())
+		if !c.Worktree {
+			if err := yasInstance.SwitchBranch(c.Arguments.BranchName); err != nil {
+				return NewError(err.Error())
+			}
 		}
+		actualBranchName = c.Arguments.BranchName
 	} else {
 		// Otherwise, create it
-		if _, err := yasInstance.CreateBranch(c.Arguments.BranchName, c.Parent); err != nil {
+		fullBranchName, err := yasInstance.CreateBranch(c.Arguments.BranchName, c.Parent)
+		if err != nil {
+			return NewError(err.Error())
+		}
+		actualBranchName = fullBranchName
+	}
+
+	// If --worktree flag is set, create/switch to worktree
+	if c.Worktree {
+		worktreePath := fmt.Sprintf(".yas/worktrees/%s", c.Arguments.BranchName)
+		if err := yasInstance.CreateWorktreeForBranch(actualBranchName, worktreePath); err != nil {
 			return NewError(err.Error())
 		}
 	}
