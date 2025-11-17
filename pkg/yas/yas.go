@@ -79,6 +79,21 @@ func New(cfg Config) (*YAS, error) {
 }
 
 func NewFromRepository(repoDirectory string) (*YAS, error) {
+	repo := gitexec.WithRepo(repoDirectory)
+
+	// If this is a worktree, get the primary git repo directory
+	isWorktree, err := repo.IsWorktree()
+	if err != nil {
+		return nil, fmt.Errorf("failed to check if repository is a worktree: %w", err)
+	}
+
+	if isWorktree {
+		repoDirectory, err = repo.WorktreeGetPrimaryRepoWorkingDirPath()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get primary git repo directory: %w", err)
+		}
+	}
+
 	cfg, err := ReadConfig(repoDirectory)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config: %w", err)

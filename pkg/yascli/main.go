@@ -8,7 +8,6 @@ import (
 	"path"
 
 	"github.com/dansimau/yas/pkg/fsutil"
-	"github.com/dansimau/yas/pkg/gitexec"
 	"github.com/jessevdk/go-flags"
 )
 
@@ -57,18 +56,7 @@ func Run(args ...string) (exitCode int) {
 				return NewError("cannot find repository (.git directory) (hint: specify --repo or run yas from inside repostory)")
 			}
 
-			repoDir := path.Dir(gitDir)
-
-			// If we're in a worktree, resolve to the primary repo directory
-			// to ensure config and state files are found correctly
-			repo := gitexec.WithRepo(repoDir)
-			if isWorktree, err := repo.IsWorktree(); err == nil && isWorktree {
-				if primaryPath, err := repo.WorktreeGetPrimaryRepoWorkingDirPath(); err == nil {
-					repoDir = primaryPath
-				}
-			}
-
-			cmd.RepoDirectory = repoDir
+			cmd.RepoDirectory = path.Dir(gitDir)
 		}
 
 		if cmd.Verbose {
