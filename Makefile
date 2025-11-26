@@ -1,7 +1,20 @@
-MAKEFLAGS += -j2
+MAKEFLAGS += -j4
 COVERPKG ?= github.com/dansimau/yas/...
+SRC = $(shell find cmd pkg \
+				\( -type f -name '*.go' -o -type d \) \
+				! -path '*_test.go' \
+				! -path '*/.*' \
+)
 
-out: lint test
+.PHONY: out
+out: yas lint test
+
+yas: $(SRC)
+	go build -o yas cmd/yas/main.go
+
+.PHONY: install
+install: yas
+	sudo install -m 755 yas /usr/local/bin/yas
 
 .PHONY: lint
 lint:
