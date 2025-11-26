@@ -295,8 +295,8 @@ func TestRestack_ShowsReminderWhenBranchesWithPRsAreRestacked(t *testing.T) {
 		"Should show reminder about branches with PRs, got: %s", output)
 	assert.Assert(t, strings.Contains(output, "topic-a"),
 		"Should mention topic-a in reminder, got: %s", output)
-	assert.Assert(t, strings.Contains(output, "yas submit --stack"),
-		"Should suggest using 'yas submit --stack', got: %s", output)
+	assert.Assert(t, strings.Contains(output, "yas submit --outdated"),
+		"Should suggest using 'yas submit --outdated', got: %s", output)
 }
 
 func TestRestack_OnlyRebasesWhenNeeded(t *testing.T) {
@@ -473,8 +473,8 @@ func TestRestack_NoReminderWhenNoBranchesHavePRs(t *testing.T) {
 	// Verify NO reminder message appears when branches don't have PRs
 	assert.Assert(t, !strings.Contains(output, "Reminder"),
 		"Should not show reminder when no branches have PRs, got: %s", output)
-	assert.Assert(t, !strings.Contains(output, "yas submit --stack"),
-		"Should not suggest 'yas submit --stack' when no PRs exist, got: %s", output)
+	assert.Assert(t, !strings.Contains(output, "yas submit --outdated"),
+		"Should not suggest 'yas submit --outdated' when no PRs exist, got: %s", output)
 }
 
 func TestRestack_WithDeletedParentBranch(t *testing.T) {
