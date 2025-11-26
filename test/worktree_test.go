@@ -6,286 +6,322 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dansimau/yas/pkg/gocmdtester"
 	"github.com/dansimau/yas/pkg/testutil"
-	"github.com/dansimau/yas/pkg/yascli"
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/assert/cmp"
 )
 
 func TestWorktree_SwitchToExistingWorktree(t *testing.T) {
-	testutil.WithTempWorkingDir(t, func() {
-		// Create main repo with two branches
-		testutil.ExecOrFail(t, `
-			git init --initial-branch=main
-			touch main
-			git add main
-			git commit -m "main-0"
+	t.Parallel()
 
-			git checkout -b feature-a
-			touch a
-			git add a
-			git commit -m "feature-a-0"
+	tempDir := t.TempDir()
 
-			git checkout main
-		`)
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
 
-		// Initialize yas
-		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "feature-a", "--parent=main"), 0)
+	// Create main repo with two branches
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+		touch main
+		git add main
+		git commit -m "main-0"
 
-		// Create a worktree for feature-a
-		worktreePath := filepath.Join(".", "worktrees", "feature-a")
-		testutil.ExecOrFail(t, "git worktree add "+worktreePath+" feature-a")
+		git checkout -b feature-a
+		touch a
+		git add a
+		git commit -m "feature-a-0"
 
-		// Ensure we're back on main in the primary repo
-		testutil.ExecOrFail(t, "git checkout main")
+		git checkout main
+	`)
 
-		// Try to switch to feature-a with YAS_SHELL_EXEC set
-		tempFile := filepath.Join(t.TempDir(), "shell-exec")
+	// Initialize yas
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "feature-a", "--parent=main").Err())
 
-		t.Setenv("YAS_SHELL_EXEC", tempFile)
+	// Create a worktree for feature-a
+	worktreePath := filepath.Join(tempDir, "worktrees", "feature-a")
+	testutil.ExecOrFail(t, tempDir, "git worktree add "+worktreePath+" feature-a")
 
-		assert.Equal(t, yascli.Run("branch", "feature-a"), 0)
+	// Ensure we're back on main in the primary repo
+	testutil.ExecOrFail(t, tempDir, "git checkout main")
 
-		// Verify the temp file contains the cd command
-		content, err := os.ReadFile(tempFile)
-		assert.NilError(t, err)
+	// Try to switch to feature-a with YAS_SHELL_EXEC set
+	tempFile := filepath.Join(t.TempDir(), "shell-exec")
 
-		contentStr := string(content)
-		assert.Assert(t, cmp.Contains(contentStr, "cd "))
-		assert.Assert(t, cmp.Contains(contentStr, "worktrees/feature-a"))
-		assert.Assert(t, cmp.Contains(contentStr, "echo "))
-		assert.Assert(t, cmp.Contains(contentStr, "Switched to branch"))
-	})
+	cliWithEnv := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+		gocmdtester.WithEnv("YAS_SHELL_EXEC", tempFile),
+	)
+
+	assert.NilError(t, cliWithEnv.Run("branch", "feature-a").Err())
+
+	// Verify the temp file contains the cd command
+	content, err := os.ReadFile(tempFile)
+	assert.NilError(t, err)
+
+	contentStr := string(content)
+	assert.Assert(t, cmp.Contains(contentStr, "cd "))
+	assert.Assert(t, cmp.Contains(contentStr, "worktrees/feature-a"))
+	assert.Assert(t, cmp.Contains(contentStr, "echo "))
+	assert.Assert(t, cmp.Contains(contentStr, "Switched to branch"))
 }
 
 func TestWorktree_FallbackToCheckoutWhenNoWorktree(t *testing.T) {
-	testutil.WithTempWorkingDir(t, func() {
-		// Create main repo with two branches but no worktrees
-		testutil.ExecOrFail(t, `
-			git init --initial-branch=main
-			touch main
-			git add main
-			git commit -m "main-0"
+	t.Parallel()
 
-			git checkout -b feature-a
-			touch a
-			git add a
-			git commit -m "feature-a-0"
+	tempDir := t.TempDir()
 
-			git checkout main
-		`)
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
 
-		// Initialize yas
-		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "feature-a", "--parent=main"), 0)
+	// Create main repo with two branches but no worktrees
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+		touch main
+		git add main
+		git commit -m "main-0"
 
-		// Try to switch to feature-a (should fall back to normal checkout)
-		tempFile := filepath.Join(t.TempDir(), "shell-exec")
-		t.Setenv("YAS_SHELL_EXEC", tempFile)
+		git checkout -b feature-a
+		touch a
+		git add a
+		git commit -m "feature-a-0"
 
-		assert.Equal(t, yascli.Run("branch", "feature-a"), 0)
+		git checkout main
+	`)
 
-		// Verify we're on feature-a branch now (normal checkout happened)
-		output := mustExecOutput("git", "branch", "--show-current")
-		assert.Equal(t, strings.TrimSpace(output), "feature-a")
+	// Initialize yas
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "feature-a", "--parent=main").Err())
 
-		// Verify the temp file is empty or doesn't exist (no cd command was written)
-		content, err := os.ReadFile(tempFile)
-		if err == nil {
-			assert.Equal(t, string(content), "")
-		}
-		// If file doesn't exist, that's also fine - it means nothing was written
-	})
+	// Try to switch to feature-a (should fall back to normal checkout)
+	tempFile := filepath.Join(t.TempDir(), "shell-exec")
+
+	cliWithEnv := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+		gocmdtester.WithEnv("YAS_SHELL_EXEC", tempFile),
+	)
+
+	assert.NilError(t, cliWithEnv.Run("branch", "feature-a").Err())
+
+	// Verify we're on feature-a branch now (normal checkout happened)
+	output := mustExecOutput(tempDir, "git", "branch", "--show-current")
+	assert.Equal(t, strings.TrimSpace(output), "feature-a")
+
+	// Verify the temp file is empty or doesn't exist (no cd command was written)
+	content, err := os.ReadFile(tempFile)
+	if err == nil {
+		assert.Equal(t, string(content), "")
+	}
+	// If file doesn't exist, that's also fine - it means nothing was written
 }
 
 func TestWorktree_ErrorWhenHookNotInstalled(t *testing.T) {
-	testutil.WithTempWorkingDir(t, func() {
-		// Create main repo with worktree
-		testutil.ExecOrFail(t, `
-			git init --initial-branch=main
-			touch main
-			git add main
-			git commit -m "main-0"
+	t.Parallel()
 
-			git checkout -b feature-a
-			touch a
-			git add a
-			git commit -m "feature-a-0"
+	tempDir := t.TempDir()
 
-			git checkout main
-		`)
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
 
-		// Initialize yas
-		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "feature-a", "--parent=main"), 0)
+	// Create main repo with worktree
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+		touch main
+		git add main
+		git commit -m "main-0"
 
-		// Create a worktree for feature-a
-		worktreePath := filepath.Join(".", "worktrees", "feature-a")
-		testutil.ExecOrFail(t, "git worktree add "+worktreePath+" feature-a")
+		git checkout -b feature-a
+		touch a
+		git add a
+		git commit -m "feature-a-0"
 
-		// Ensure we're back on main
-		testutil.ExecOrFail(t, "git checkout main")
+		git checkout main
+	`)
 
-		// Try to switch to feature-a WITHOUT YAS_SHELL_EXEC set
-		_, stderr, err := testutil.CaptureOutput(func() {
-			exitCode := yascli.Run("branch", "feature-a")
-			assert.Equal(t, exitCode, 1)
-		})
+	// Initialize yas
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "feature-a", "--parent=main").Err())
 
-		assert.NilError(t, err)
-		assert.Assert(t, cmp.Contains(stderr, "YAS_SHELL_EXEC environment variable not set"))
-		assert.Assert(t, cmp.Contains(stderr, "install the yas shell hook"))
-		assert.Assert(t, cmp.Contains(stderr, "yas hook bash"))
-		assert.Assert(t, cmp.Contains(stderr, "yas hook zsh"))
-	})
+	// Create a worktree for feature-a
+	worktreePath := filepath.Join(tempDir, "worktrees", "feature-a")
+	testutil.ExecOrFail(t, tempDir, "git worktree add "+worktreePath+" feature-a")
+
+	// Ensure we're back on main
+	testutil.ExecOrFail(t, tempDir, "git checkout main")
+
+	// Try to switch to feature-a WITHOUT YAS_SHELL_EXEC set
+	result := cli.Run("branch", "feature-a")
+	assert.Equal(t, result.ExitCode(), 1)
+
+	stderr := result.Stderr()
+	assert.Assert(t, cmp.Contains(stderr, "YAS_SHELL_EXEC environment variable not set"))
+	assert.Assert(t, cmp.Contains(stderr, "install the yas shell hook"))
+	assert.Assert(t, cmp.Contains(stderr, "yas hook bash"))
+	assert.Assert(t, cmp.Contains(stderr, "yas hook zsh"))
 }
 
 func TestHook_BashOutputsHookCode(t *testing.T) {
-	testutil.WithTempWorkingDir(t, func() {
-		stdout, stderr, err := testutil.CaptureOutput(func() {
-			exitCode := yascli.Run("hook", "bash")
-			assert.Equal(t, exitCode, 0)
-		})
+	t.Parallel()
 
-		assert.NilError(t, err)
-		assert.Equal(t, stderr, "")
+	tempDir := t.TempDir()
 
-		// Verify the hook code contains expected elements
-		assert.Assert(t, cmp.Contains(stdout, "yas() {"))
-		assert.Assert(t, cmp.Contains(stdout, "YAS_SHELL_EXEC"))
-		assert.Assert(t, cmp.Contains(stdout, "mktemp"))
-		assert.Assert(t, cmp.Contains(stdout, "command yas"))
-		assert.Assert(t, cmp.Contains(stdout, "source"))
-		assert.Assert(t, cmp.Contains(stdout, "rm -f"))
-	})
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	result := cli.Run("hook", "bash")
+	assert.NilError(t, result.Err())
+	assert.Equal(t, result.Stderr(), "")
+
+	stdout := result.Stdout()
+	// Verify the hook code contains expected elements
+	assert.Assert(t, cmp.Contains(stdout, "yas() {"))
+	assert.Assert(t, cmp.Contains(stdout, "YAS_SHELL_EXEC"))
+	assert.Assert(t, cmp.Contains(stdout, "mktemp"))
+	assert.Assert(t, cmp.Contains(stdout, "command yas"))
+	assert.Assert(t, cmp.Contains(stdout, "source"))
+	assert.Assert(t, cmp.Contains(stdout, "rm -f"))
 }
 
 func TestHook_ZshOutputsHookCode(t *testing.T) {
-	testutil.WithTempWorkingDir(t, func() {
-		stdout, stderr, err := testutil.CaptureOutput(func() {
-			exitCode := yascli.Run("hook", "zsh")
-			assert.Equal(t, exitCode, 0)
-		})
+	t.Parallel()
 
-		assert.NilError(t, err)
-		assert.Equal(t, stderr, "")
+	tempDir := t.TempDir()
 
-		// Verify the hook code contains expected elements
-		assert.Assert(t, cmp.Contains(stdout, "yas() {"))
-		assert.Assert(t, cmp.Contains(stdout, "YAS_SHELL_EXEC"))
-		assert.Assert(t, cmp.Contains(stdout, "mktemp"))
-		assert.Assert(t, cmp.Contains(stdout, "command yas"))
-		assert.Assert(t, cmp.Contains(stdout, "source"))
-		assert.Assert(t, cmp.Contains(stdout, "rm -f"))
-	})
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	result := cli.Run("hook", "zsh")
+	assert.NilError(t, result.Err())
+	assert.Equal(t, result.Stderr(), "")
+
+	stdout := result.Stdout()
+	// Verify the hook code contains expected elements
+	assert.Assert(t, cmp.Contains(stdout, "yas() {"))
+	assert.Assert(t, cmp.Contains(stdout, "YAS_SHELL_EXEC"))
+	assert.Assert(t, cmp.Contains(stdout, "mktemp"))
+	assert.Assert(t, cmp.Contains(stdout, "command yas"))
+	assert.Assert(t, cmp.Contains(stdout, "source"))
+	assert.Assert(t, cmp.Contains(stdout, "rm -f"))
 }
 
 func TestWorktree_SwitchFromWorktreeToMainBranch(t *testing.T) {
-	testutil.WithTempWorkingDir(t, func() {
-		// Create main repo with a branch that has a worktree
-		testutil.ExecOrFail(t, `
-			git init --initial-branch=main
-			touch main
-			git add main
-			git commit -m "main-0"
+	t.Parallel()
 
-			git checkout -b feature-a
-			touch a
-			git add a
-			git commit -m "feature-a-0"
+	tempDir := t.TempDir()
 
-			git checkout main
-		`)
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
 
-		// Initialize yas
-		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "feature-a", "--parent=main"), 0)
+	// Create main repo with a branch that has a worktree
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+		touch main
+		git add main
+		git commit -m "main-0"
 
-		// Create a worktree for feature-a
-		worktreePath := filepath.Join(".", "worktrees", "feature-a")
-		testutil.ExecOrFail(t, "git worktree add "+worktreePath+" feature-a")
+		git checkout -b feature-a
+		touch a
+		git add a
+		git commit -m "feature-a-0"
 
-		// Get primary repo directory (current directory)
-		primaryDir := mustExecOutput("pwd")
+		git checkout main
+	`)
 
-		// Now try to switch to main from within the worktree
-		tempFile := filepath.Join(t.TempDir(), "shell-exec")
-		t.Setenv("YAS_SHELL_EXEC", tempFile)
+	// Initialize yas
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "feature-a", "--parent=main").Err())
 
-		// Change to worktree directory and run yas from there
-		t.Chdir(worktreePath)
+	// Create a worktree for feature-a
+	worktreePath := filepath.Join(tempDir, "worktrees", "feature-a")
+	testutil.ExecOrFail(t, tempDir, "git worktree add "+worktreePath+" feature-a")
 
-		// Run yas branch from worktree directory
-		assert.Equal(t, yascli.Run("branch", "main"), 0)
+	// Now try to switch to main from within the worktree
+	tempFile := filepath.Join(t.TempDir(), "shell-exec")
 
-		// Verify the temp file contains cd to primary repo and yas br command
-		content, err := os.ReadFile(tempFile)
-		assert.NilError(t, err)
+	cliInWorktree := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(worktreePath),
+		gocmdtester.WithEnv("YAS_SHELL_EXEC", tempFile),
+	)
 
-		contentStr := string(content)
-		assert.Assert(t, cmp.Contains(contentStr, "cd "))
-		assert.Assert(t, cmp.Contains(contentStr, strings.TrimSpace(primaryDir)))
-		assert.Assert(t, cmp.Contains(contentStr, "yas"))
-		assert.Assert(t, cmp.Contains(contentStr, "br"))
-		assert.Assert(t, cmp.Contains(contentStr, "main"))
-	})
+	// Run yas branch from worktree directory
+	assert.NilError(t, cliInWorktree.Run("branch", "main").Err())
+
+	// Verify the temp file contains cd to primary repo
+	content, err := os.ReadFile(tempFile)
+	assert.NilError(t, err)
+
+	contentStr := string(content)
+	assert.Assert(t, cmp.Contains(contentStr, "cd "))
+	assert.Assert(t, cmp.Contains(contentStr, tempDir))
+	assert.Assert(t, cmp.Contains(contentStr, "Switched to branch"))
+	assert.Assert(t, cmp.Contains(contentStr, "main"))
 }
 
 func TestWorktree_SwitchFromWorktreeToAnotherNonWorktreeBranch(t *testing.T) {
-	testutil.WithTempWorkingDir(t, func() {
-		// Create main repo with multiple branches
-		testutil.ExecOrFail(t, `
-			git init --initial-branch=main
-			touch main
-			git add main
-			git commit -m "main-0"
+	t.Parallel()
 
-			git checkout -b feature-a
-			touch a
-			git add a
-			git commit -m "feature-a-0"
+	tempDir := t.TempDir()
 
-			git checkout main
-			git checkout -b feature-b
-			touch b
-			git add b
-			git commit -m "feature-b-0"
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
 
-			git checkout main
-		`)
+	// Create main repo with multiple branches
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+		touch main
+		git add main
+		git commit -m "main-0"
 
-		// Initialize yas
-		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "feature-a", "--parent=main"), 0)
-		assert.Equal(t, yascli.Run("add", "feature-b", "--parent=main"), 0)
+		git checkout -b feature-a
+		touch a
+		git add a
+		git commit -m "feature-a-0"
 
-		// Create a worktree for feature-a only
-		worktreePath := filepath.Join(".", "worktrees", "feature-a")
-		testutil.ExecOrFail(t, "git worktree add "+worktreePath+" feature-a")
+		git checkout main
+		git checkout -b feature-b
+		touch b
+		git add b
+		git commit -m "feature-b-0"
 
-		// Get primary repo directory
-		primaryDir := mustExecOutput("pwd")
+		git checkout main
+	`)
 
-		// Now try to switch to feature-b from within feature-a worktree
-		tempFile := filepath.Join(t.TempDir(), "shell-exec")
-		t.Setenv("YAS_SHELL_EXEC", tempFile)
+	// Initialize yas
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "feature-a", "--parent=main").Err())
+	assert.NilError(t, cli.Run("add", "feature-b", "--parent=main").Err())
 
-		// Change to worktree directory and run yas from there
-		t.Chdir(worktreePath)
+	// Create a worktree for feature-a only
+	worktreePath := filepath.Join(tempDir, "worktrees", "feature-a")
+	testutil.ExecOrFail(t, tempDir, "git worktree add "+worktreePath+" feature-a")
 
-		// Run yas branch from worktree directory
-		assert.Equal(t, yascli.Run("branch", "feature-b"), 0)
+	// Now try to switch to feature-b from within feature-a worktree
+	tempFile := filepath.Join(t.TempDir(), "shell-exec")
 
-		// Verify the temp file contains cd to primary repo and yas br command
-		content, err := os.ReadFile(tempFile)
-		assert.NilError(t, err)
+	cliInWorktree := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(worktreePath),
+		gocmdtester.WithEnv("YAS_SHELL_EXEC", tempFile),
+	)
 
-		contentStr := string(content)
-		assert.Assert(t, cmp.Contains(contentStr, "cd "))
-		assert.Assert(t, cmp.Contains(contentStr, strings.TrimSpace(primaryDir)))
-		assert.Assert(t, cmp.Contains(contentStr, "yas"))
-		assert.Assert(t, cmp.Contains(contentStr, "br"))
-		assert.Assert(t, cmp.Contains(contentStr, "feature-b"))
-	})
+	// Run yas branch from worktree directory
+	assert.NilError(t, cliInWorktree.Run("branch", "feature-b").Err())
+
+	// Verify the temp file contains cd to primary repo and yas br command
+	content, err := os.ReadFile(tempFile)
+	assert.NilError(t, err)
+
+	contentStr := string(content)
+	assert.Assert(t, cmp.Contains(contentStr, "cd "))
+	assert.Assert(t, cmp.Contains(contentStr, tempDir))
+	assert.Assert(t, cmp.Contains(contentStr, "yas"))
+	assert.Assert(t, cmp.Contains(contentStr, "br"))
+	assert.Assert(t, cmp.Contains(contentStr, "feature-b"))
 }

@@ -101,7 +101,7 @@ func CaptureOutput(fn func()) (stdout string, stderr string, err error) {
 	return stdout, stderr, nil
 }
 
-func ExecOrFail(t *testing.T, lines string) {
+func ExecOrFail(t *testing.T, workingDir string, lines string) {
 	f, err := os.CreateTemp(t.TempDir(), "exec*.sh")
 	if err != nil {
 		t.Fatal(err)
@@ -129,11 +129,11 @@ func ExecOrFail(t *testing.T, lines string) {
 		t.Fatal(err)
 	}
 
-	if err := xexec.Command("chmod", "+x", f.Name()).Run(); err != nil {
+	if err := xexec.Command("chmod", "+x", f.Name()).WithWorkingDir(workingDir).Run(); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := xexec.Command("sh", "-c", f.Name()).Run(); err != nil {
+	if err := xexec.Command("sh", "-c", f.Name()).WithWorkingDir(workingDir).Run(); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -161,12 +161,7 @@ func WithEnv(vars ...string) func() {
 	}
 }
 
-// WithTempWorkingDir creates a temporary directory and switches to that
-// directory for the duration of the test. When the test is complete, it
-// switches back to the original working directory.
-//
-// If the test passes, the directory is cleaned up. If the test fails, the temp
-// directory is left in place and the path to it is printed.
+// Deprecated: Use t.TempDir() instead.
 func WithTempWorkingDir(t *testing.T, fn func()) {
 	t.Helper()
 

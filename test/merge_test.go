@@ -5,636 +5,623 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/dansimau/yas/pkg/gitexec"
+	"github.com/dansimau/yas/pkg/gocmdtester"
+	"github.com/dansimau/yas/pkg/stringutil"
 	"github.com/dansimau/yas/pkg/testutil"
 	"github.com/dansimau/yas/pkg/yas"
 	"gotest.tools/v3/assert"
 )
 
-func TestMerge_FailsWhenNoRestackInProgress(t *testing.T) {
-	_, cleanup := setupMockCommandsWithPR(t, mockPROptions{
-		ID:                "PR_kwDOTest123",
-		State:             "OPEN",
-		URL:               "https://github.com/test/test/pull/42",
-		BaseRefName:       "main",
-		ReviewDecision:    "APPROVED",
-		StatusCheckRollup: "[]", // Empty array means SUCCESS
-	})
-	defer cleanup()
+func TestMerge_FailsWhenRestackInProgress(t *testing.T) {
+	t.Parallel()
 
-	testutil.WithTempWorkingDir(t, func() {
-		testutil.ExecOrFail(t, `
-			git init --initial-branch=main
-			git remote add origin https://fake.origin/test/test.git
+	tempDir := t.TempDir()
 
-			# main
-			touch main
-			git add main
-			git commit -m "main-0"
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
 
-			# Set up remote tracking for main
-			git config branch.main.remote origin
-			git config branch.main.merge refs/heads/main
+	// No mocks needed - merge fails before any gh calls
+	cli.SkipMockVerification()
 
-			# topic-a
-			git checkout -b topic-a
-			touch a
-			git add a
-			git commit -m "topic-a-0"
-		`)
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+		git remote add origin https://fake.origin/test/test.git
 
-		// Initialize yas config
-		cfg := yas.Config{
-			RepoDirectory: ".",
-			TrunkBranch:   "main",
-		}
-		_, err := yas.WriteConfig(cfg)
-		assert.NilError(t, err)
+		# main
+		touch main
+		git add main
+		git commit -m "main-0"
 
-		// Create YAS instance and track branch
-		y, err := yas.NewFromRepository(".")
-		assert.NilError(t, err)
-		err = y.SetParent("topic-a", "main", "")
-		assert.NilError(t, err)
+		# Set up remote tracking for main
+		git config branch.main.remote origin
+		git config branch.main.merge refs/heads/main
 
-		// Simulate a restack in progress
-		restackState := &yas.RestackState{
-			StartingBranch: "topic-a",
-			CurrentBranch:  "topic-a",
-			CurrentParent:  "main",
-		}
-		err = yas.SaveRestackState(".", restackState)
-		assert.NilError(t, err)
+		# topic-a
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+	`)
 
-		// Try to merge - should fail
-		err = y.Merge("", false)
-		assert.ErrorContains(t, err, "restack operation is already in progress")
-	})
+	// Initialize yas config and track branch
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
+
+	// Simulate a restack in progress
+	restackState := &yas.RestackState{
+		StartingBranch: "topic-a",
+		CurrentBranch:  "topic-a",
+		CurrentParent:  "main",
+	}
+	err := yas.SaveRestackState(tempDir, restackState)
+	assert.NilError(t, err)
+
+	// Try to merge - should fail
+	result := cli.Run("merge")
+	assert.Equal(t, result.ExitCode(), 1)
+	assert.Assert(t, result.StderrContains("restack operation is already in progress"))
 }
 
 func TestMerge_FailsWhenNoPR(t *testing.T) {
-	_, cleanup := setupMockCommands(t, "") // No existing PR
-	defer cleanup()
+	t.Parallel()
 
-	testutil.WithTempWorkingDir(t, func() {
-		testutil.ExecOrFail(t, `
-			git init --initial-branch=main
-			git remote add origin https://fake.origin/test/test.git
+	tempDir := t.TempDir()
 
-			# main
-			touch main
-			git add main
-			git commit -m "main-0"
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
 
-			# Set up remote tracking for main
-			git config branch.main.remote origin
-			git config branch.main.merge refs/heads/main
+	// No mocks needed - merge fails checking stored metadata (no PR ID stored)
+	cli.SkipMockVerification()
 
-			# topic-a
-			git checkout -b topic-a
-			touch a
-			git add a
-			git commit -m "topic-a-0"
-		`)
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+		git remote add origin https://fake.origin/test/test.git
 
-		// Initialize yas config
-		cfg := yas.Config{
-			RepoDirectory: ".",
-			TrunkBranch:   "main",
-		}
-		_, err := yas.WriteConfig(cfg)
-		assert.NilError(t, err)
+		# main
+		touch main
+		git add main
+		git commit -m "main-0"
 
-		// Create YAS instance and track branch
-		y, err := yas.NewFromRepository(".")
-		assert.NilError(t, err)
-		err = y.SetParent("topic-a", "main", "")
-		assert.NilError(t, err)
+		# Set up remote tracking for main
+		git config branch.main.remote origin
+		git config branch.main.merge refs/heads/main
 
-		// Try to merge - should fail
-		err = y.Merge("", false)
-		assert.ErrorContains(t, err, "does not have a PR")
-	})
+		# topic-a
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+	`)
+
+	// Initialize yas config and track branch (but don't submit - no PR)
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
+
+	// Try to merge - should fail
+	result := cli.Run("merge")
+	assert.Equal(t, result.ExitCode(), 1)
+	assert.Assert(t, result.StderrContains("does not have a PR"))
 }
 
 func TestMerge_FailsWhenNotAtTopOfStack(t *testing.T) {
-	_, cleanup := setupMockCommandsWithPR(t, mockPROptions{
-		ID:                "PR_kwDOTest123",
-		State:             "OPEN",
-		URL:               "https://github.com/test/test/pull/42",
-		BaseRefName:       "topic-a", // Parent is topic-a, not main
-		ReviewDecision:    "APPROVED",
-		StatusCheckRollup: "[]",
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	// Mock PR info for topic-b (needed to have a PR ID stored)
+	mockGitHubPRForBranch(cli, "topic-b", yas.PullRequestMetadata{
+		ID:          "PR_kwDOTest123b",
+		State:       "OPEN",
+		URL:         "https://github.com/test/test/pull/42",
+		BaseRefName: "topic-a", // Parent is topic-a, not main
 	})
-	defer cleanup()
 
-	testutil.WithTempWorkingDir(t, func() {
-		testutil.ExecOrFail(t, `
-			git init --initial-branch=main
-			git remote add origin https://fake.origin/test/test.git
+	// Skip verification - merge fails before calling all mocks
+	cli.SkipMockVerification()
 
-			# main
-			touch main
-			git add main
-			git commit -m "main-0"
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+		git remote add origin https://fake.origin/test/test.git
 
-			# Set up remote tracking for main
-			git config branch.main.remote origin
-			git config branch.main.merge refs/heads/main
+		# main
+		touch main
+		git add main
+		git commit -m "main-0"
 
-			# topic-a
-			git checkout -b topic-a
-			touch a
-			git add a
-			git commit -m "topic-a-0"
+		# Set up remote tracking for main
+		git config branch.main.remote origin
+		git config branch.main.merge refs/heads/main
 
-			# topic-b (child of topic-a)
-			git checkout -b topic-b
-			touch b
-			git add b
-			git commit -m "topic-b-0"
-		`)
+		# topic-a
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
 
-		// Initialize yas config
-		cfg := yas.Config{
-			RepoDirectory: ".",
-			TrunkBranch:   "main",
-		}
-		_, err := yas.WriteConfig(cfg)
-		assert.NilError(t, err)
+		# topic-b (child of topic-a)
+		git checkout -b topic-b
+		touch b
+		git add b
+		git commit -m "topic-b-0"
+	`)
 
-		// Create YAS instance and track branches
-		y, err := yas.NewFromRepository(".")
-		assert.NilError(t, err)
-		err = y.SetParent("topic-a", "main", "")
-		assert.NilError(t, err)
-		err = y.SetParent("topic-b", "topic-a", "")
-		assert.NilError(t, err)
+	// Initialize yas config and track branches
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-b", "--parent=topic-a").Err())
 
-		// Refresh to get PR metadata
-		err = y.RefreshRemoteStatus("topic-b")
-		assert.NilError(t, err)
+	// Refresh to get PR metadata (stores PR ID in metadata)
+	assert.NilError(t, cli.Run("refresh", "topic-b").Err())
 
-		// Try to merge topic-b (which is not at top of stack) - should fail
-		testutil.ExecOrFail(t, "git checkout topic-b")
-
-		err = y.Merge("", false)
-		assert.ErrorContains(t, err, "must be at top of stack")
-		assert.ErrorContains(t, err, "Merge parent branches first")
-	})
+	// Try to merge topic-b (which is not at top of stack) - should fail
+	result := cli.Run("merge")
+	assert.Equal(t, result.ExitCode(), 1)
+	assert.Assert(t, result.StderrContains("must be at top of stack"))
+	assert.Assert(t, result.StderrContains("Merge parent branches first"))
 }
 
 func TestMerge_FailsWhenNeedsRestack(t *testing.T) {
-	_, cleanup := setupMockCommandsWithPR(t, mockPROptions{
-		ID:                "PR_kwDOTest123",
-		State:             "OPEN",
-		URL:               "https://github.com/test/test/pull/42",
-		BaseRefName:       "main",
-		ReviewDecision:    "APPROVED",
-		StatusCheckRollup: "[]",
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	// Mock PR info for topic-a (needed to have a PR ID stored)
+	mockGitHubPRForBranch(cli, "topic-a", yas.PullRequestMetadata{
+		ID:          "PR_kwDOTest123",
+		State:       "OPEN",
+		URL:         "https://github.com/test/test/pull/42",
+		BaseRefName: "main",
 	})
-	defer cleanup()
 
-	testutil.WithTempWorkingDir(t, func() {
-		testutil.ExecOrFail(t, `
-			git init --initial-branch=main
-			git remote add origin https://fake.origin/test/test.git
+	// Skip verification - merge fails before calling all mocks
+	cli.SkipMockVerification()
 
-			# main
-			touch main
-			git add main
-			git commit -m "main-0"
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+		git remote add origin https://fake.origin/test/test.git
 
-			# Set up remote tracking for main
-			git config branch.main.remote origin
-			git config branch.main.merge refs/heads/main
+		# main
+		touch main
+		git add main
+		git commit -m "main-0"
 
-			# topic-a
-			git checkout -b topic-a
-			touch a
-			git add a
-			git commit -m "topic-a-0"
+		# Set up remote tracking for main
+		git config branch.main.remote origin
+		git config branch.main.merge refs/heads/main
 
-			# Add a commit to main (will make topic-a need restack)
-			git checkout main
-			touch main2
-			git add main2
-			git commit -m "main-1"
-		`)
+		# topic-a
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
 
-		// Initialize yas config
-		cfg := yas.Config{
-			RepoDirectory: ".",
-			TrunkBranch:   "main",
-		}
-		_, err := yas.WriteConfig(cfg)
-		assert.NilError(t, err)
+		# Add a commit to main (will make topic-a need restack)
+		git checkout main
+		touch main2
+		git add main2
+		git commit -m "main-1"
 
-		// Create YAS instance and track branch
-		y, err := yas.NewFromRepository(".")
-		assert.NilError(t, err)
-		err = y.SetParent("topic-a", "main", "")
-		assert.NilError(t, err)
+		git checkout topic-a
+	`)
 
-		// Refresh to get PR metadata
-		err = y.RefreshRemoteStatus("topic-a")
-		assert.NilError(t, err)
+	// Initialize yas config and track branch
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
 
-		// Try to merge - should fail because branch needs restack
-		testutil.ExecOrFail(t, "git checkout topic-a")
+	// Refresh to get PR metadata (stores PR ID in metadata)
+	assert.NilError(t, cli.Run("refresh", "topic-a").Err())
 
-		err = y.Merge("", false)
-		assert.ErrorContains(t, err, "branch needs restack")
-	})
+	// Try to merge - should fail because branch needs restack
+	result := cli.Run("merge")
+	assert.Equal(t, result.ExitCode(), 1)
+	assert.Assert(t, result.StderrContains("branch needs restack"))
 }
 
 func TestMerge_FailsWhenCINotPassing(t *testing.T) {
-	_, cleanup := setupMockCommandsWithPR(t, mockPROptions{
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	fakeOrigin := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	// Mock basic PR info (used by refresh)
+	mockGitHubPRForBranch(cli, "topic-a", yas.PullRequestMetadata{
+		ID:          "PR_kwDOTest123",
+		State:       "OPEN",
+		URL:         "https://github.com/test/test/pull/42",
+		BaseRefName: "main",
+	})
+
+	// Mock extended PR query for merge checks (with failing CI)
+	cli.Mock(
+		"gh", "pr", "list",
+		"--head", "topic-a",
+		"--state", "all",
+		"--json", "id,state,url,isDraft,baseRefName,reviewDecision,statusCheckRollup",
+	).WithStdout(mustMarshalJSON([]yas.PullRequestMetadata{{
 		ID:                "PR_kwDOTest123",
 		State:             "OPEN",
 		URL:               "https://github.com/test/test/pull/42",
 		BaseRefName:       "main",
 		ReviewDecision:    "APPROVED",
-		StatusCheckRollup: `[{"state":"FAILURE","conclusion":"FAILURE"}]`,
-	})
-	defer cleanup()
+		StatusCheckRollup: []yas.StatusCheck{{State: "FAILURE", Conclusion: "FAILURE"}},
+	}}))
 
-	testutil.WithTempWorkingDir(t, func() {
-		testutil.ExecOrFail(t, `
-			git init --initial-branch=main
-			git remote add origin https://fake.origin/test/test.git
+	testutil.ExecOrFail(t, tempDir, stringutil.MustInterpolate(`
+		# Set up "remote" repository
+		git init --bare {{.fakeOrigin}}
 
-			# main
-			touch main
-			git add main
-			git commit -m "main-0"
+		git init --initial-branch=main
+		git remote add origin {{.fakeOrigin}}
 
-			# Set up remote tracking for main
-			git config branch.main.remote origin
-			git config branch.main.merge refs/heads/main
+		# main
+		touch main
+		git add main
+		git commit -m "main-0"
 
-			# topic-a
-			git checkout -b topic-a
-			touch a
-			git add a
-			git commit -m "topic-a-0"
-		`)
+		# Set up remote tracking for main
+		git config branch.main.remote origin
+		git config branch.main.merge refs/heads/main
 
-		// Initialize yas config
-		cfg := yas.Config{
-			RepoDirectory: ".",
-			TrunkBranch:   "main",
-		}
-		_, err := yas.WriteConfig(cfg)
-		assert.NilError(t, err)
+		# topic-a
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
 
-		// Create YAS instance and track branch
-		y, err := yas.NewFromRepository(".")
-		assert.NilError(t, err)
-		err = y.SetParent("topic-a", "main", "")
-		assert.NilError(t, err)
+		# Push topic-a to simulate submitted state
+		git push -u origin topic-a
+	`, map[string]string{
+		"fakeOrigin": fakeOrigin,
+	}))
 
-		// Submit first to simulate that PR exists and is up to date
-		err = y.Submit(false)
-		assert.NilError(t, err)
+	// Initialize yas config and track branch
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
 
-		// Reload instance to get updated metadata
-		y, err = yas.NewFromRepository(".")
-		assert.NilError(t, err)
+	// Refresh to populate PR metadata
+	assert.NilError(t, cli.Run("refresh", "topic-a").Err())
 
-		// Refresh PR status to get review/CI info (submit only refreshes basic info)
-		err = y.RefreshPRStatus("topic-a")
-		assert.NilError(t, err)
-
-		// Try to merge - should fail because CI is failing
-		testutil.ExecOrFail(t, "git checkout topic-a")
-
-		err = y.Merge("", false)
-		assert.ErrorContains(t, err, "CI checks are not passing")
-		assert.ErrorContains(t, err, "Use --force to override")
-	})
+	// Try to merge - should fail because CI is failing
+	result := cli.Run("merge")
+	assert.Equal(t, result.ExitCode(), 1)
+	assert.Assert(t, result.StderrContains("CI checks are not passing"))
+	assert.Assert(t, result.StderrContains("Use --force to override"))
 }
 
 func TestMerge_FailsWhenNotApproved(t *testing.T) {
-	_, cleanup := setupMockCommandsWithPR(t, mockPROptions{
-		ID:                "PR_kwDOTest123",
-		State:             "OPEN",
-		URL:               "https://github.com/test/test/pull/42",
-		BaseRefName:       "main",
-		ReviewDecision:    "REVIEW_REQUIRED",
-		StatusCheckRollup: "[]",
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	fakeOrigin := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	// Mock basic PR info (used by refresh)
+	mockGitHubPRForBranch(cli, "topic-a", yas.PullRequestMetadata{
+		ID:          "PR_kwDOTest123",
+		State:       "OPEN",
+		URL:         "https://github.com/test/test/pull/42",
+		BaseRefName: "main",
 	})
-	defer cleanup()
 
-	testutil.WithTempWorkingDir(t, func() {
-		testutil.ExecOrFail(t, `
-			git init --initial-branch=main
-			git remote add origin https://fake.origin/test/test.git
+	// Mock extended PR query for merge checks (without approval)
+	cli.Mock(
+		"gh", "pr", "list",
+		"--head", "topic-a",
+		"--state", "all",
+		"--json", "id,state,url,isDraft,baseRefName,reviewDecision,statusCheckRollup",
+	).WithStdout(mustMarshalJSON([]yas.PullRequestMetadata{{
+		ID:             "PR_kwDOTest123",
+		State:          "OPEN",
+		URL:            "https://github.com/test/test/pull/42",
+		BaseRefName:    "main",
+		ReviewDecision: "REVIEW_REQUIRED",
+	}}))
 
-			# main
-			touch main
-			git add main
-			git commit -m "main-0"
+	testutil.ExecOrFail(t, tempDir, stringutil.MustInterpolate(`
+		# Set up "remote" repository
+		git init --bare {{.fakeOrigin}}
 
-			# Set up remote tracking for main
-			git config branch.main.remote origin
-			git config branch.main.merge refs/heads/main
+		git init --initial-branch=main
+		git remote add origin {{.fakeOrigin}}
 
-			# topic-a
-			git checkout -b topic-a
-			touch a
-			git add a
-			git commit -m "topic-a-0"
-		`)
+		# main
+		touch main
+		git add main
+		git commit -m "main-0"
 
-		// Initialize yas config
-		cfg := yas.Config{
-			RepoDirectory: ".",
-			TrunkBranch:   "main",
-		}
-		_, err := yas.WriteConfig(cfg)
-		assert.NilError(t, err)
+		# Set up remote tracking for main
+		git config branch.main.remote origin
+		git config branch.main.merge refs/heads/main
 
-		// Create YAS instance and track branch
-		y, err := yas.NewFromRepository(".")
-		assert.NilError(t, err)
-		err = y.SetParent("topic-a", "main", "")
-		assert.NilError(t, err)
+		# topic-a
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
 
-		// Submit first to simulate that PR exists and is up to date
-		err = y.Submit(false)
-		assert.NilError(t, err)
+		# Push topic-a to simulate submitted state
+		git push -u origin topic-a
+	`, map[string]string{
+		"fakeOrigin": fakeOrigin,
+	}))
 
-		// Reload instance to get updated metadata
-		y, err = yas.NewFromRepository(".")
-		assert.NilError(t, err)
+	// Initialize yas config and track branch
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
 
-		// Refresh PR status to get review/CI info (submit only refreshes basic info)
-		err = y.RefreshPRStatus("topic-a")
-		assert.NilError(t, err)
+	// Refresh to populate PR metadata
+	assert.NilError(t, cli.Run("refresh", "topic-a").Err())
 
-		// Try to merge - should fail because PR needs approval
-		testutil.ExecOrFail(t, "git checkout topic-a")
-
-		err = y.Merge("", false)
-		assert.ErrorContains(t, err, "PR needs approval")
-		assert.ErrorContains(t, err, "Use --force to override")
-	})
+	// Try to merge - should fail because PR needs approval
+	result := cli.Run("merge")
+	assert.Equal(t, result.ExitCode(), 1)
+	assert.Assert(t, result.StderrContains("PR needs approval"))
+	assert.Assert(t, result.StderrContains("Use --force to override"))
 }
 
 func TestMerge_SucceedsWithForceFlag(t *testing.T) {
-	cmdLogFile, cleanup := setupMockCommandsWithPR(t, mockPROptions{
-		ID:                "PR_kwDOTest123",
-		State:             "OPEN",
-		URL:               "https://github.com/test/test/pull/42",
-		BaseRefName:       "main",
-		ReviewDecision:    "REVIEW_REQUIRED",                              // Not approved
-		StatusCheckRollup: `[{"state":"FAILURE","conclusion":"FAILURE"}]`, // CI failing
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	fakeOrigin := t.TempDir()
+
+	// Set up EDITOR to auto-approve merge message (appends newline + comment)
+	// Using printf to properly add a newline before the comment
+	editorScript := filepath.Join(tempDir, "editor.sh")
+	err := os.WriteFile(editorScript, []byte("#!/bin/bash\nprintf '\\n# User edited merge message' >> \"$1\"\n"), 0o755)
+	assert.NilError(t, err)
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+		gocmdtester.WithEnv("EDITOR", editorScript),
+	)
+
+	// Mock basic PR info (used by refresh)
+	mockGitHubPRForBranch(cli, "topic-a", yas.PullRequestMetadata{
+		ID:          "PR_kwDOTest123",
+		State:       "OPEN",
+		URL:         "https://github.com/test/test/pull/42",
+		BaseRefName: "main",
 	})
-	defer cleanup()
 
-	testutil.WithTempWorkingDir(t, func() {
-		testutil.ExecOrFail(t, `
-			git init --initial-branch=main
-			git remote add origin https://fake.origin/test/test.git
+	// Mock gh pr view for merge (to get title and body)
+	cli.Mock("gh", "pr", "view", "42", "--json", "title,body", "-q", ".title + \"\n---SEPARATOR---\n\" + .body").WithStdout("Test PR Title\n---SEPARATOR---\nTest PR Body")
 
-			# main
-			touch main
-			git add main
-			git commit -m "main-0"
+	// Mock gh pr merge command - body will have original + newline + comment
+	cli.Mock("gh", "pr", "merge", "42", "--squash", "--auto", "--subject", "Test PR Title", "--body", "Test PR Body\n# User edited merge message")
 
-			# Set up remote tracking for main
-			git config branch.main.remote origin
-			git config branch.main.merge refs/heads/main
+	testutil.ExecOrFail(t, tempDir, stringutil.MustInterpolate(`
+		# Set up "remote" repository
+		git init --bare {{.fakeOrigin}}
 
-			# topic-a
-			git checkout -b topic-a
-			touch a
-			git add a
-			git commit -m "topic-a-0"
-		`)
+		git init --initial-branch=main
+		git remote add origin {{.fakeOrigin}}
 
-		// Initialize yas config
-		cfg := yas.Config{
-			RepoDirectory: ".",
-			TrunkBranch:   "main",
-		}
-		_, err := yas.WriteConfig(cfg)
-		assert.NilError(t, err)
+		# main
+		touch main
+		git add main
+		git commit -m "main-0"
 
-		// Create YAS instance and track branch
-		y, err := yas.NewFromRepository(".")
-		assert.NilError(t, err)
-		err = y.SetParent("topic-a", "main", "")
-		assert.NilError(t, err)
+		# Set up remote tracking for main
+		git config branch.main.remote origin
+		git config branch.main.merge refs/heads/main
 
-		// Submit first to simulate that PR exists and is up to date
-		err = y.Submit(false)
-		assert.NilError(t, err)
+		# topic-a
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
 
-		// Set EDITOR to a script that just adds a comment to the merge message
-		editorScript := filepath.Join(t.TempDir(), "editor.sh")
-		err = os.WriteFile(editorScript, []byte(`#!/bin/bash
-echo "# User edited merge message" >> "$1"
-`), 0o755)
-		assert.NilError(t, err)
-		t.Setenv("EDITOR", editorScript)
+		# Push topic-a to simulate submitted state
+		git push -u origin topic-a
+	`, map[string]string{
+		"fakeOrigin": fakeOrigin,
+	}))
 
-		// Try to merge with --force - should succeed even with failing CI/reviews
-		testutil.ExecOrFail(t, "git checkout topic-a")
+	// Initialize yas config and track branch
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
 
-		err = y.Merge("", true)
-		assert.NilError(t, err)
+	// Refresh to populate PR metadata
+	assert.NilError(t, cli.Run("refresh", "topic-a").Err())
 
-		// Parse the command log
-		commands, err := parseCmdLog(cmdLogFile)
-		assert.NilError(t, err)
+	// Try to merge with --force - should succeed even with failing CI/reviews
+	result := cli.Run("merge", "--force")
+	assert.NilError(t, result.Err())
 
-		// Verify gh pr merge was called
-		mergeCmd := findCommand(commands, "gh", "pr", "merge")
-		assert.Assert(t, mergeCmd != nil, "gh pr merge should be called")
-
-		// Verify it includes expected flags
-		if mergeCmd != nil {
-			assert.Assert(t, contains(mergeCmd, "--squash"), "should include --squash")
-			// assert.Assert(t, contains(mergeCmd, "--delete-branch"), "should include --delete-branch")
-			assert.Assert(t, contains(mergeCmd, "--auto"), "should include --auto")
-			assert.Assert(t, contains(mergeCmd, "--subject"), "should include --subject")
-			assert.Assert(t, contains(mergeCmd, "--body"), "should include --body")
-		}
-
-		// Verify merge message file was cleaned up
-		mergeFilePath := filepath.Join(".", ".git", "yas-merge-msg")
-		_, err = os.Stat(mergeFilePath)
-		assert.Assert(t, os.IsNotExist(err), "merge message file should be cleaned up")
-	})
+	// Verify merge message file was cleaned up
+	mergeFilePath := filepath.Join(tempDir, ".git", "yas-merge-msg")
+	_, err = os.Stat(mergeFilePath)
+	assert.Assert(t, os.IsNotExist(err), "merge message file should be cleaned up")
 }
 
 func TestMerge_AbortsWhenMergeMessageEmpty(t *testing.T) {
-	_, cleanup := setupMockCommandsWithPR(t, mockPROptions{
-		ID:                "PR_kwDOTest123",
-		State:             "OPEN",
-		URL:               "https://github.com/test/test/pull/42",
-		BaseRefName:       "main",
-		ReviewDecision:    "APPROVED",
-		StatusCheckRollup: "[]",
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	fakeOrigin := t.TempDir()
+
+	// Set up EDITOR to clear the file (simulating user deleting content)
+	editorScript := filepath.Join(tempDir, "editor.sh")
+	err := os.WriteFile(editorScript, []byte("#!/bin/bash\necho \"\" > \"$1\"\n"), 0o755)
+	assert.NilError(t, err)
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+		gocmdtester.WithEnv("EDITOR", editorScript),
+	)
+
+	// Mock basic PR info (used by refresh)
+	mockGitHubPRForBranch(cli, "topic-a", yas.PullRequestMetadata{
+		ID:          "PR_kwDOTest123",
+		State:       "OPEN",
+		URL:         "https://github.com/test/test/pull/42",
+		BaseRefName: "main",
 	})
-	defer cleanup()
 
-	testutil.WithTempWorkingDir(t, func() {
-		testutil.ExecOrFail(t, `
-			git init --initial-branch=main
-			git remote add origin https://fake.origin/test/test.git
+	// Mock extended PR query for merge checks (approved, so we proceed to editor)
+	cli.Mock(
+		"gh", "pr", "list",
+		"--head", "topic-a",
+		"--state", "all",
+		"--json", "id,state,url,isDraft,baseRefName,reviewDecision,statusCheckRollup",
+	).WithStdout(mustMarshalJSON([]yas.PullRequestMetadata{{
+		ID:             "PR_kwDOTest123",
+		State:          "OPEN",
+		URL:            "https://github.com/test/test/pull/42",
+		BaseRefName:    "main",
+		ReviewDecision: "APPROVED",
+	}}))
 
-			# main
-			touch main
-			git add main
-			git commit -m "main-0"
+	// Mock gh pr view for merge (to get title and body)
+	cli.Mock("gh", "pr", "view", "42", "--json", "title,body", "-q", ".title + \"\n---SEPARATOR---\n\" + .body").WithStdout("Test PR Title\n---SEPARATOR---\nTest PR Body")
 
-			# Set up remote tracking for main
-			git config branch.main.remote origin
-			git config branch.main.merge refs/heads/main
+	testutil.ExecOrFail(t, tempDir, stringutil.MustInterpolate(`
+		# Set up "remote" repository
+		git init --bare {{.fakeOrigin}}
 
-			# topic-a
-			git checkout -b topic-a
-			touch a
-			git add a
-			git commit -m "topic-a-0"
-		`)
+		git init --initial-branch=main
+		git remote add origin {{.fakeOrigin}}
 
-		// Initialize yas config
-		cfg := yas.Config{
-			RepoDirectory: ".",
-			TrunkBranch:   "main",
-		}
-		_, err := yas.WriteConfig(cfg)
-		assert.NilError(t, err)
+		# main
+		touch main
+		git add main
+		git commit -m "main-0"
 
-		// Create YAS instance and track branch
-		y, err := yas.NewFromRepository(".")
-		assert.NilError(t, err)
-		err = y.SetParent("topic-a", "main", "")
-		assert.NilError(t, err)
+		# Set up remote tracking for main
+		git config branch.main.remote origin
+		git config branch.main.merge refs/heads/main
 
-		// Submit first to simulate that PR exists and is up to date
-		err = y.Submit(false)
-		assert.NilError(t, err)
+		# topic-a
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
 
-		// Set EDITOR to a script that clears the file (simulating user deleting content)
-		editorScript := filepath.Join(t.TempDir(), "editor.sh")
-		err = os.WriteFile(editorScript, []byte(`#!/bin/bash
-# Clear the file content
-echo "" > "$1"
-`), 0o755)
-		assert.NilError(t, err)
-		t.Setenv("EDITOR", editorScript)
+		# Push topic-a to simulate submitted state
+		git push -u origin topic-a
+	`, map[string]string{
+		"fakeOrigin": fakeOrigin,
+	}))
 
-		// Try to merge - should fail because merge message is empty
-		testutil.ExecOrFail(t, "git checkout topic-a")
+	// Initialize yas config and track branch
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
 
-		err = y.Merge("", false)
-		assert.ErrorContains(t, err, "merge aborted")
-		assert.ErrorContains(t, err, "empty commit message")
+	// Refresh to populate PR metadata
+	assert.NilError(t, cli.Run("refresh", "topic-a").Err())
 
-		// Verify merge message file was cleaned up even after abort
-		mergeFilePath := filepath.Join(".", ".git", "yas-merge-msg")
-		_, err = os.Stat(mergeFilePath)
-		assert.Assert(t, os.IsNotExist(err), "merge message file should be cleaned up after abort")
-	})
+	// Try to merge - should fail because merge message is empty
+	result := cli.Run("merge")
+	assert.Equal(t, result.ExitCode(), 1)
+	assert.Assert(t, result.StderrContains("merge aborted"))
+	assert.Assert(t, result.StderrContains("empty commit message"))
+
+	// Verify merge message file was cleaned up even after abort
+	mergeFilePath := filepath.Join(tempDir, ".git", "yas-merge-msg")
+	_, err = os.Stat(mergeFilePath)
+	assert.Assert(t, os.IsNotExist(err), "merge message file should be cleaned up after abort")
 }
 
 func TestMerge_WithBranchNameReturnsToOriginalBranch(t *testing.T) {
-	cmdLogFile, cleanup := setupMockCommandsWithPR(t, mockPROptions{
-		ID:                "PR_kwDOTest123",
-		State:             "OPEN",
-		URL:               "https://github.com/test/test/pull/42",
-		BaseRefName:       "main",
-		ReviewDecision:    "APPROVED",
-		StatusCheckRollup: "[]",
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	fakeOrigin := t.TempDir()
+
+	// Set up EDITOR to auto-approve merge message (appends newline + comment)
+	// Using printf to properly add a newline before the comment
+	editorScript := filepath.Join(tempDir, "editor.sh")
+	err := os.WriteFile(editorScript, []byte("#!/bin/bash\nprintf '\\n# User edited merge message' >> \"$1\"\n"), 0o755)
+	assert.NilError(t, err)
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+		gocmdtester.WithEnv("EDITOR", editorScript),
+	)
+
+	// Mock basic PR info for topic-a (used by refresh)
+	mockGitHubPRForBranch(cli, "topic-a", yas.PullRequestMetadata{
+		ID:          "PR_kwDOTest123",
+		State:       "OPEN",
+		URL:         "https://github.com/test/test/pull/42",
+		BaseRefName: "main",
 	})
-	defer cleanup()
 
-	testutil.WithTempWorkingDir(t, func() {
-		testutil.ExecOrFail(t, `
-			git init --initial-branch=main
-			git remote add origin https://fake.origin/test/test.git
+	// Mock gh pr view for merge (to get title and body)
+	cli.Mock("gh", "pr", "view", "42", "--json", "title,body", "-q", ".title + \"\n---SEPARATOR---\n\" + .body").WithStdout("Test PR Title\n---SEPARATOR---\nTest PR Body")
 
-			# main
-			touch main
-			git add main
-			git commit -m "main-0"
+	// Mock gh pr merge command - body will have original + newline + comment
+	cli.Mock("gh", "pr", "merge", "42", "--squash", "--auto", "--subject", "Test PR Title", "--body", "Test PR Body\n# User edited merge message")
 
-			# Set up remote tracking for main
-			git config branch.main.remote origin
-			git config branch.main.merge refs/heads/main
+	testutil.ExecOrFail(t, tempDir, stringutil.MustInterpolate(`
+		# Set up "remote" repository
+		git init --bare {{.fakeOrigin}}
 
-			# topic-a
-			git checkout -b topic-a
-			touch a
-			git add a
-			git commit -m "topic-a-0"
+		git init --initial-branch=main
+		git remote add origin {{.fakeOrigin}}
 
-			# other-branch (we'll be on this branch when merging topic-a)
-			git checkout -b other-branch
-			touch other
-			git add other
-			git commit -m "other-0"
-		`)
+		# main
+		touch main
+		git add main
+		git commit -m "main-0"
 
-		// Initialize yas config
-		cfg := yas.Config{
-			RepoDirectory: ".",
-			TrunkBranch:   "main",
-		}
-		_, err := yas.WriteConfig(cfg)
-		assert.NilError(t, err)
+		# Set up remote tracking for main
+		git config branch.main.remote origin
+		git config branch.main.merge refs/heads/main
 
-		// Create YAS instance and track branches
-		y, err := yas.NewFromRepository(".")
-		assert.NilError(t, err)
-		err = y.SetParent("topic-a", "main", "")
-		assert.NilError(t, err)
-		err = y.SetParent("other-branch", "main", "")
-		assert.NilError(t, err)
+		# topic-a
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
 
-		// Submit topic-a
-		testutil.ExecOrFail(t, "git checkout topic-a")
+		# Push topic-a to simulate submitted state
+		git push -u origin topic-a
 
-		err = y.Submit(false)
-		assert.NilError(t, err)
+		# other-branch (we'll be on this branch when merging topic-a)
+		git checkout -b other-branch
+		touch other
+		git add other
+		git commit -m "other-0"
+	`, map[string]string{
+		"fakeOrigin": fakeOrigin,
+	}))
 
-		// Set EDITOR to a script that just adds a comment to the merge message
-		editorScript := filepath.Join(t.TempDir(), "editor.sh")
-		err = os.WriteFile(editorScript, []byte(`#!/bin/bash
-echo "# User edited merge message" >> "$1"
-`), 0o755)
-		assert.NilError(t, err)
-		t.Setenv("EDITOR", editorScript)
+	// Initialize yas config and track branches
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
+	assert.NilError(t, cli.Run("add", "other-branch", "--parent=main").Err())
 
-		// Checkout other-branch (so we're NOT on topic-a)
-		testutil.ExecOrFail(t, "git checkout other-branch")
+	// Refresh topic-a to populate PR metadata
+	assert.NilError(t, cli.Run("refresh", "topic-a").Err())
 
-		// Verify we're on other-branch
-		git := gitexec.WithRepo(".")
-		currentBranch, err := git.GetCurrentBranchName()
-		assert.NilError(t, err)
-		assert.Equal(t, "other-branch", currentBranch)
+	// Verify we're on other-branch
+	currentBranch := mustExecOutput(tempDir, "git", "branch", "--show-current")
+	equalLines(t, currentBranch, "other-branch")
 
-		// Merge topic-a (specifying the branch name explicitly)
-		err = y.Merge("topic-a", true)
-		assert.NilError(t, err)
+	// Merge topic-a (specifying the branch name explicitly)
+	result := cli.Run("merge", "topic-a", "--force")
+	assert.NilError(t, result.Err())
 
-		// Verify we're back on other-branch after the merge
-		currentBranch, err = git.GetCurrentBranchName()
-		assert.NilError(t, err)
-		assert.Equal(t, "other-branch", currentBranch)
-
-		// Parse the command log
-		commands, err := parseCmdLog(cmdLogFile)
-		assert.NilError(t, err)
-
-		// Verify gh pr merge was called
-		mergeCmd := findCommand(commands, "gh", "pr", "merge")
-		assert.Assert(t, mergeCmd != nil, "gh pr merge should be called")
-	})
+	// Verify we're back on other-branch after the merge
+	currentBranch = mustExecOutput(tempDir, "git", "branch", "--show-current")
+	equalLines(t, currentBranch, "other-branch")
 }

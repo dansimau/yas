@@ -1,9 +1,9 @@
 package test
 
 import (
-	"bytes"
-	"io"
-	"os"
+	"encoding/json"
+	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -16,8 +16,32 @@ import (
 
 // mustExecOutput executes the specified command/args and returns the output
 // from stdout. Panics if there is an error.
-func mustExecOutput(args ...string) (output string) {
-	b, err := xexec.Command(args...).WithEnvVars(gitexec.CleanedGitEnv()).Output()
+func mustExecOutput(workingDir string, args ...string) (output string) {
+	b, err := xexec.Command(args...).WithEnvVars(gitexec.CleanedGitEnv()).WithWorkingDir(workingDir).Output()
+	if err != nil {
+		panic(err)
+	}
+
+	return string(b)
+}
+
+// mustExecExitCode executes the specified command/args and returns the exit code.
+func mustExecExitCode(workingDir string, args ...string) int {
+	err := xexec.Command(args...).WithEnvVars(gitexec.CleanedGitEnv()).WithWorkingDir(workingDir).Run()
+	if err == nil {
+		return 0
+	}
+
+	exitErr := &exec.ExitError{}
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode()
+	}
+
+	panic(err)
+}
+
+func mustMarshalJSON(v any) string {
+	b, err := json.Marshal(v)
 	if err != nil {
 		panic(err)
 	}
@@ -44,30 +68,6 @@ func stripWhiteSpaceFromLines(s string) string {
 	}
 
 	return strings.Join(lines, "\n")
-}
-
-// captureStdout captures stdout while executing the given function.
-func captureStdout(t *testing.T, f func()) string {
-	t.Helper()
-
-	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	f()
-
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	os.Stdout = oldStdout
-
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, r); err != nil {
-		t.Fatal(err)
-	}
-
-	return buf.String()
 }
 
 // assertFileExists is a test helper that calls fsutil.FileExists and asserts

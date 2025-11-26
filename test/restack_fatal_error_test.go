@@ -4,64 +4,70 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dansimau/yas/pkg/gocmdtester"
 	"github.com/dansimau/yas/pkg/testutil"
-	"github.com/dansimau/yas/pkg/yascli"
 	"gotest.tools/v3/assert"
 )
 
 // TestRestack_FatalErrorDoesNotSaveState tests that when a rebase fails with
 // a fatal error (e.g., unstashed changes), we don't save restack state.
 func TestRestack_FatalErrorDoesNotSaveState(t *testing.T) {
-	testutil.WithTempWorkingDir(t, func() {
-		testutil.ExecOrFail(t, `
-			git init --initial-branch=main
+	t.Parallel()
 
-			# main
-			echo "line1" > file.txt
-			git add file.txt
-			git commit -m "main-0"
+	tempDir := t.TempDir()
 
-			# topic-a
-			git checkout -b topic-a
-			echo "line2" >> file.txt
-			git add file.txt
-			git commit -m "topic-a-0"
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
 
-			# update main
-			git checkout main
-			echo "updated" > main.txt
-			git add main.txt
-			git commit -m "main-1"
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
 
-			# on branch topic-a
-			git checkout topic-a
+		# main
+		echo "line1" > file.txt
+		git add file.txt
+		git commit -m "main-0"
 
-			# Create unstashed changes that will cause rebase to fail
-			echo "uncommitted change" >> file.txt
-		`)
+		# topic-a
+		git checkout -b topic-a
+		echo "line2" >> file.txt
+		git add file.txt
+		git commit -m "topic-a-0"
 
-		// Initialize yas config
-		assert.Equal(t, yascli.Run("config", "set", "--trunk-branch=main"), 0)
-		assert.Equal(t, yascli.Run("add", "topic-a", "--parent=main"), 0)
+		# update main
+		git checkout main
+		echo "updated" > main.txt
+		git add main.txt
+		git commit -m "main-1"
 
-		// Run restack - it should fail due to unstashed changes
-		exitCode := yascli.Run("restack")
-		assert.Equal(t, exitCode, 1, "restack should fail due to unstashed changes")
+		# on branch topic-a
+		git checkout topic-a
 
-		// Verify that restack state was NOT saved (fatal error, not conflict)
-		assert.Assert(t, !assertRestackStateExists(t, "."), "restack state should NOT be saved for fatal errors")
+		# Create unstashed changes that will cause rebase to fail
+		echo "uncommitted change" >> file.txt
+	`)
 
-		// Verify we're still on topic-a
-		equalLines(t, mustExecOutput("git", "branch", "--show-current"), "topic-a")
+	// Initialize yas config
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
 
-		// Verify no rebase is in progress
-		testutil.ExecOrFail(t, "test ! -d .git/rebase-merge")
-		testutil.ExecOrFail(t, "test ! -d .git/rebase-apply")
+	// Run restack - it should fail due to unstashed changes
+	result := cli.Run("restack")
+	assert.Equal(t, result.ExitCode(), 1, "restack should fail due to unstashed changes")
 
-		// Verify topic-a still has old commits (not rebased)
-		logOutput := mustExecOutput("git", "log", "--pretty=%s")
-		assert.Assert(t, strings.Contains(logOutput, "topic-a-0"), "topic-a commit should exist")
-		assert.Assert(t, strings.Contains(logOutput, "main-0"), "main-0 commit should exist")
-		assert.Assert(t, !strings.Contains(logOutput, "main-1"), "main-1 should NOT be in history")
-	})
+	// Verify that restack state was NOT saved (fatal error, not conflict)
+	assert.Assert(t, !assertRestackStateExists(t, tempDir), "restack state should NOT be saved for fatal errors")
+
+	// Verify we're still on topic-a
+	equalLines(t, mustExecOutput(tempDir, "git", "branch", "--show-current"), "topic-a")
+
+	// Verify no rebase is in progress
+	testutil.ExecOrFail(t, tempDir, "test ! -d .git/rebase-merge")
+	testutil.ExecOrFail(t, tempDir, "test ! -d .git/rebase-apply")
+
+	// Verify topic-a still has old commits (not rebased)
+	logOutput := mustExecOutput(tempDir, "git", "log", "--pretty=%s")
+	assert.Assert(t, strings.Contains(logOutput, "topic-a-0"), "topic-a commit should exist")
+	assert.Assert(t, strings.Contains(logOutput, "main-0"), "main-0 commit should exist")
+	assert.Assert(t, !strings.Contains(logOutput, "main-1"), "main-1 should NOT be in history")
 }
