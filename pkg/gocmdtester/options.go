@@ -9,27 +9,6 @@ type runConfig struct {
 	stdin      io.Reader
 }
 
-// clone creates a copy of the runConfig.
-func (c *runConfig) clone() *runConfig {
-	if c == nil {
-		return &runConfig{}
-	}
-
-	clone := &runConfig{
-		workingDir: c.workingDir,
-		stdin:      c.stdin,
-	}
-
-	if c.env != nil {
-		clone.env = make(map[string]string, len(c.env))
-		for k, v := range c.env {
-			clone.env[k] = v
-		}
-	}
-
-	return clone
-}
-
 // Option is a functional option for configuring a CmdTester.
 type Option func(*runConfig)
 
