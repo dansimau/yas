@@ -30,13 +30,15 @@ func (yas *YAS) graph() (*dag.DAG, error) {
 		return nil, err
 	}
 
-	for _, branch := range yas.data.Branches.ToSlice().WithParents() {
+	branches := yas.data.Branches.ToSlice().WithParents().NotDeleted()
+
+	for _, branch := range branches {
 		if err := graph.AddVertexByID(branch.Name, branch.Name); err != nil {
 			return nil, err
 		}
 	}
 
-	for _, branch := range yas.data.Branches.ToSlice().WithParents() {
+	for _, branch := range branches {
 		// Add parent vertex, if it doesn't exist
 		if _, err := graph.GetVertex(branch.Parent); errors.As(err, &dag.IDUnknownError{}) {
 			if err := graph.AddVertexByID(branch.Parent, branch.Parent); err != nil {
