@@ -29,7 +29,7 @@ go 1.22
 
 // TestMock_BasicMock tests basic mock functionality.
 func TestMock_BasicMock(t *testing.T) {
-	defer gocmdtester.CleanupAll()
+	t.Parallel()
 
 	// Create a test binary that calls an external command
 	mainGo := createTestModuleWithExec(t, `package main
@@ -70,7 +70,7 @@ func main() {
 
 // TestMock_NoMatch tests that unmatched commands exit with 254.
 func TestMock_NoMatch(t *testing.T) {
-	defer gocmdtester.CleanupAll()
+	t.Parallel()
 
 	// Create a test binary that calls an external command
 	mainGo := createTestModuleWithExec(t, `package main
@@ -116,7 +116,7 @@ func main() {
 
 // TestMock_ExitCode tests mock exit code handling.
 func TestMock_ExitCode(t *testing.T) {
-	defer gocmdtester.CleanupAll()
+	t.Parallel()
 
 	mainGo := createTestModuleWithExec(t, `package main
 
@@ -151,7 +151,7 @@ func main() {
 
 // TestMock_MultipleMocks tests multiple mocks for different commands.
 func TestMock_MultipleMocks(t *testing.T) {
-	defer gocmdtester.CleanupAll()
+	t.Parallel()
 
 	mainGo := createTestModuleWithExec(t, `package main
 
@@ -190,7 +190,7 @@ func main() {
 
 // TestMock_SameCommandDifferentArgs tests multiple mocks for the same command with different args.
 func TestMock_SameCommandDifferentArgs(t *testing.T) {
-	defer gocmdtester.CleanupAll()
+	t.Parallel()
 
 	mainGo := createTestModuleWithExec(t, `package main
 
@@ -229,7 +229,7 @@ func main() {
 
 // TestMock_CalledWithArgs tests the CalledWithArgs method.
 func TestMock_CalledWithArgs(t *testing.T) {
-	defer gocmdtester.CleanupAll()
+	t.Parallel()
 
 	mainGo := createTestModuleWithExec(t, `package main
 
@@ -255,7 +255,7 @@ func main() {
 
 // TestMock_MultipleRuns tests that mocks work across multiple Run() calls.
 func TestMock_MultipleRuns(t *testing.T) {
-	defer gocmdtester.CleanupAll()
+	t.Parallel()
 
 	mainGo := createTestModuleWithExec(t, `package main
 
@@ -286,7 +286,7 @@ func main() {
 
 // TestMock_Calls tests getting all calls to a mock.
 func TestMock_Calls(t *testing.T) {
-	defer gocmdtester.CleanupAll()
+	t.Parallel()
 
 	mainGo := createTestModuleWithExec(t, `package main
 
@@ -319,7 +319,7 @@ func main() {
 
 // TestMock_WithPassthroughExec tests that passthrough executes the real command.
 func TestMock_WithPassthroughExec(t *testing.T) {
-	defer gocmdtester.CleanupAll()
+	t.Parallel()
 
 	// Create a test binary that calls "echo" which is a real command
 	mainGo := createTestModuleWithExec(t, `package main
@@ -357,7 +357,7 @@ func main() {
 
 // TestMock_PassthroughExitCode tests that passthrough returns the real command's exit code.
 func TestMock_PassthroughExitCode(t *testing.T) {
-	defer gocmdtester.CleanupAll()
+	t.Parallel()
 
 	// Create a test binary that calls "false" which exits with code 1
 	mainGo := createTestModuleWithExec(t, `package main
@@ -395,7 +395,7 @@ func main() {
 
 // TestMock_VerifyAllCalled_Success tests that verification passes when all mocks are called.
 func TestMock_VerifyAllCalled_Success(t *testing.T) {
-	defer gocmdtester.CleanupAll()
+	t.Parallel()
 
 	mainGo := createTestModuleWithExec(t, `package main
 

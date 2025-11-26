@@ -18,7 +18,12 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 
-	os.Exit(m.Run())
+	code := m.Run()
+
+	// Clean up all cached testers after all tests complete
+	_ = gocmdtester.CleanupAll()
+
+	os.Exit(code)
 }
 
 // createTestModule creates a temporary Go module directory with the given main.go code.
@@ -43,7 +48,7 @@ go 1.22
 
 // TestFromPath_Success tests successful compilation.
 func TestFromPath_Success(t *testing.T) {
-	defer gocmdtester.CleanupAll()
+	t.Parallel()
 
 	mainGo := createTestModule(t, `package main
 
@@ -71,7 +76,7 @@ func main() {
 
 // TestFromPath_CacheReturns tests that FromPath reuses the cached binary.
 func TestFromPath_CacheReturns(t *testing.T) {
-	defer gocmdtester.CleanupAll()
+	t.Parallel()
 
 	mainGo := createTestModule(t, `package main
 
@@ -92,7 +97,7 @@ func main() {
 
 // TestRun_Success tests successful command execution.
 func TestRun_Success(t *testing.T) {
-	defer gocmdtester.CleanupAll()
+	t.Parallel()
 
 	mainGo := createTestModule(t, `package main
 
@@ -114,7 +119,7 @@ func main() {
 
 // TestRun_Arguments tests that arguments are passed correctly.
 func TestRun_Arguments(t *testing.T) {
-	defer gocmdtester.CleanupAll()
+	t.Parallel()
 
 	mainGo := createTestModule(t, `package main
 
@@ -138,7 +143,7 @@ func main() {
 
 // TestFromPath_WithEnv tests environment variable handling.
 func TestFromPath_WithEnv(t *testing.T) {
-	defer gocmdtester.CleanupAll()
+	t.Parallel()
 
 	mainGo := createTestModule(t, `package main
 
@@ -161,7 +166,7 @@ func main() {
 
 // TestFromPath_WithMultipleEnv tests multiple environment variables.
 func TestFromPath_WithMultipleEnv(t *testing.T) {
-	defer gocmdtester.CleanupAll()
+	t.Parallel()
 
 	mainGo := createTestModule(t, `package main
 
@@ -186,7 +191,7 @@ func main() {
 
 // TestFromPath_WithWorkingDir tests working directory handling.
 func TestFromPath_WithWorkingDir(t *testing.T) {
-	defer gocmdtester.CleanupAll()
+	t.Parallel()
 
 	mainGo := createTestModule(t, `package main
 
@@ -211,7 +216,7 @@ func main() {
 
 // TestFromPath_WithStdin tests stdin handling.
 func TestFromPath_WithStdin(t *testing.T) {
-	defer gocmdtester.CleanupAll()
+	t.Parallel()
 
 	mainGo := createTestModule(t, `package main
 
@@ -239,7 +244,7 @@ func main() {
 
 // TestRun_NonZeroExitCode tests that non-zero exit codes are captured correctly.
 func TestRun_NonZeroExitCode(t *testing.T) {
-	defer gocmdtester.CleanupAll()
+	t.Parallel()
 
 	mainGo := createTestModule(t, `package main
 
@@ -265,7 +270,7 @@ func main() {
 
 // TestRun_StdoutStderr tests stdout and stderr capture.
 func TestRun_StdoutStderr(t *testing.T) {
-	defer gocmdtester.CleanupAll()
+	t.Parallel()
 
 	mainGo := createTestModule(t, `package main
 
@@ -292,7 +297,7 @@ func main() {
 
 // TestResult_HelperMethods tests the Result helper methods.
 func TestResult_HelperMethods(t *testing.T) {
-	defer gocmdtester.CleanupAll()
+	t.Parallel()
 
 	mainGo := createTestModule(t, `package main
 
@@ -321,7 +326,7 @@ func main() {
 
 // TestWriteCoverageProfile tests coverage collection and merging.
 func TestWriteCoverageProfile(t *testing.T) {
-	defer gocmdtester.CleanupAll()
+	t.Parallel()
 
 	mainGo := createTestModule(t, `package main
 
@@ -357,9 +362,6 @@ func main() {
 // TestParallelExecution tests that multiple CmdTesters can run in parallel.
 func TestParallelExecution(t *testing.T) {
 	t.Parallel()
-	t.Cleanup(func() {
-		_ = gocmdtester.CleanupAll()
-	})
 
 	mainGo := createTestModule(t, `package main
 
@@ -385,7 +387,11 @@ func main() {
 }
 
 // TestClearCache tests that ClearCache removes cached testers.
+// NOTE: This test cannot run in parallel as it tests global cache cleanup.
 func TestClearCache(t *testing.T) {
+	// Clean up any existing cache state first
+	_ = gocmdtester.CleanupAll()
+
 	mainGo := createTestModule(t, `package main
 
 func main() {}
@@ -415,7 +421,7 @@ func main() {}
 
 // TestCleanup_IsNoOp tests that Cleanup() is a no-op for cached testers.
 func TestCleanup_IsNoOp(t *testing.T) {
-	defer gocmdtester.CleanupAll()
+	t.Parallel()
 
 	mainGo := createTestModule(t, `package main
 
@@ -440,7 +446,7 @@ func main() {}
 
 // TestFromPath_CombinedOptions tests multiple options together.
 func TestFromPath_CombinedOptions(t *testing.T) {
-	defer gocmdtester.CleanupAll()
+	t.Parallel()
 
 	mainGo := createTestModule(t, `package main
 
@@ -480,7 +486,7 @@ func main() {
 
 // TestMultipleRuns tests that the same tester can be used for multiple runs.
 func TestMultipleRuns(t *testing.T) {
-	defer gocmdtester.CleanupAll()
+	t.Parallel()
 
 	mainGo := createTestModule(t, `package main
 
@@ -518,7 +524,7 @@ func main() {
 
 // TestWriteCoverageProfile_MultipleCalls tests that coverage accumulates.
 func TestWriteCoverageProfile_MultipleCalls(t *testing.T) {
-	defer gocmdtester.CleanupAll()
+	t.Parallel()
 
 	mainGo := createTestModule(t, `package main
 
@@ -571,7 +577,7 @@ func main() {
 
 // TestWriteCombinedCoverage tests combined coverage from multiple testers.
 func TestWriteCombinedCoverage(t *testing.T) {
-	defer gocmdtester.CleanupAll()
+	t.Parallel()
 
 	mainGo1 := createTestModule(t, `package main
 
@@ -615,7 +621,7 @@ func main() {
 
 // TestGOCOVERDIR_Isolation tests that GOCOVERDIR is properly isolated.
 func TestGOCOVERDIR_Isolation(t *testing.T) {
-	defer gocmdtester.CleanupAll()
+	t.Parallel()
 
 	mainGo := createTestModule(t, `package main
 
@@ -640,7 +646,7 @@ func main() {
 
 // TestAccessorMethods tests the BinaryPath and CoverageDir accessor methods.
 func TestAccessorMethods(t *testing.T) {
-	defer gocmdtester.CleanupAll()
+	t.Parallel()
 
 	mainGo := createTestModule(t, `package main
 

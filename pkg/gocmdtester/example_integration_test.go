@@ -13,13 +13,13 @@ import (
 // TestIntegration_YasBinary demonstrates using gocmdtester with the actual yas binary.
 // This test shows how to collect coverage from a real CLI application.
 func TestIntegration_YasBinary(t *testing.T) {
+	t.Parallel()
+
 	// Path to the yas main.go
 	mainGoPath := filepath.Join("..", "..", "cmd", "yas", "main.go")
 
 	// Create tester (uses cached binary if already compiled)
 	tester := gocmdtester.FromPath(t, mainGoPath)
-
-	defer gocmdtester.CleanupAll() // Clean up cached testers
 
 	// Run the binary with --help flag
 	result := tester.Run("--help")

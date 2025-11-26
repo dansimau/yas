@@ -21,7 +21,8 @@ func TestWorktree_SwitchToExistingWorktree(t *testing.T) {
 		gocmdtester.WithWorkingDir(tempDir),
 	)
 
-	// Create main repo with two branches
+	// Create main repo with two branches and worktree
+	worktreePath := filepath.Join(tempDir, "worktrees", "feature-a")
 	testutil.ExecOrFail(t, tempDir, `
 		git init --initial-branch=main
 		touch main
@@ -34,18 +35,12 @@ func TestWorktree_SwitchToExistingWorktree(t *testing.T) {
 		git commit -m "feature-a-0"
 
 		git checkout main
+		git worktree add `+worktreePath+` feature-a
 	`)
 
 	// Initialize yas
 	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
 	assert.NilError(t, cli.Run("add", "feature-a", "--parent=main").Err())
-
-	// Create a worktree for feature-a
-	worktreePath := filepath.Join(tempDir, "worktrees", "feature-a")
-	testutil.ExecOrFail(t, tempDir, "git worktree add "+worktreePath+" feature-a")
-
-	// Ensure we're back on main in the primary repo
-	testutil.ExecOrFail(t, tempDir, "git checkout main")
 
 	// Try to switch to feature-a with YAS_SHELL_EXEC set
 	tempFile := filepath.Join(t.TempDir(), "shell-exec")
@@ -140,18 +135,14 @@ func TestWorktree_ErrorWhenHookNotInstalled(t *testing.T) {
 		git commit -m "feature-a-0"
 
 		git checkout main
+
+		# Add worktree
+		git worktree add worktrees feature-a
 	`)
 
 	// Initialize yas
 	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
 	assert.NilError(t, cli.Run("add", "feature-a", "--parent=main").Err())
-
-	// Create a worktree for feature-a
-	worktreePath := filepath.Join(tempDir, "worktrees", "feature-a")
-	testutil.ExecOrFail(t, tempDir, "git worktree add "+worktreePath+" feature-a")
-
-	// Ensure we're back on main
-	testutil.ExecOrFail(t, tempDir, "git checkout main")
 
 	// Try to switch to feature-a WITHOUT YAS_SHELL_EXEC set
 	result := cli.Run("branch", "feature-a")
@@ -220,6 +211,7 @@ func TestWorktree_SwitchFromWorktreeToMainBranch(t *testing.T) {
 	)
 
 	// Create main repo with a branch that has a worktree
+	worktreePath := filepath.Join(tempDir, "worktrees", "feature-a")
 	testutil.ExecOrFail(t, tempDir, `
 		git init --initial-branch=main
 		touch main
@@ -232,15 +224,12 @@ func TestWorktree_SwitchFromWorktreeToMainBranch(t *testing.T) {
 		git commit -m "feature-a-0"
 
 		git checkout main
+		git worktree add `+worktreePath+` feature-a
 	`)
 
 	// Initialize yas
 	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
 	assert.NilError(t, cli.Run("add", "feature-a", "--parent=main").Err())
-
-	// Create a worktree for feature-a
-	worktreePath := filepath.Join(tempDir, "worktrees", "feature-a")
-	testutil.ExecOrFail(t, tempDir, "git worktree add "+worktreePath+" feature-a")
 
 	// Now try to switch to main from within the worktree
 	tempFile := filepath.Join(t.TempDir(), "shell-exec")
@@ -273,7 +262,8 @@ func TestWorktree_SwitchFromWorktreeToAnotherNonWorktreeBranch(t *testing.T) {
 		gocmdtester.WithWorkingDir(tempDir),
 	)
 
-	// Create main repo with multiple branches
+	// Create main repo with multiple branches and worktree for feature-a
+	worktreePath := filepath.Join(tempDir, "worktrees", "feature-a")
 	testutil.ExecOrFail(t, tempDir, `
 		git init --initial-branch=main
 		touch main
@@ -292,16 +282,13 @@ func TestWorktree_SwitchFromWorktreeToAnotherNonWorktreeBranch(t *testing.T) {
 		git commit -m "feature-b-0"
 
 		git checkout main
+		git worktree add `+worktreePath+` feature-a
 	`)
 
 	// Initialize yas
 	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
 	assert.NilError(t, cli.Run("add", "feature-a", "--parent=main").Err())
 	assert.NilError(t, cli.Run("add", "feature-b", "--parent=main").Err())
-
-	// Create a worktree for feature-a only
-	worktreePath := filepath.Join(tempDir, "worktrees", "feature-a")
-	testutil.ExecOrFail(t, tempDir, "git worktree add "+worktreePath+" feature-a")
 
 	// Now try to switch to feature-b from within feature-a worktree
 	tempFile := filepath.Join(t.TempDir(), "shell-exec")
