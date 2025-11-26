@@ -60,7 +60,7 @@ def main():
         # Only process output if it exists
         if output:
             # Check for lines containing "FAIL" - output in red to stderr
-            if 'FAIL' in output:
+            if 'FAIL:' in output:
                 sys.stderr.write(f"{Colors.RED}{output}{Colors.RESET}")
                 sys.stderr.flush()
 
