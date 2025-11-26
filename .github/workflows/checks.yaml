@@ -17,16 +17,12 @@ jobs:
         with:
           go-version: "1.25"
 
-      - name: Run lint
-        run: make lint
-        shell: bash
-
-      - name: Run tests
+      - name: Run tests/lint
         run: |
           set -o pipefail
           git config --global user.email "bob@example.com"
           git config --global user.name "Bob"
-          make test
+          make test lint
         shell: bash
 
       - name: Annotate
