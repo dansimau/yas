@@ -10,10 +10,10 @@ yas (Yet Another Stacked Diff Tool) is a CLI tool for managing stacked PRs on Gi
 
 ```bash
 # Build the binary
-go build ./cmd/yas
+make yas
 
-# Run all tests and see failures
-make test >/dev/null
+# Run all tests with coverage
+make test
 
 # Run tests in a specific package
 go test ./pkg/yas
@@ -22,10 +22,7 @@ go test ./test
 # Run a specific test
 go test ./test -run TestUpdateTrunk
 
-# Run tests with verbose output
-make test
-
-# Run lint checks
+# Run lint checks (formats and fixes)
 make lint
 ```
 
@@ -38,19 +35,22 @@ make lint
 - **pkg/yas**: Core business logic for stacked diff management
 - **pkg/gitexec**: Git operations wrapper using go-git and command execution
 - **pkg/xexec**: Command execution utilities with environment control
+- **pkg/gocmdtester**: Test utility for running CLI with coverage collection
 - **test/**: Integration tests using temporary git repositories
 
 ### State Management
 
-yas maintains two key files in the `.git` directory:
-- **.git/yas.yaml**: Configuration (trunk branch name)
-- **.git/.yasstate**: JSON database tracking branch metadata and parent relationships
+yas maintains two key files in the `.yas` directory:
+
+- **.yas/yas.yaml**: Configuration (trunk branch name)
+- **.yas/yas.state.json**: JSON database tracking branch metadata and parent relationships
 
 The state is managed through `yasDatabase` (pkg/yas/store.go) which uses a thread-safe `branchMap` to store `BranchMetadata` for each tracked branch.
 
 ### Branch Graph Model
 
 yas uses a Directed Acyclic Graph (DAG) from `github.com/heimdalr/dag` to model branch dependencies:
+
 - Each branch is a vertex containing `BranchMetadata`
 - Edges represent parent-child relationships
 - The trunk branch (e.g., `main`) is the root vertex
@@ -59,22 +59,26 @@ yas uses a Directed Acyclic Graph (DAG) from `github.com/heimdalr/dag` to model 
 ### Key Workflows
 
 **Add/Track Branch** (`yas add`):
+
 - Detects fork point using `git merge-base --fork-point`
 - Automatically determines parent branch from fork point
 - Stores parent relationship in `.yasstate`
 
 **Submit** (`yas submit`):
+
 - Pushes current branch to remote
 - Creates GitHub PR using `gh` CLI with `--draft --fill-first`
 - Sets PR base to parent branch (enables stacked PRs)
 
 **Restack** (`yas restack`):
+
 - Builds DAG of all branch relationships
 - Gets descendants of current branch
 - Rebases each descendant from leaf nodes using `git rebase --update-refs`
 - Skips git hooks during rebase with `core.hooksPath=/dev/null`
 
 **Sync** (`yas sync`):
+
 - Tracks untracked branches by refreshing remote status
 - Queries GitHub PR status using `gh pr list --json`
 - Deletes local branches for merged PRs
@@ -86,10 +90,16 @@ Git operations use cleaned environments (`CleanedGitEnv()` in pkg/gitexec/util.g
 
 ### Testing Patterns
 
-Integration tests (in `test/`) use `testutil.WithTempWorkingDir()` to create isolated git repositories. Tests execute git commands directly to set up scenarios, then verify behavior using `yascli.Run()` and git command output.
+Integration tests (in `test/`) use `gocmdtester.FromPath()` to compile and run the CLI binary with coverage collection. Tests use `t.TempDir()` to create isolated directories and `testutil.ExecOrFail()` to run shell setup scripts. Coverage from integration tests is merged with unit test coverage via `gocmdtester.WriteCombinedCoverage()`.
+
+Test helpers in `test/util.go`:
+
+- `equalLines()`: Compare multi-line strings ignoring whitespace
+- `mustExecOutput()`: Run commands and return stdout
+- `mockGitHubPRForBranch()`: Mock GitHub PR API responses for testing
 
 ## Requirements
 
-- Go 1.22+
+- Go 1.24+
 - Git 2.38+ (validated at runtime)
 - GitHub CLI (`gh`) for PR operations
