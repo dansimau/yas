@@ -68,10 +68,10 @@ func TestSync_RestacksChildrenOntoParentWhenMergedPRDeleted(t *testing.T) {
 	assert.NilError(t, cli.Run("refresh", "topic-b").Err())
 
 	// Verify initial state
-	y, err := yas.NewFromRepository(tempDir)
+	yasInstance, err := yas.NewFromRepository(tempDir)
 	assert.NilError(t, err)
 
-	branchMetadata := y.TrackedBranches()
+	branchMetadata := yasInstance.TrackedBranches()
 	topicB, exists := branchMetadata.Get("topic-b")
 	assert.Assert(t, exists, "topic-b should exist")
 	assert.Equal(t, topicB.Parent, "topic-a")
@@ -81,15 +81,17 @@ func TestSync_RestacksChildrenOntoParentWhenMergedPRDeleted(t *testing.T) {
 	assert.Equal(t, topicC.Parent, "topic-b")
 
 	// Delete merged branch topic-b
-	err = y.DeleteMergedBranch("topic-b")
+	err = yasInstance.DeleteBranch("topic-b")
 	assert.NilError(t, err)
 
-	// Reload the instance to get fresh data
-	y, err = yas.NewFromRepository(tempDir)
-	assert.NilError(t, err)
+	// Restack to trigger reparenting of children
+	assert.NilError(t, cli.Run("restack", "topic-c").Err())
+
+	// Reload state file
+	assert.NilError(t, yasInstance.Reload())
 
 	// Verify topic-b is deleted
-	branchMetadata = y.TrackedBranches()
+	branchMetadata = yasInstance.TrackedBranches()
 	_, exists = branchMetadata.Get("topic-b")
 	assert.Assert(t, !exists, "topic-b should be deleted")
 
@@ -168,18 +170,20 @@ func TestSync_HandlesMultipleChildrenWhenParentMerged(t *testing.T) {
 	assert.NilError(t, cli.Run("refresh", "topic-a").Err())
 
 	// Create YAS instance and delete merged branch
-	y, err := yas.NewFromRepository(tempDir)
+	yasInstance, err := yas.NewFromRepository(tempDir)
 	assert.NilError(t, err)
 
-	err = y.DeleteMergedBranch("topic-a")
+	err = yasInstance.DeleteBranch("topic-a")
 	assert.NilError(t, err)
 
-	// Reload the instance to get fresh data
-	y, err = yas.NewFromRepository(tempDir)
-	assert.NilError(t, err)
+	// Restack from trunk to trigger reparenting of all children
+	assert.NilError(t, cli.Run("restack", "main").Err())
+
+	// Reload to get fresh data
+	assert.NilError(t, yasInstance.Reload())
 
 	// Verify topic-a is deleted
-	branchMetadata := y.TrackedBranches()
+	branchMetadata := yasInstance.TrackedBranches()
 	_, exists := branchMetadata.Get("topic-a")
 	assert.Assert(t, !exists, "topic-a should be deleted")
 
@@ -206,7 +210,7 @@ func TestSync_HandlesMultipleChildrenWhenParentMerged(t *testing.T) {
 	`)
 }
 
-func TestSync_ErrorsWhenMergedBranchHasNoParent(t *testing.T) {
+func TestSync_DeleteBranchWithNoParent(t *testing.T) {
 	t.Parallel()
 
 	tempDir := t.TempDir()
@@ -247,14 +251,20 @@ func TestSync_ErrorsWhenMergedBranchHasNoParent(t *testing.T) {
 	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
 
 	// Create YAS instance
-	y, err := yas.NewFromRepository(tempDir)
+	yasInstance, err := yas.NewFromRepository(tempDir)
 	assert.NilError(t, err)
 
 	// Refresh to populate PR metadata (but no parent set)
 	assert.NilError(t, cli.Run("refresh", "topic-a").Err())
 
-	// Try to delete merged branch without parent - should error
-	err = y.DeleteMergedBranch("topic-a")
-	assert.ErrorContains(t, err, "has no parent branch set")
-	assert.ErrorContains(t, err, "cannot safely delete merged branch")
+	// Delete branch without parent - should succeed (soft delete)
+	err = yasInstance.DeleteBranch("topic-a")
+	assert.NilError(t, err)
+
+	// Reload and verify topic-a is no longer in tracked branches
+	assert.NilError(t, yasInstance.Reload())
+
+	branchMetadata := yasInstance.TrackedBranches()
+	_, exists := branchMetadata.Get("topic-a")
+	assert.Assert(t, !exists, "topic-a should be deleted from tracked branches")
 }

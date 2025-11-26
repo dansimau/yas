@@ -11,8 +11,13 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 )
 
-func (yas *YAS) cleanupBranch(name string) error {
-	yas.data.Branches.Remove(name)
+func (yas *YAS) markBranchDeleted(name string) error {
+	branchMetdata := yas.data.Branches.Get(name)
+
+	now := time.Now()
+	branchMetdata.Deleted = &now
+
+	yas.data.Branches.Set(name, branchMetdata)
 
 	return yas.data.Save()
 }
@@ -45,7 +50,7 @@ func (yas *YAS) DeleteBranch(name string) error {
 	}
 
 	if !branchExists {
-		if err := yas.cleanupBranch(name); err != nil {
+		if err := yas.markBranchDeleted(name); err != nil {
 			return err
 		}
 
@@ -68,75 +73,11 @@ func (yas *YAS) DeleteBranch(name string) error {
 		return err
 	}
 
-	if err := yas.cleanupBranch(name); err != nil {
+	if err := yas.markBranchDeleted(name); err != nil {
 		return err
 	}
 
 	return nil
-}
-
-// DeleteMergedBranch deletes a merged branch after restacking its children onto its parent.
-func (yas *YAS) DeleteMergedBranch(name string) error {
-	// Get the metadata of the branch being deleted
-	branchMetadata := yas.data.Branches.Get(name)
-	parentBranch := branchMetadata.Parent
-
-	// Require a parent branch for proper restacking
-	if parentBranch == "" {
-		return fmt.Errorf("branch %s has no parent branch set; cannot safely delete merged branch", name)
-	}
-
-	// Get the graph to find children
-	graph, err := yas.graph()
-	if err != nil {
-		return fmt.Errorf("failed to get graph: %w", err)
-	}
-
-	// Find all children of this branch
-	children, err := graph.GetChildren(name)
-	if err != nil {
-		return fmt.Errorf("failed to get children: %w", err)
-	}
-
-	// If there are children, restack them onto the parent
-	if len(children) > 0 {
-		fmt.Printf("Restacking %d child branch(es) onto %s...\n", len(children), parentBranch)
-
-		for childID := range children {
-			// Get child metadata for branch point
-			childMetadata := yas.data.Branches.Get(childID)
-
-			// Rebase the child onto the grandparent, removing commits from the merged branch
-			// git rebase --onto <grandparent> <child's-branch-point> <child>
-			// This replays only the child's commits (after its branch point) onto the grandparent
-			fmt.Printf("  Rebasing %s onto %s...\n", childID, parentBranch)
-
-			if err := yas.git.RebaseOntoWithBranchPoint(parentBranch, childMetadata.BranchPoint, childID); err != nil {
-				return fmt.Errorf("failed to rebase %s onto %s: %w", childID, parentBranch, err)
-			}
-
-			// Update the child's parent to point to the grandparent
-			childMetadata.Parent = parentBranch
-
-			// Update the child's branch point to the grandparent's current commit
-			grandparentCommit, err := yas.git.GetCommitHash(parentBranch)
-			if err != nil {
-				return fmt.Errorf("failed to get grandparent commit: %w", err)
-			}
-
-			childMetadata.BranchPoint = grandparentCommit
-
-			yas.data.Branches.Set(childID, childMetadata)
-		}
-
-		// Save the updated metadata
-		if err := yas.data.Save(); err != nil {
-			return fmt.Errorf("failed to save updated metadata: %w", err)
-		}
-	}
-
-	// Now delete the merged branch
-	return yas.DeleteBranch(name)
 }
 
 func (yas *YAS) SetParent(branchName, parentBranchName, branchPoint string) error {
@@ -195,6 +136,9 @@ func (yas *YAS) SetParent(branchName, parentBranchName, branchPoint string) erro
 	if branchMetdata.Created.IsZero() {
 		branchMetdata.Created = time.Now()
 	}
+
+	// Undelete it if it was previously deleted
+	branchMetdata.Deleted = nil
 
 	yas.data.Branches.Set(branchName, branchMetdata)
 
@@ -365,7 +309,7 @@ func (yas *YAS) SwitchBranch(branchName string) error {
 }
 
 func (yas *YAS) TrackedBranches() Branches {
-	return yas.data.Branches.ToSlice()
+	return yas.data.Branches.ToSlice().NotDeleted()
 }
 
 func (yas *YAS) UntrackedBranches() ([]string, error) {
