@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/dansimau/yas/pkg/fsutil"
 )
 
 func (r *Repo) WorktreeGetPrimaryRepoPath() (string, error) {
@@ -37,8 +39,8 @@ type WorktreeEntry struct {
 	Branch string
 }
 
-// WorktreeList returns all worktrees for the repository.
-func (r *Repo) WorktreeList() ([]WorktreeEntry, error) {
+// Worktrees returns all worktrees for the repository.
+func (r *Repo) Worktrees() ([]WorktreeEntry, error) {
 	output, err := r.output("git", "worktree", "list", "--porcelain")
 	if err != nil {
 		return nil, fmt.Errorf("failed to list worktrees (ensure you are on a recent version of git that supports worktrees): %w", err)
@@ -81,10 +83,36 @@ func (r *Repo) WorktreeList() ([]WorktreeEntry, error) {
 	return worktrees, nil
 }
 
-// WorktreeFindByBranch finds the worktree path for a given branch
+// LinkedWorktrees returns all linked/child worktrees for the repository (i.e. excluding the primary worktree).
+func (r *Repo) LinkedWorktrees() ([]WorktreeEntry, error) {
+	worktrees, err := r.Worktrees()
+	if err != nil {
+		return nil, err
+	}
+
+	linkedWorktrees := []WorktreeEntry{}
+
+	for _, wt := range worktrees {
+		isSameRealPath, err := fsutil.IsSameRealPath(wt.Path, r.path)
+		if err != nil {
+			return nil, err
+		}
+
+		if isSameRealPath {
+			// Skip the primary worktree
+			continue
+		}
+
+		linkedWorktrees = append(linkedWorktrees, wt)
+	}
+
+	return linkedWorktrees, nil
+}
+
+// LinkedWorktreePathForBranch finds the worktree path for a given branch
 // Returns empty string if no worktree exists for the branch.
-func (r *Repo) WorktreeFindByBranch(branch string) (string, error) {
-	worktrees, err := r.WorktreeList()
+func (r *Repo) LinkedWorktreePathForBranch(branch string) (string, error) {
+	worktrees, err := r.LinkedWorktrees()
 	if err != nil {
 		return "", err
 	}

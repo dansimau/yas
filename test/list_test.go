@@ -937,12 +937,15 @@ func TestList_ShowsManuallyDeletedBranchWithLivingChild(t *testing.T) {
 	// topic-a should show "(deleted)" status
 	lines := strings.Split(output, "\n")
 	foundTopicADeleted := false
+
 	for _, line := range lines {
 		if strings.Contains(line, "topic-a") && strings.Contains(line, "deleted") {
 			foundTopicADeleted = true
+
 			break
 		}
 	}
+
 	assert.Assert(t, foundTopicADeleted,
 		"topic-a should show '(deleted)' status, but got: %s", output)
 

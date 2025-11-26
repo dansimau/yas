@@ -214,12 +214,12 @@ func (yas *YAS) SwitchBranch(branchName string) error {
 	}
 
 	// Check if the branch has a worktree
-	worktreePath, err := yas.git.WorktreeFindByBranch(branchName)
+	worktreePath, err := yas.git.LinkedWorktreePathForBranch(branchName)
 	if err != nil {
-		// If we can't check for worktrees, just continue with normal checkout
-		// (this might happen if git version is too old or other issues)
-		fmt.Fprintf(os.Stderr, "WARNING: failed to check for worktrees: %v\n", err)
-	} else if worktreePath != "" {
+		return fmt.Errorf("failed to check for linked worktree path for branch: %w", err)
+	}
+
+	if worktreePath != "" {
 		// Branch has a worktree - switch to it using shell exec
 		shellExec, err := NewShellExecWriter()
 		if err != nil {
@@ -251,15 +251,17 @@ func (yas *YAS) SwitchBranch(branchName string) error {
 	// because the repo directory may have been resolved to the primary repo
 	cwd, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "WARNING: failed to get current directory: %v\n", err)
+		return fmt.Errorf("failed to get current directory: %w", err)
 	}
 
 	cwdRepo := gitexec.WithRepo(cwd)
 
 	inWorktree, err := cwdRepo.IsWorktree()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "WARNING: failed to check if in worktree: %v\n", err)
-	} else if inWorktree {
+		return fmt.Errorf("failed to check if in worktree: %w", err)
+	}
+
+	if inWorktree {
 		// We're in a worktree but target branch doesn't have one
 		// Switch back to primary repo and run checkout there
 		shellExec, err := NewShellExecWriter()

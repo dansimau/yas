@@ -243,15 +243,12 @@ func TestWorktree_SwitchFromWorktreeToMainBranch(t *testing.T) {
 	// Run yas branch from worktree directory
 	assert.NilError(t, cliInWorktree.Run("branch", "main").Err())
 
-	// Verify the temp file contains cd to primary repo
+	// Verify the temp file contains switch to main branch
 	content, err := os.ReadFile(tempFile)
 	assert.NilError(t, err)
 
 	contentStr := string(content)
-	assert.Assert(t, cmp.Contains(contentStr, "cd "))
-	assert.Assert(t, cmp.Contains(contentStr, tempDir))
-	assert.Assert(t, cmp.Contains(contentStr, "Switched to branch"))
-	assert.Assert(t, cmp.Contains(contentStr, "main"))
+	assert.Assert(t, cmp.Contains(contentStr, "yas br main"))
 }
 
 func TestWorktree_SwitchFromWorktreeToAnotherNonWorktreeBranch(t *testing.T) {
@@ -388,8 +385,8 @@ func TestWorktree_CreateBranchWithWorktreeFlagAndPrefix(t *testing.T) {
 	// Create a new branch with --worktree flag
 	assert.NilError(t, cli.Run("branch", "feature-a", "--worktree").Err())
 
-	// Verify the worktree was created with unprefixed name
-	worktreePath := filepath.Join(tempDir, ".yas", "worktrees", "feature-a")
+	// Verify the worktree was created with prefixed name
+	worktreePath := filepath.Join(tempDir, ".yas", "worktrees", "testuser", "feature-a")
 	info, err := os.Stat(worktreePath)
 	assert.NilError(t, err)
 	assert.Assert(t, info.IsDir())

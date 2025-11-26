@@ -79,3 +79,28 @@ func SearchParentsForPathFromCwd(filename string) (path string, err error) {
 
 	return SearchParentsForPath(filename, wd)
 }
+
+// IsSameRealPath returns true if the two paths are the same real path.
+func IsSameRealPath(path1, path2 string) (bool, error) {
+	realPath1, err := filepath.EvalSymlinks(path1)
+	if err != nil {
+		return false, err
+	}
+
+	realPath2, err := filepath.EvalSymlinks(path2)
+	if err != nil {
+		return false, err
+	}
+
+	absPath1, err := filepath.Abs(realPath1)
+	if err != nil {
+		return false, err
+	}
+
+	absPath2, err := filepath.Abs(realPath2)
+	if err != nil {
+		return false, err
+	}
+
+	return absPath1 == absPath2, nil
+}

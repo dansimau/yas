@@ -36,39 +36,32 @@ func (c *branchCmd) Execute(args []string) error {
 		return nil
 	}
 
+	fullBranchName := c.Arguments.BranchName
+
 	// Check if branch name provided exists locally or remotely
 	branchExists, err := yasInstance.BranchExists(c.Arguments.BranchName)
 	if err != nil {
 		return NewError(err.Error())
 	}
 
-	var actualBranchName string
-
-	// If the branch exists, switch to it (unless using --worktree, then skip for now)
-	if branchExists {
-		if !c.Worktree {
-			if err := yasInstance.SwitchBranch(c.Arguments.BranchName); err != nil {
-				return NewError(err.Error())
-			}
-		}
-
-		actualBranchName = c.Arguments.BranchName
-	} else {
-		// Otherwise, create it
-		fullBranchName, err := yasInstance.CreateBranch(c.Arguments.BranchName, c.Parent)
+	// Create branch if it doesn't exist
+	if !branchExists {
+		fullBranchName, err = yasInstance.CreateBranch(c.Arguments.BranchName, c.Parent)
 		if err != nil {
 			return NewError(err.Error())
 		}
-
-		actualBranchName = fullBranchName
 	}
 
-	// If --worktree flag is set, create/switch to worktree
+	// Ensure worktree exists for branch
 	if c.Worktree {
-		worktreePath := ".yas/worktrees/" + c.Arguments.BranchName
-		if err := yasInstance.CreateWorktreeForBranch(actualBranchName, worktreePath); err != nil {
+		if err := yasInstance.EnsureLinkedWorktreeForBranch(fullBranchName); err != nil {
 			return NewError(err.Error())
 		}
+	}
+
+	// Switch to the branch
+	if err := yasInstance.SwitchBranch(fullBranchName); err != nil {
+		return NewError(err.Error())
 	}
 
 	return nil
