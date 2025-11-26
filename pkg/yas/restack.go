@@ -255,7 +255,7 @@ func (yas *YAS) processRestackWorkQueue(startingBranch string, workQueue [][2]st
 		}
 
 		if !childBranchExists {
-			if childMetadata.Deleted != nil {
+			if childMetadata.Deleted == nil {
 				now := time.Now()
 				childMetadata.Deleted = &now
 				yas.data.Branches.Set(childBranch, childMetadata)

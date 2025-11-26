@@ -188,3 +188,7 @@ func (yas *YAS) CreateBranch(branchName string, parentBranch string) (string, er
 
 	return fullBranchName, nil
 }
+
+func (yas *YAS) Reload() error {
+	return yas.data.Reload()
+}

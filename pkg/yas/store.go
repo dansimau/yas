@@ -33,6 +33,45 @@ func (d *yasDatabase) Save() error {
 	return os.WriteFile(d.filePath, b, 0o644)
 }
 
+// Reload re-reads the database from disk, refreshing the in-memory data.
+func (d *yasDatabase) Reload() error {
+	exists, err := fsutil.FileExists(d.filePath)
+	if err != nil {
+		return err
+	}
+
+	if !exists {
+		// Reset to empty state if file doesn't exist
+		d.Branches.Lock()
+		d.Branches.data = map[string]BranchMetadata{}
+		d.Branches.Unlock()
+
+		return nil
+	}
+
+	b, err := os.ReadFile(d.filePath)
+	if err != nil {
+		return err
+	}
+
+	newData := &yasData{
+		Branches: &branchMap{
+			data: map[string]BranchMetadata{},
+		},
+	}
+
+	if err := json.Unmarshal(b, newData); err != nil {
+		return err
+	}
+
+	// Update the in-memory data with a lock
+	d.Branches.Lock()
+	d.Branches.data = newData.Branches.data
+	d.Branches.Unlock()
+
+	return nil
+}
+
 // migrateCreatedTimestamps backfills Created timestamps for branches that don't have them.
 // This ensures consistent ordering across runs. The migration is saved to disk immediately.
 func (d *yasDatabase) migrateCreatedTimestamps() error {

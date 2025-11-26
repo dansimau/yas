@@ -187,3 +187,173 @@ func TestMigrateCreatedTimestamps_EmptyBranchName(t *testing.T) {
 	branch1 := db.Branches.Get("branch1")
 	assert.Assert(t, !branch1.Created.IsZero(), "branch1 should get a timestamp")
 }
+
+func TestReload(t *testing.T) {
+	// Create a temporary directory for the test
+	tmpDir := t.TempDir()
+	dbFilePath := filepath.Join(tmpDir, ".yasstate")
+
+	// Create a database file with initial data
+	now := time.Now()
+	initialData := yasData{
+		Branches: &branchMap{
+			data: map[string]BranchMetadata{
+				"branch1": {
+					Parent:  "main",
+					Created: now,
+				},
+			},
+		},
+	}
+
+	// Write the initial data to disk
+	b, err := json.MarshalIndent(initialData, "", "  ")
+	assert.NilError(t, err)
+	err = os.WriteFile(dbFilePath, b, 0o644)
+	assert.NilError(t, err)
+
+	// Load the database
+	db, err := loadData(dbFilePath)
+	assert.NilError(t, err)
+
+	// Verify initial state
+	assert.Assert(t, db.Branches.Exists("branch1"), "branch1 should exist")
+	assert.Assert(t, !db.Branches.Exists("branch2"), "branch2 should not exist yet")
+
+	// Modify the file on disk (simulating external changes, e.g., from another process)
+	updatedData := yasData{
+		Branches: &branchMap{
+			data: map[string]BranchMetadata{
+				"branch1": {
+					Parent:  "main",
+					Created: now,
+				},
+				"branch2": {
+					Parent:  "branch1",
+					Created: now,
+				},
+			},
+		},
+	}
+
+	b, err = json.MarshalIndent(updatedData, "", "  ")
+	assert.NilError(t, err)
+	err = os.WriteFile(dbFilePath, b, 0o644)
+	assert.NilError(t, err)
+
+	// Reload should pick up the new data
+	err = db.Reload()
+	assert.NilError(t, err)
+
+	// Verify reloaded state
+	assert.Assert(t, db.Branches.Exists("branch1"), "branch1 should still exist")
+	assert.Assert(t, db.Branches.Exists("branch2"), "branch2 should now exist after reload")
+
+	branch2 := db.Branches.Get("branch2")
+	assert.Equal(t, "branch1", branch2.Parent)
+}
+
+func TestReload_FileDeleted(t *testing.T) {
+	// Create a temporary directory for the test
+	tmpDir := t.TempDir()
+	dbFilePath := filepath.Join(tmpDir, ".yasstate")
+
+	// Create a database file with initial data
+	now := time.Now()
+	initialData := yasData{
+		Branches: &branchMap{
+			data: map[string]BranchMetadata{
+				"branch1": {
+					Parent:  "main",
+					Created: now,
+				},
+			},
+		},
+	}
+
+	// Write the initial data to disk
+	b, err := json.MarshalIndent(initialData, "", "  ")
+	assert.NilError(t, err)
+	err = os.WriteFile(dbFilePath, b, 0o644)
+	assert.NilError(t, err)
+
+	// Load the database
+	db, err := loadData(dbFilePath)
+	assert.NilError(t, err)
+
+	// Verify initial state
+	assert.Assert(t, db.Branches.Exists("branch1"), "branch1 should exist")
+
+	// Delete the file
+	err = os.Remove(dbFilePath)
+	assert.NilError(t, err)
+
+	// Reload should reset to empty state
+	err = db.Reload()
+	assert.NilError(t, err)
+
+	// Verify state is now empty
+	assert.Assert(t, !db.Branches.Exists("branch1"), "branch1 should no longer exist after reload with deleted file")
+}
+
+func TestReload_BranchRemoved(t *testing.T) {
+	// Create a temporary directory for the test
+	tmpDir := t.TempDir()
+	dbFilePath := filepath.Join(tmpDir, ".yasstate")
+
+	// Create a database file with initial data
+	now := time.Now()
+	initialData := yasData{
+		Branches: &branchMap{
+			data: map[string]BranchMetadata{
+				"branch1": {
+					Parent:  "main",
+					Created: now,
+				},
+				"branch2": {
+					Parent:  "branch1",
+					Created: now,
+				},
+			},
+		},
+	}
+
+	// Write the initial data to disk
+	b, err := json.MarshalIndent(initialData, "", "  ")
+	assert.NilError(t, err)
+	err = os.WriteFile(dbFilePath, b, 0o644)
+	assert.NilError(t, err)
+
+	// Load the database
+	db, err := loadData(dbFilePath)
+	assert.NilError(t, err)
+
+	// Verify initial state
+	assert.Assert(t, db.Branches.Exists("branch1"), "branch1 should exist")
+	assert.Assert(t, db.Branches.Exists("branch2"), "branch2 should exist")
+
+	// Modify the file on disk to remove branch2
+	updatedData := yasData{
+		Branches: &branchMap{
+			data: map[string]BranchMetadata{
+				"branch1": {
+					Parent:  "main",
+					Created: now,
+				},
+			},
+		},
+	}
+
+	b, err = json.MarshalIndent(updatedData, "", "  ")
+	assert.NilError(t, err)
+	err = os.WriteFile(dbFilePath, b, 0o644)
+	assert.NilError(t, err)
+
+	// Reload should pick up the change
+	err = db.Reload()
+	assert.NilError(t, err)
+
+	// Verify branch2 is gone
+	assert.Assert(t, db.Branches.Exists("branch1"), "branch1 should still exist")
+	assert.Assert(t, !db.Branches.Exists("branch2"), "branch2 should be gone after reload")
+}
