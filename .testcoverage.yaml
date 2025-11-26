@@ -1,2 +1,2 @@
-profile: cover.out
+profile: coverage/combined.out
 local-prefix: github.com/dansimau/yas

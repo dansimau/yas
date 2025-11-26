@@ -1,7 +1,6 @@
 package gitexec
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -10,6 +9,8 @@ import (
 )
 
 func TestDetectMainBranch(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name           string
 		setup          func(t *testing.T, repoPath string)
@@ -18,7 +19,7 @@ func TestDetectMainBranch(t *testing.T) {
 		{
 			name: "detects local main branch",
 			setup: func(t *testing.T, repoPath string) {
-				testutil.ExecOrFail(t, `
+				testutil.ExecOrFail(t, repoPath, `
 					git init
 					git checkout -b main
 					git config user.email "test@example.com"
@@ -31,7 +32,7 @@ func TestDetectMainBranch(t *testing.T) {
 		{
 			name: "detects local master branch",
 			setup: func(t *testing.T, repoPath string) {
-				testutil.ExecOrFail(t, `
+				testutil.ExecOrFail(t, repoPath, `
 					git init
 					git checkout -b master
 					git config user.email "test@example.com"
@@ -44,7 +45,7 @@ func TestDetectMainBranch(t *testing.T) {
 		{
 			name: "prefers main over master when both exist",
 			setup: func(t *testing.T, repoPath string) {
-				testutil.ExecOrFail(t, `
+				testutil.ExecOrFail(t, repoPath, `
 					git init
 					git checkout -b main
 					git config user.email "test@example.com"
@@ -59,7 +60,7 @@ func TestDetectMainBranch(t *testing.T) {
 			name: "detects remote main branch",
 			setup: func(t *testing.T, repoPath string) {
 				remoteDir := filepath.Join(t.TempDir(), "remote.git")
-				testutil.ExecOrFail(t, `
+				testutil.ExecOrFail(t, repoPath, `
 					git init --bare `+remoteDir+`
 					git init
 					git checkout -b main
@@ -78,7 +79,7 @@ func TestDetectMainBranch(t *testing.T) {
 			name: "detects remote master branch",
 			setup: func(t *testing.T, repoPath string) {
 				remoteDir := filepath.Join(t.TempDir(), "remote.git")
-				testutil.ExecOrFail(t, `
+				testutil.ExecOrFail(t, repoPath, `
 					git init --bare `+remoteDir+`
 					git init
 					git checkout -b master
@@ -96,7 +97,7 @@ func TestDetectMainBranch(t *testing.T) {
 		{
 			name: "returns empty string when no main/master branch exists",
 			setup: func(t *testing.T, repoPath string) {
-				testutil.ExecOrFail(t, `
+				testutil.ExecOrFail(t, repoPath, `
 					git init
 					git checkout -b develop
 					git config user.email "test@example.com"
@@ -110,22 +111,22 @@ func TestDetectMainBranch(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			testutil.WithTempWorkingDir(t, func() {
-				repoPath, err := os.Getwd()
-				assert.NilError(t, err)
+			t.Parallel()
 
-				tt.setup(t, repoPath)
+			repoPath := t.TempDir()
+			tt.setup(t, repoPath)
 
-				repo := WithRepo(repoPath)
-				branch, err := repo.DetectMainBranch()
-				assert.NilError(t, err)
-				assert.Equal(t, tt.expectedBranch, branch)
-			})
+			repo := WithRepo(repoPath)
+			branch, err := repo.DetectMainBranch()
+			assert.NilError(t, err)
+			assert.Equal(t, tt.expectedBranch, branch)
 		})
 	}
 }
 
 func TestGetRemoteForBranch(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name           string
 		setup          func(t *testing.T, repoPath string)
@@ -137,7 +138,7 @@ func TestGetRemoteForBranch(t *testing.T) {
 		{
 			name: "returns remote for branch with configured remote",
 			setup: func(t *testing.T, repoPath string) {
-				testutil.ExecOrFail(t, `
+				testutil.ExecOrFail(t, repoPath, `
 					git init
 					git config user.email "test@example.com"
 					git config user.name "Test User"
@@ -154,7 +155,7 @@ func TestGetRemoteForBranch(t *testing.T) {
 		{
 			name: "returns remote for first branch with configured remote",
 			setup: func(t *testing.T, repoPath string) {
-				testutil.ExecOrFail(t, `
+				testutil.ExecOrFail(t, repoPath, `
 					git init
 					git config user.email "test@example.com"
 					git config user.name "Test User"
@@ -174,7 +175,7 @@ func TestGetRemoteForBranch(t *testing.T) {
 		{
 			name: "returns remote for second branch when first has no remote",
 			setup: func(t *testing.T, repoPath string) {
-				testutil.ExecOrFail(t, `
+				testutil.ExecOrFail(t, repoPath, `
 					git init
 					git config user.email "test@example.com"
 					git config user.name "Test User"
@@ -192,7 +193,7 @@ func TestGetRemoteForBranch(t *testing.T) {
 		{
 			name: "returns error when no branch has remote configured",
 			setup: func(t *testing.T, repoPath string) {
-				testutil.ExecOrFail(t, `
+				testutil.ExecOrFail(t, repoPath, `
 					git init
 					git config user.email "test@example.com"
 					git config user.name "Test User"
@@ -209,7 +210,7 @@ func TestGetRemoteForBranch(t *testing.T) {
 		{
 			name: "returns error when no branch names provided",
 			setup: func(t *testing.T, repoPath string) {
-				testutil.ExecOrFail(t, `
+				testutil.ExecOrFail(t, repoPath, `
 					git init
 					git config user.email "test@example.com"
 					git config user.name "Test User"
@@ -224,7 +225,7 @@ func TestGetRemoteForBranch(t *testing.T) {
 		{
 			name: "handles custom remote names",
 			setup: func(t *testing.T, repoPath string) {
-				testutil.ExecOrFail(t, `
+				testutil.ExecOrFail(t, repoPath, `
 					git init
 					git config user.email "test@example.com"
 					git config user.name "Test User"
@@ -242,23 +243,21 @@ func TestGetRemoteForBranch(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			testutil.WithTempWorkingDir(t, func() {
-				repoPath, err := os.Getwd()
+			t.Parallel()
+
+			repoPath := t.TempDir()
+			tt.setup(t, repoPath)
+
+			repo := WithRepo(repoPath)
+			remote, err := repo.GetRemoteForBranch(tt.branchNames...)
+
+			if tt.expectError {
+				assert.Error(t, err, tt.errorContains)
+				assert.Equal(t, "", remote)
+			} else {
 				assert.NilError(t, err)
-
-				tt.setup(t, repoPath)
-
-				repo := WithRepo(repoPath)
-				remote, err := repo.GetRemoteForBranch(tt.branchNames...)
-
-				if tt.expectError {
-					assert.Error(t, err, tt.errorContains)
-					assert.Equal(t, "", remote)
-				} else {
-					assert.NilError(t, err)
-					assert.Equal(t, tt.expectedRemote, remote)
-				}
-			})
+				assert.Equal(t, tt.expectedRemote, remote)
+			}
 		})
 	}
 }

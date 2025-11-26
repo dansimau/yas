@@ -41,3 +41,7 @@ linters:
     - usestdlibvars
     - whitespace
     - wsl_v5
+  exclusions:
+    rules:
+      - linters: [errcheck]
+        source: "^\\s*defer\\s+"
