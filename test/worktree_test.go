@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/dansimau/yas/pkg/gocmdtester"
+	"github.com/dansimau/yas/pkg/stringutil"
 	"github.com/dansimau/yas/pkg/testutil"
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/assert/cmp"
@@ -507,4 +508,80 @@ func TestWorktree_CreateWorktreeForExistingBranch(t *testing.T) {
 	contentStr := string(content)
 	assert.Assert(t, cmp.Contains(contentStr, "cd "))
 	assert.Assert(t, cmp.Contains(contentStr, ".yas/worktrees/feature-a"))
+}
+
+func TestWorktree_CreateWorktreeForRemoteOnlyBranch(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	fakeOrigin := t.TempDir()
+
+	testutil.ExecOrFail(t, tempDir, stringutil.MustInterpolate(`
+		# Set up "remote" bare repository
+		git init --bare {{.fakeOrigin}}
+
+		# Initialize local repo with main branch
+		git init --initial-branch=main
+		git remote add origin {{.fakeOrigin}}
+
+		touch main
+		git add main
+		git commit -m "main-0"
+
+		# Create topic-a branch and push to origin
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+		git push origin topic-a
+
+		# Delete local branch to simulate remote-only branch
+		git checkout main
+		git branch -D topic-a
+
+		# Fetch remote refs so local repo knows about origin/topic-a
+		git fetch origin
+	`, map[string]string{
+		"fakeOrigin": fakeOrigin,
+	}))
+
+	// Verify topic-a doesn't exist locally
+	localBranchExists := strings.TrimSpace(mustExecOutput(tempDir, "sh", "-c", "git branch --list topic-a"))
+	assert.Equal(t, localBranchExists, "")
+
+	// Set up shell exec env
+	tempFile := filepath.Join(t.TempDir(), "shell-exec")
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+		gocmdtester.WithEnv("YAS_SHELL_EXEC", tempFile),
+	)
+
+	// Initialize yas
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+
+	// Create worktree for remote-only branch with --worktree flag
+	assert.NilError(t, cli.Run("branch", "topic-a", "--worktree").Err())
+
+	// Verify worktree was created at correct path
+	worktreePath := filepath.Join(tempDir, ".yas", "worktrees", "topic-a")
+	info, err := os.Stat(worktreePath)
+	assert.NilError(t, err)
+	assert.Assert(t, info.IsDir())
+
+	// Verify local branch now exists
+	localBranch := strings.TrimSpace(mustExecOutput(tempDir, "git", "branch", "--list", "topic-a"))
+	assert.Assert(t, cmp.Contains(localBranch, "topic-a"))
+
+	// Verify local branch tracks remote
+	remote := strings.TrimSpace(mustExecOutput(tempDir, "git", "config", "branch.topic-a.remote"))
+	assert.Equal(t, remote, "origin")
+
+	// Verify the shell exec file contains cd command to the worktree
+	content, err := os.ReadFile(tempFile)
+	assert.NilError(t, err)
+
+	contentStr := string(content)
+	assert.Assert(t, cmp.Contains(contentStr, "cd "))
+	assert.Assert(t, cmp.Contains(contentStr, ".yas/worktrees/topic-a"))
 }
