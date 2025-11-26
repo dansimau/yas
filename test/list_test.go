@@ -3,6 +3,7 @@ package test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dansimau/yas/pkg/gocmdtester"
 	"github.com/dansimau/yas/pkg/stringutil"
@@ -814,4 +815,286 @@ func TestList_SortsByCreatedTimestamp(t *testing.T) {
 		"topic-c (created first) should appear before topic-a, but got positions: c=%d, a=%d", topicCPos, topicAPos)
 	assert.Assert(t, topicAPos < topicBPos,
 		"topic-a (created second) should appear before topic-b, but got positions: a=%d, b=%d", topicAPos, topicBPos)
+}
+
+func TestList_HidesManuallyDeletedLeafBranch(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+
+		# main
+		touch main
+		git add main
+		git commit -m "main-0"
+
+		# Set up remote tracking for main
+		git config branch.main.remote origin
+		git config branch.main.merge refs/heads/main
+
+		# topic-a
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+
+		# topic-b
+		git checkout -b topic-b
+		touch b
+		git add b
+		git commit -m "topic-b-0"
+
+		git checkout main
+	`)
+
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-b", "--parent=topic-a").Err())
+
+	// Mark topic-b as deleted in yas metadata (simulating yas delete)
+	state := readStateFileFromDir(t, tempDir)
+	branch := state.Branches["topic-b"]
+	now := time.Now()
+	branch.Deleted = &now
+	state.Branches["topic-b"] = branch
+	writeStateFileToDir(t, tempDir, state)
+
+	// Also delete from git to match the real scenario
+	testutil.ExecOrFail(t, tempDir, "git branch -D topic-b")
+
+	// Capture the list output
+	result := cli.Run("list")
+	assert.NilError(t, result.Err())
+	output := result.Stdout()
+
+	// topic-b should NOT appear (deleted leaf branch is hidden)
+	assert.Assert(t, !strings.Contains(output, "topic-b"),
+		"topic-b (deleted leaf) should NOT appear in list, but got: %s", output)
+
+	// topic-a should still appear
+	assert.Assert(t, strings.Contains(output, "topic-a"),
+		"topic-a should still appear in list, but got: %s", output)
+}
+
+func TestList_ShowsManuallyDeletedBranchWithLivingChild(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+
+		# main
+		touch main
+		git add main
+		git commit -m "main-0"
+
+		# Set up remote tracking for main
+		git config branch.main.remote origin
+		git config branch.main.merge refs/heads/main
+
+		# topic-a
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+
+		# topic-b
+		git checkout -b topic-b
+		touch b
+		git add b
+		git commit -m "topic-b-0"
+
+		git checkout main
+	`)
+
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-b", "--parent=topic-a").Err())
+
+	// Delete topic-a from git (but keep in yas metadata and keep topic-b)
+	testutil.ExecOrFail(t, tempDir, "git branch -D topic-a")
+
+	// Capture the list output
+	result := cli.Run("list")
+	assert.NilError(t, result.Err())
+	output := result.Stdout()
+
+	// topic-a SHOULD appear because it has a living child (topic-b)
+	assert.Assert(t, strings.Contains(output, "topic-a"),
+		"topic-a (deleted with living child) SHOULD appear in list, but got: %s", output)
+
+	// topic-a should show "(deleted)" status
+	lines := strings.Split(output, "\n")
+	foundTopicADeleted := false
+	for _, line := range lines {
+		if strings.Contains(line, "topic-a") && strings.Contains(line, "deleted") {
+			foundTopicADeleted = true
+			break
+		}
+	}
+	assert.Assert(t, foundTopicADeleted,
+		"topic-a should show '(deleted)' status, but got: %s", output)
+
+	// topic-b should still appear as child of topic-a
+	assert.Assert(t, strings.Contains(output, "topic-b"),
+		"topic-b should still appear in list, but got: %s", output)
+}
+
+func TestList_HidesManuallyDeletedSubtreeRecursively(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+
+		# main
+		touch main
+		git add main
+		git commit -m "main-0"
+
+		# Set up remote tracking for main
+		git config branch.main.remote origin
+		git config branch.main.merge refs/heads/main
+
+		# topic-a
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+
+		# topic-b
+		git checkout -b topic-b
+		touch b
+		git add b
+		git commit -m "topic-b-0"
+
+		# topic-c
+		git checkout -b topic-c
+		touch c
+		git add c
+		git commit -m "topic-c-0"
+
+		git checkout main
+	`)
+
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-b", "--parent=topic-a").Err())
+	assert.NilError(t, cli.Run("add", "topic-c", "--parent=topic-b").Err())
+
+	// Mark all branches as deleted in yas metadata (simulating yas delete)
+	state := readStateFileFromDir(t, tempDir)
+	now := time.Now()
+	branchA := state.Branches["topic-a"]
+	branchA.Deleted = &now
+	state.Branches["topic-a"] = branchA
+	branchB := state.Branches["topic-b"]
+	branchB.Deleted = &now
+	state.Branches["topic-b"] = branchB
+	branchC := state.Branches["topic-c"]
+	branchC.Deleted = &now
+	state.Branches["topic-c"] = branchC
+	writeStateFileToDir(t, tempDir, state)
+
+	// Also delete from git to match the real scenario
+	testutil.ExecOrFail(t, tempDir, `
+		git branch -D topic-a
+		git branch -D topic-b
+		git branch -D topic-c
+	`)
+
+	// Capture the list output
+	result := cli.Run("list")
+	assert.NilError(t, result.Err())
+	output := result.Stdout()
+
+	// None of the deleted branches should appear (entire subtree is hidden)
+	assert.Assert(t, !strings.Contains(output, "topic-a"),
+		"topic-a (deleted subtree) should NOT appear in list, but got: %s", output)
+	assert.Assert(t, !strings.Contains(output, "topic-b"),
+		"topic-b (deleted subtree) should NOT appear in list, but got: %s", output)
+	assert.Assert(t, !strings.Contains(output, "topic-c"),
+		"topic-c (deleted subtree) should NOT appear in list, but got: %s", output)
+
+	// Only main should appear
+	assert.Assert(t, strings.Contains(output, "main"),
+		"main should still appear in list, but got: %s", output)
+}
+
+func TestList_HidesDeletedLeafBranch(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+
+		# main
+		touch main
+		git add main
+		git commit -m "main-0"
+
+		# Set up remote tracking for main
+		git config branch.main.remote origin
+		git config branch.main.merge refs/heads/main
+
+		# topic-a
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+
+		# topic-b
+		git checkout -b topic-b
+		touch b
+		git add b
+		git commit -m "topic-b-0"
+
+		git checkout main
+	`)
+
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-b", "--parent=topic-a").Err())
+
+	// Mark topic-b as deleted in yas metadata (but keep in git)
+	state := readStateFileFromDir(t, tempDir)
+	branch := state.Branches["topic-b"]
+	now := time.Now()
+	branch.Deleted = &now
+	state.Branches["topic-b"] = branch
+	writeStateFileToDir(t, tempDir, state)
+
+	// Capture the list output
+	result := cli.Run("list")
+	assert.NilError(t, result.Err())
+	output := result.Stdout()
+
+	// topic-b should NOT appear (marked as deleted in metadata)
+	assert.Assert(t, !strings.Contains(output, "topic-b"),
+		"topic-b (deleted in metadata) should NOT appear in list, but got: %s", output)
+
+	// topic-a should still appear
+	assert.Assert(t, strings.Contains(output, "topic-a"),
+		"topic-a should still appear in list, but got: %s", output)
 }
