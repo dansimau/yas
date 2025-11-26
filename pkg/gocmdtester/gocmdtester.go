@@ -82,10 +82,11 @@ func FromPath(t *testing.T, mainGoPath string, opts ...Option) *CmdTester {
 
 	// Check cache first
 	if cached, ok := cache.Load(absMainPath); ok {
-		// Apply options to a copy of the cached tester's config
 		cachedTester := cached.(*CmdTester)
-		cfg := cachedTester.runConfig.clone()
 
+		// Start with a fresh config - don't inherit options from the cached tester
+		// as those were specific to the original caller
+		cfg := &runConfig{}
 		for _, opt := range opts {
 			opt(cfg)
 		}
@@ -117,8 +118,9 @@ func FromPath(t *testing.T, mainGoPath string, opts ...Option) *CmdTester {
 		_ = tester.cleanup()
 
 		cachedTester := actual.(*CmdTester)
-		cfg := cachedTester.runConfig.clone()
 
+		// Start with a fresh config - don't inherit options from the cached tester
+		cfg := &runConfig{}
 		for _, opt := range opts {
 			opt(cfg)
 		}
