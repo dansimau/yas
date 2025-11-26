@@ -7,6 +7,7 @@ lint:
 
 .PHONY: test
 test:
+	mkdir -p coverage
 	rm -f ./coverage/main.cov ./coverage/integration-tests.cov ./coverage/combined.out
 	GOCMDTESTER_COVERPKG=$(COVERPKG) time go test -count 1 -json ./test/... -coverprofile=./coverage/main.cov -covermode=atomic -coverpkg=$(COVERPKG) | tee test-results.json | python3 bin/colourise-go-test-output.py >/dev/null
 	go run github.com/wadey/gocovmerge@latest coverage/main.cov coverage/integration-tests.cov > coverage/combined.out
