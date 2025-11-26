@@ -1,8 +1,6 @@
 package yascli
 
 import (
-	"fmt"
-
 	"github.com/dansimau/yas/pkg/yas"
 )
 
@@ -53,6 +51,7 @@ func (c *branchCmd) Execute(args []string) error {
 				return NewError(err.Error())
 			}
 		}
+
 		actualBranchName = c.Arguments.BranchName
 	} else {
 		// Otherwise, create it
@@ -60,12 +59,13 @@ func (c *branchCmd) Execute(args []string) error {
 		if err != nil {
 			return NewError(err.Error())
 		}
+
 		actualBranchName = fullBranchName
 	}
 
 	// If --worktree flag is set, create/switch to worktree
 	if c.Worktree {
-		worktreePath := fmt.Sprintf(".yas/worktrees/%s", c.Arguments.BranchName)
+		worktreePath := ".yas/worktrees/" + c.Arguments.BranchName
 		if err := yasInstance.CreateWorktreeForBranch(actualBranchName, worktreePath); err != nil {
 			return NewError(err.Error())
 		}

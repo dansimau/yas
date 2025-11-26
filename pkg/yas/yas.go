@@ -210,6 +210,7 @@ func (yas *YAS) CreateWorktreeForBranch(branchName string, worktreePath string) 
 	if err != nil {
 		existingResolved = existingWorktreePath
 	}
+
 	repoResolved, err := filepath.EvalSymlinks(yas.cfg.RepoDirectory)
 	if err != nil {
 		repoResolved = yas.cfg.RepoDirectory
@@ -230,6 +231,7 @@ func (yas *YAS) CreateWorktreeForBranch(branchName string, worktreePath string) 
 	if currentBranch == branchName {
 		// Get the parent branch to switch to
 		branchMetadata := yas.data.Branches.Get(branchName)
+
 		parentBranch := yas.cfg.TrunkBranch // default to trunk
 		if branchMetadata.Parent != "" {
 			parentBranch = branchMetadata.Parent
