@@ -48,10 +48,16 @@ func ensureShimCompiled() (string, error) {
 		return "", fmt.Errorf("failed to create temp directory: %w", err)
 	}
 
+	// Get coverpkg from the environment variable GOCOVERPKG
+	coverPkg := os.Getenv("GOCMDTESTER_COVERPKG")
+	if coverPkg == "" {
+		coverPkg = "./..."
+	}
+
 	binaryPath := filepath.Join(tmpDir, "mockshim")
 
 	// Compile the mockshim binary
-	if err := xexec.Command("go", "build", "-o", binaryPath, ".").
+	if err := xexec.Command("go", "build", "-cover", "-coverpkg="+coverPkg, "-covermode=atomic", "-o", binaryPath, ".").
 		WithWorkingDir(mockshimDir).
 		Verbose(true).
 		Run(); err != nil {
