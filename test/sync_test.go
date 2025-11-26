@@ -81,7 +81,7 @@ func TestSync_RestacksChildrenOntoParentWhenMergedPRDeleted(t *testing.T) {
 	assert.Equal(t, topicC.Parent, "topic-b")
 
 	// Delete merged branch topic-b
-	err = y.DeleteMergedBranch("topic-b")
+	err = y.DeleteBranch("topic-b")
 	assert.NilError(t, err)
 
 	// Reload the instance to get fresh data
@@ -171,7 +171,7 @@ func TestSync_HandlesMultipleChildrenWhenParentMerged(t *testing.T) {
 	y, err := yas.NewFromRepository(tempDir)
 	assert.NilError(t, err)
 
-	err = y.DeleteMergedBranch("topic-a")
+	err = y.DeleteBranch("topic-a")
 	assert.NilError(t, err)
 
 	// Reload the instance to get fresh data
@@ -254,7 +254,7 @@ func TestSync_ErrorsWhenMergedBranchHasNoParent(t *testing.T) {
 	assert.NilError(t, cli.Run("refresh", "topic-a").Err())
 
 	// Try to delete merged branch without parent - should error
-	err = y.DeleteMergedBranch("topic-a")
+	err = y.DeleteBranch("topic-a")
 	assert.ErrorContains(t, err, "has no parent branch set")
 	assert.ErrorContains(t, err, "cannot safely delete merged branch")
 }
