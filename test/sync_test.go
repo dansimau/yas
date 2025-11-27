@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/dansimau/yas/pkg/gocmdtester"
+	"github.com/dansimau/yas/pkg/stringutil"
 	"github.com/dansimau/yas/pkg/testutil"
 	"github.com/dansimau/yas/pkg/yas"
 	"gotest.tools/v3/assert"
@@ -13,6 +14,7 @@ func TestSync_RestacksChildrenOntoParentWhenMergedPRDeleted(t *testing.T) {
 	t.Parallel()
 
 	tempDir := t.TempDir()
+	fakeOrigin := t.TempDir()
 
 	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
 		gocmdtester.WithWorkingDir(tempDir),
@@ -27,9 +29,24 @@ func TestSync_RestacksChildrenOntoParentWhenMergedPRDeleted(t *testing.T) {
 		BaseRefName: "topic-a",
 	})
 
-	testutil.ExecOrFail(t, tempDir, `
+	mockGitHubPRForBranch(cli, "main", yas.PullRequestMetadata{})
+
+	// Git pull should be successful
+	cli.Mock("git", "pull", gocmdtester.AnyFurtherArgs).WithStdout("Already up to date.\n")
+
+	// Pass through all other git commands
+	cli.Mock("git", gocmdtester.AnyFurtherArgs).WithPassthroughExec()
+
+	testutil.ExecOrFail(t, tempDir, stringutil.MustInterpolate(`
+		# Set up "remote" bare repository
+		git init --bare {{.fakeOrigin}}
+
+		# Initialize local repo with main branch
 		git init --initial-branch=main
-		git remote add origin https://fake.origin/test/test.git
+
+		git remote add origin {{.fakeOrigin}}
+		git branch --set-upstream-to=origin/main main
+		git push -u origin main
 
 		# main
 		touch main
@@ -56,7 +73,9 @@ func TestSync_RestacksChildrenOntoParentWhenMergedPRDeleted(t *testing.T) {
 
 		# back to main
 		git checkout main
-	`)
+	`, map[string]string{
+		"fakeOrigin": fakeOrigin,
+	}))
 
 	// Initialize yas config
 	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
@@ -84,8 +103,8 @@ func TestSync_RestacksChildrenOntoParentWhenMergedPRDeleted(t *testing.T) {
 	err = yasInstance.DeleteBranch("topic-b")
 	assert.NilError(t, err)
 
-	// Restack to trigger reparenting of children
-	assert.NilError(t, cli.Run("restack", "topic-c").Err())
+	// Sync to trigger reparenting of children
+	assert.NilError(t, cli.Run("sync", "--restack").Err())
 
 	// Reload state file
 	assert.NilError(t, yasInstance.Reload())
