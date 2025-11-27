@@ -377,8 +377,17 @@ func (yas *YAS) Continue() error {
 		return fmt.Errorf("failed to load restack state: %w", err)
 	}
 
+	// Get the branch context for the current branch being rebased
+	// This ensures we check/continue the rebase in the correct worktree
+	branch, err := yas.git.WithBranchContext(state.CurrentBranch)
+	if err != nil {
+		return fmt.Errorf("failed to get branch context for %s: %w", state.CurrentBranch, err)
+	}
+
+	defer branch.RestoreOriginal()
+
 	// Check if a rebase is currently in progress
-	rebaseInProgress, err := yas.git.IsRebaseInProgress()
+	rebaseInProgress, err := branch.IsRebaseInProgress()
 	if err != nil {
 		return fmt.Errorf("failed to check if rebase is in progress: %w", err)
 	}
@@ -388,12 +397,12 @@ func (yas *YAS) Continue() error {
 		fmt.Printf("Continuing rebase for %s...\n", state.CurrentBranch)
 
 		for {
-			if err := yas.git.RebaseContinue(); err != nil {
+			if err := branch.RebaseContinue(); err != nil {
 				return fmt.Errorf("rebase continue failed: %w\n\nFix conflicts and run 'yas continue' again", err)
 			}
 
 			// Check if rebase is still in progress
-			stillInProgress, err := yas.git.IsRebaseInProgress()
+			stillInProgress, err := branch.IsRebaseInProgress()
 			if err != nil {
 				return fmt.Errorf("failed to check if rebase is in progress: %w", err)
 			}
@@ -409,12 +418,12 @@ func (yas *YAS) Continue() error {
 	} else {
 		// No rebase in progress - check if it was aborted or already completed
 		// Verify the rebase actually happened by checking if the branch's merge-base with parent equals parent's current commit
-		mergeBase, err := yas.git.GetMergeBase(state.CurrentBranch, state.CurrentParent)
+		mergeBase, err := branch.GetMergeBase(state.CurrentBranch, state.CurrentParent)
 		if err != nil {
 			return fmt.Errorf("failed to get merge-base: %w", err)
 		}
 
-		parentCommit, err := yas.git.GetCommitHash(state.CurrentParent)
+		parentCommit, err := branch.GetCommitHash(state.CurrentParent)
 		if err != nil {
 			return fmt.Errorf("failed to get parent commit: %w", err)
 		}
@@ -430,7 +439,7 @@ func (yas *YAS) Continue() error {
 	// Update the branch point for the just-completed rebase
 	childMetadata := yas.data.Branches.Get(state.CurrentBranch)
 
-	parentCommit, err := yas.git.GetCommitHash(state.CurrentParent)
+	parentCommit, err := branch.GetCommitHash(state.CurrentParent)
 	if err != nil {
 		return fmt.Errorf("failed to get parent commit after rebase: %w", err)
 	}
@@ -530,8 +539,17 @@ func (yas *YAS) Abort() error {
 
 	fmt.Printf("Aborting restack operation...\n")
 
+	// Get the branch context for the current branch being rebased
+	// This ensures we check/abort the rebase in the correct worktree
+	branch, err := yas.git.WithBranchContext(state.CurrentBranch)
+	if err != nil {
+		return fmt.Errorf("failed to get branch context for %s: %w", state.CurrentBranch, err)
+	}
+
+	defer branch.RestoreOriginal()
+
 	// Check if a rebase is currently in progress
-	rebaseInProgress, err := yas.git.IsRebaseInProgress()
+	rebaseInProgress, err := branch.IsRebaseInProgress()
 	if err != nil {
 		return fmt.Errorf("failed to check if rebase is in progress: %w", err)
 	}
@@ -540,7 +558,7 @@ func (yas *YAS) Abort() error {
 	if rebaseInProgress {
 		fmt.Printf("Aborting in-progress rebase for %s...\n", state.CurrentBranch)
 
-		if err := yas.git.RebaseAbort(); err != nil {
+		if err := branch.RebaseAbort(); err != nil {
 			return fmt.Errorf("failed to abort rebase: %w", err)
 		}
 	}

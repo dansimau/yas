@@ -1,6 +1,7 @@
 package gitexec
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -100,8 +101,9 @@ func (r *Repo) LinkedWorktrees() ([]WorktreeEntry, error) {
 	return linkedWorktrees, nil
 }
 
-// LinkedWorktreePathForBranch finds the worktree path for a given branch
+// LinkedWorktreePathForBranch finds the worktree path for a given branch.
 // Returns empty string if no worktree exists for the branch.
+// Also handles detached worktrees that have a rebase in progress for the target branch.
 func (r *Repo) LinkedWorktreePathForBranch(branch string) (string, error) {
 	worktrees, err := r.LinkedWorktrees()
 	if err != nil {
@@ -112,9 +114,41 @@ func (r *Repo) LinkedWorktreePathForBranch(branch string) (string, error) {
 		if wt.Branch == branch {
 			return wt.Path, nil
 		}
+
+		// Check if this is a detached worktree with a rebase in progress for our target branch
+		if wt.Branch == "" {
+			rebaseBranch, err := r.getRebaseBranchInWorktree(wt.Path)
+			if err == nil && rebaseBranch == branch {
+				return wt.Path, nil
+			}
+		}
 	}
 
 	return "", nil
+}
+
+// getRebaseBranchInWorktree checks if a rebase is in progress in the given worktree
+// and returns the branch name being rebased.
+func (r *Repo) getRebaseBranchInWorktree(worktreePath string) (string, error) {
+	wtRepo := &Repo{path: worktreePath}
+
+	gitDir, err := wtRepo.output("git", "rev-parse", "--git-dir")
+	if err != nil {
+		return "", err
+	}
+
+	// Check rebase-merge first (interactive rebase), then rebase-apply
+	for _, rebaseDir := range []string{"rebase-merge", "rebase-apply"} {
+		headNamePath := gitDir + "/" + rebaseDir + "/head-name"
+
+		headName, err := wtRepo.output("cat", headNamePath)
+		if err == nil {
+			// head-name contains refs/heads/branch-name
+			return strings.TrimPrefix(headName, "refs/heads/"), nil
+		}
+	}
+
+	return "", errors.New("no rebase in progress")
 }
 
 // IsLinkedWorktree returns true if the current directory is a worktree (not the primary repo).

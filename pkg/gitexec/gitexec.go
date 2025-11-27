@@ -11,6 +11,8 @@ import (
 	"github.com/hashicorp/go-version"
 )
 
+var ErrDetachedHead = errors.New("currently in detached state")
+
 type CloneOptions struct {
 	URL   string
 	Depth int
@@ -157,7 +159,7 @@ func (r *Repo) GetCurrentBranchName() (string, error) {
 	}
 
 	if s == "" {
-		return "", errors.New("currently in detached state")
+		return "", ErrDetachedHead
 	}
 
 	return s, nil
@@ -315,13 +317,19 @@ func (r *Repo) Commit() error {
 
 // IsRebaseInProgress checks if a rebase operation is currently in progress.
 func (r *Repo) IsRebaseInProgress() (bool, error) {
+	// Get the actual git directory (handles both regular repos and linked worktrees)
+	gitDir, err := r.output("git", "rev-parse", "--git-dir")
+	if err != nil {
+		return false, err
+	}
+
 	// Check for rebase-merge directory (interactive rebase)
-	if err := r.run("test", "-d", r.path+"/.git/rebase-merge"); err == nil {
+	if err := r.run("test", "-d", gitDir+"/rebase-merge"); err == nil {
 		return true, nil
 	}
 
 	// Check for rebase-apply directory (non-interactive rebase)
-	if err := r.run("test", "-d", r.path+"/.git/rebase-apply"); err == nil {
+	if err := r.run("test", "-d", gitDir+"/rebase-apply"); err == nil {
 		return true, nil
 	}
 
