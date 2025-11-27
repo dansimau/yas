@@ -1159,6 +1159,7 @@ func TestList_FromInsideWorktree(t *testing.T) {
 			assert.Assert(t, strings.Contains(line, "*"),
 				"feature-a should show '*' (current branch) when run from worktree, got: %s", line)
 		}
+
 		if strings.Contains(line, "feature-b") {
 			assert.Assert(t, !strings.Contains(line, "*"),
 				"feature-b should NOT show '*' when run from worktree, got: %s", line)

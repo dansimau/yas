@@ -249,7 +249,10 @@ func TestWorktree_SwitchFromWorktreeToMainBranch(t *testing.T) {
 	assert.NilError(t, err)
 
 	contentStr := string(content)
-	assert.Assert(t, cmp.Contains(contentStr, "yas br main"))
+	assert.Assert(t, cmp.Contains(contentStr, "cd "))
+	assert.Assert(t, cmp.Contains(contentStr, tempDir))
+	assert.Assert(t, cmp.Contains(contentStr, "Switched to branch"))
+	assert.Assert(t, cmp.Contains(contentStr, "main"))
 }
 
 func TestWorktree_SwitchFromWorktreeToAnotherNonWorktreeBranch(t *testing.T) {
