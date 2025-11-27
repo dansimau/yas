@@ -6,22 +6,47 @@ import (
 	"path"
 
 	"github.com/dansimau/yas/pkg/fsutil"
+	"github.com/dansimau/yas/pkg/gitexec"
 	"gopkg.in/yaml.v2"
 )
 
-var configFilenames = []string{".yas/yas.yaml", ".git/yas.yaml"}
+var (
+	configFiles = []string{
+		".yas/yas.yaml",
+		".git/yas.yaml", // Deprecated
+	}
+
+	stateFiles = []string{
+		".yas/yas.state.json",
+		".git/.yasstate", // Deprecated
+	}
+
+	defaultWorktreesPath = ".yas/worktrees"
+)
 
 type Config struct {
 	RepoDirectory    string `yaml:"-"`
 	TrunkBranch      string `yaml:"trunkBranch"`
 	AutoPrefixBranch bool   `yaml:"autoPrefixBranch"`
+	WorktreesPath    string `yaml:"worktreesPath"`
 }
 
-// resolveConfigPath returns the first config path that exists, or the first
-// path if none exist (for writing to the new location).
-func resolveConfigPath(repoDir string) (string, error) {
-	for _, filename := range configFilenames {
-		fullPath := path.Join(repoDir, filename)
+// getYASConfigBase returns the base path for the YAS config files. This is the
+// primary worktree path.
+func getYASConfigBase(repoDir string) (string, error) {
+	return gitexec.WithRepo(repoDir).PrimaryWorktreePath()
+}
+
+// resolveFirstFilePath returns the first file path that exists, or the first
+// path if none exist.
+func resolveFirstFilePath(repoDir string, candidates []string) (string, error) {
+	configBasePath, err := getYASConfigBase(repoDir)
+	if err != nil {
+		return "", err
+	}
+
+	for _, filename := range candidates {
+		fullPath := path.Join(configBasePath, filename)
 
 		exists, err := fsutil.FileExists(fullPath)
 		if err != nil {
@@ -32,8 +57,21 @@ func resolveConfigPath(repoDir string) (string, error) {
 			return fullPath, nil
 		}
 	}
+
 	// No file exists - use first (new) path for writing
-	return path.Join(repoDir, configFilenames[0]), nil
+	return path.Join(configBasePath, candidates[0]), nil
+}
+
+// resolveConfigPath returns the first config path that exists, or the first
+// path if none exist (for writing to the new location).
+func resolveConfigPath(repoDir string) (string, error) {
+	return resolveFirstFilePath(repoDir, configFiles)
+}
+
+// resolveStatePath returns the first state path that exists, or the first
+// path if none exist (for writing to the new location).
+func resolveStatePath(repoDir string) (string, error) {
+	return resolveFirstFilePath(repoDir, stateFiles)
 }
 
 func IsConfigured(repoDirectory string) (bool, error) {
@@ -68,6 +106,7 @@ func ReadConfig(repoDirectory string) (*Config, error) {
 	// Default AutoPrefixBranch to true for backward compatibility
 	config := Config{
 		AutoPrefixBranch: true,
+		WorktreesPath:    defaultWorktreesPath,
 	}
 	if err := yaml.Unmarshal(yamlBytes, &config); err != nil {
 		return nil, err
