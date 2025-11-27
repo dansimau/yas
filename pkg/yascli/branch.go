@@ -1,6 +1,8 @@
 package yascli
 
 import (
+	"fmt"
+
 	"github.com/dansimau/yas/pkg/yas"
 )
 
@@ -36,37 +38,47 @@ func (c *branchCmd) Execute(args []string) error {
 		return nil
 	}
 
-	// Check if branch name provided exists locally or remotely
-	branchExists, err := yasInstance.BranchExists(c.Arguments.BranchName)
+	fullBranchName := c.Arguments.BranchName
+
+	branchExistsLocally, err := yasInstance.BranchExistsLocally(c.Arguments.BranchName)
 	if err != nil {
 		return NewError(err.Error())
 	}
 
-	var actualBranchName string
+	branchExistsRemotely, err := yasInstance.BranchExistsRemotely(c.Arguments.BranchName)
+	if err != nil {
+		return NewError(err.Error())
+	}
 
-	// If the branch exists, switch to it (unless using --worktree, then skip for now)
-	if branchExists {
-		if !c.Worktree {
-			if err := yasInstance.SwitchBranch(c.Arguments.BranchName); err != nil {
-				return NewError(err.Error())
-			}
-		}
+	branchExists := branchExistsLocally || branchExistsRemotely
 
-		actualBranchName = c.Arguments.BranchName
-	} else {
-		// Otherwise, create it
-		fullBranchName, err := yasInstance.CreateBranch(c.Arguments.BranchName, c.Parent)
+	// Create branch if it doesn't exist
+	if !branchExists {
+		fullBranchName, err = yasInstance.CreateBranch(c.Arguments.BranchName, c.Parent)
 		if err != nil {
 			return NewError(err.Error())
 		}
-
-		actualBranchName = fullBranchName
 	}
 
-	// If --worktree flag is set, create/switch to worktree
+	// Ensure worktree exists for branch
 	if c.Worktree {
-		worktreePath := ".yas/worktrees/" + c.Arguments.BranchName
-		if err := yasInstance.CreateWorktreeForBranch(actualBranchName, worktreePath); err != nil {
+		if err := yasInstance.EnsureLinkedWorktreeForBranch(fullBranchName); err != nil {
+			return NewError(err.Error())
+		}
+	}
+
+	// Switch to the branch
+	if err := yasInstance.SwitchBranch(fullBranchName); err != nil {
+		return NewError(err.Error())
+	}
+
+	if branchExistsRemotely && !branchExistsLocally {
+		// Refresh remote status if the branch existed remotely but not locally
+		if err := yasInstance.RefreshRemoteStatus(fullBranchName); err != nil {
+			return NewError(fmt.Errorf("failed to refresh remote status for branch: %w", err).Error())
+		}
+
+		if err := yasInstance.SetParent(fullBranchName, "", ""); err != nil {
 			return NewError(err.Error())
 		}
 	}

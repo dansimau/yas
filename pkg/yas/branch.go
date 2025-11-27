@@ -23,7 +23,7 @@ func (yas *YAS) markBranchDeleted(name string) error {
 }
 
 func (yas *YAS) BranchExists(branchName string) (bool, error) {
-	exists, err := yas.branchExistsLocally(branchName)
+	exists, err := yas.BranchExistsLocally(branchName)
 	if err != nil {
 		return false, err
 	}
@@ -32,14 +32,14 @@ func (yas *YAS) BranchExists(branchName string) (bool, error) {
 		return true, nil
 	}
 
-	return yas.branchExistsRemotely(branchName)
+	return yas.BranchExistsRemotely(branchName)
 }
 
-func (yas *YAS) branchExistsLocally(branchName string) (bool, error) {
+func (yas *YAS) BranchExistsLocally(branchName string) (bool, error) {
 	return yas.git.BranchExists(branchName)
 }
 
-func (yas *YAS) branchExistsRemotely(branchName string) (bool, error) {
+func (yas *YAS) BranchExistsRemotely(branchName string) (bool, error) {
 	return yas.git.RemoteBranchExists(branchName)
 }
 
@@ -94,6 +94,13 @@ func (yas *YAS) SetParent(branchName, parentBranchName, branchPoint string) erro
 		return errors.New("refusing to add trunk branch as a child")
 	}
 
+	branchMetdata := yas.data.Branches.Get(branchName)
+
+	// See if we can get this from the branch metadata
+	if parentBranchName == "" {
+		parentBranchName = branchMetdata.GitHubPullRequest.BaseRefName
+	}
+
 	if parentBranchName == "" {
 		forkPoint, err := yas.git.GetForkPoint(branchName)
 		if err != nil {
@@ -116,16 +123,29 @@ func (yas *YAS) SetParent(branchName, parentBranchName, branchPoint string) erro
 		parentBranchName = branchName
 	}
 
-	branchMetdata := yas.data.Branches.Get(branchName)
 	branchMetdata.Parent = parentBranchName
 
-	// Capture the branch point - this is where the branch actually diverged from its parent
+	// Capture the branch point - this is where the branch actually diverged from its parent.
+	// Try to autodetect: Use merge-base to find the common ancestor, which is the true branch point.
 	if branchPoint == "" {
-		// Autodetect: Use merge-base to find the common ancestor, which is the true branch point
 		var err error
 
-		branchPoint, err = yas.git.GetMergeBase(branchName, parentBranchName)
-		if err != nil {
+		branchesToTry := []string{
+			parentBranchName,
+			// Handle case where we are checking out a remote-only branch and we don't have the parent locally
+			"origin/" + parentBranchName,
+		}
+
+		for _, branch := range branchesToTry {
+			branchPoint, err = yas.git.GetMergeBase(branchName, branch)
+			if err != nil {
+				continue
+			}
+
+			break
+		}
+
+		if branchPoint == "" {
 			return fmt.Errorf("failed to get branch point: %w", err)
 		}
 	}
@@ -207,19 +227,13 @@ func (yas *YAS) SwitchBranchInteractive() error {
 }
 
 func (yas *YAS) SwitchBranch(branchName string) error {
-	// Check if the branch exists locally
-	localBranchExists, err := yas.branchExistsLocally(branchName)
+	// Check if the branch has a worktree
+	worktreePath, err := yas.git.LinkedWorktreePathForBranch(branchName)
 	if err != nil {
-		return fmt.Errorf("failed to check if branch exists locally: %w", err)
+		return fmt.Errorf("failed to check for linked worktree path for branch: %w", err)
 	}
 
-	// Check if the branch has a worktree
-	worktreePath, err := yas.git.WorktreeFindByBranch(branchName)
-	if err != nil {
-		// If we can't check for worktrees, just continue with normal checkout
-		// (this might happen if git version is too old or other issues)
-		fmt.Fprintf(os.Stderr, "WARNING: failed to check for worktrees: %v\n", err)
-	} else if worktreePath != "" {
+	if worktreePath != "" {
 		// Branch has a worktree - switch to it using shell exec
 		shellExec, err := NewShellExecWriter()
 		if err != nil {
@@ -251,15 +265,17 @@ func (yas *YAS) SwitchBranch(branchName string) error {
 	// because the repo directory may have been resolved to the primary repo
 	cwd, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "WARNING: failed to get current directory: %v\n", err)
+		return fmt.Errorf("failed to get current directory: %w", err)
 	}
 
 	cwdRepo := gitexec.WithRepo(cwd)
 
 	inWorktree, err := cwdRepo.IsWorktree()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "WARNING: failed to check if in worktree: %v\n", err)
-	} else if inWorktree {
+		return fmt.Errorf("failed to check if in worktree: %w", err)
+	}
+
+	if inWorktree {
 		// We're in a worktree but target branch doesn't have one
 		// Switch back to primary repo and run checkout there
 		shellExec, err := NewShellExecWriter()
@@ -295,14 +311,6 @@ func (yas *YAS) SwitchBranch(branchName string) error {
 	// We're in primary repo and target has no worktree - proceed with normal checkout
 	if err := yas.git.Checkout(branchName); err != nil {
 		return fmt.Errorf("failed to checkout branch: %w", err)
-	}
-
-	// If the branch did not previously exist locally, refresh it so we can
-	// track it and get the latest PR status.
-	if !localBranchExists {
-		if err := yas.RefreshRemoteStatus(branchName); err != nil {
-			fmt.Fprintf(os.Stderr, "WARNING: failed to refresh remote status for branch: %v\n", err)
-		}
 	}
 
 	return nil
