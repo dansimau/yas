@@ -60,7 +60,7 @@ func (c *deleteCmd) Execute(args []string) error {
 		}
 	}
 
-	if err := yasInstance.DeleteBranchWithWorktree(branchName, c.Force); err != nil {
+	if err := yasInstance.DeleteBranch(branchName, c.Force); err != nil {
 		return NewError(fmt.Sprintf("failed to delete branch: %v", err))
 	}
 

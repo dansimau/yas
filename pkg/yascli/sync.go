@@ -40,7 +40,7 @@ func (c *syncCmd) checkForClosedPRs() error {
 		worktreePath, _ := c.yasInstance.WorktreePathForBranch(branch.Name)
 
 		if !cmd.DryRun {
-			if err := c.yasInstance.DeleteBranch(branch.Name); err != nil {
+			if err := c.yasInstance.DeleteBranch(branch.Name, false); err != nil {
 				return fmt.Errorf("error deleting branch %s: %w", branch.Name, err)
 			}
 

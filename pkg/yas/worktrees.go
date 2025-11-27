@@ -13,6 +13,11 @@ func (yas *YAS) WorktreePathForBranch(branchName string) (string, error) {
 	return yas.git.LinkedWorktreePathForBranch(branchName)
 }
 
+// PrimaryRepoPath returns the path to the primary repository (main worktree).
+func (yas *YAS) PrimaryRepoPath() (string, error) {
+	return yas.git.PrimaryWorktreePath()
+}
+
 // EnsureLinkedWorktreeForBranch creates a worktree for an existing branch.
 // The worktree is created at the specified path relative to the repo root.
 // After creation, it switches to the worktree using SwitchBranch.

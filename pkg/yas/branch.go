@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dansimau/yas/pkg/gitexec"
 	"github.com/go-git/go-git/v5/plumbing"
 )
 
@@ -43,56 +42,76 @@ func (yas *YAS) BranchExistsRemotely(branchName string) (bool, error) {
 	return yas.git.RemoteBranchExists(branchName)
 }
 
-func (yas *YAS) DeleteBranch(name string) error {
-	return yas.DeleteBranchWithWorktree(name, false)
-}
-
-// DeleteBranchWithWorktree deletes a branch and its associated worktree if one exists.
+// DeleteBranch deletes a branch and its associated worktree if one exists.
 // If force is true, it will remove the worktree even if it has uncommitted changes.
-func (yas *YAS) DeleteBranchWithWorktree(name string, force bool) error {
-	branchExists, err := yas.git.BranchExists(name)
+func (yas *YAS) DeleteBranch(branchName string, force bool) error {
+	branchExists, err := yas.git.BranchExists(branchName)
 	if err != nil {
 		return err
 	}
 
 	if !branchExists {
-		if err := yas.markBranchDeleted(name); err != nil {
+		// Mark the branch as deleted if it doesn't exist
+		if err := yas.markBranchDeleted(branchName); err != nil {
 			return err
 		}
 
 		return nil
 	}
 
-	// Check if there's a worktree for this branch
-	worktreePath, err := yas.git.LinkedWorktreePathForBranch(name)
-	if err != nil {
-		return fmt.Errorf("failed to check for worktree: %w", err)
-	}
-
-	// If there's a worktree, remove it first
-	if worktreePath != "" {
-		if err := yas.git.WorktreeRemove(worktreePath, force); err != nil {
-			return fmt.Errorf("failed to remove worktree: %w", err)
-		}
-	}
-
-	currentBranchName, err := yas.git.GetCurrentBranchName()
+	currentBranch, err := yas.git.GetCurrentBranchName()
 	if err != nil {
 		return err
 	}
 
-	// Can't delete the branch while we're on it; switch to trunk
-	if currentBranchName == name {
+	worktreePath, err := yas.git.LinkedWorktreePathForBranch(branchName)
+	if err != nil {
+		return fmt.Errorf("failed to check for worktree: %w", err)
+	}
+
+	// Deleting a branch with a worktree
+	if worktreePath != "" {
+		inWorktree, err := yas.git.IsLinkedWorktree()
+		if err != nil {
+			return err
+		}
+
+		// If we're deleting the current worktree, switch us back to the primary path at the end
+		if inWorktree && currentBranch == branchName {
+			shellExec, err := NewShellExecWriter()
+			if err != nil {
+				return err
+			}
+
+			defer func() {
+				if closeErr := shellExec.Close(); closeErr != nil {
+					fmt.Fprintf(os.Stderr, "WARNING: failed to close shell exec file: %v\n", closeErr)
+				}
+			}()
+
+			if err := shellExec.WriteCommand("cd", yas.cfg.RepoDirectory); err != nil {
+				return fmt.Errorf("failed to write cd command: %w", err)
+			}
+		}
+
+		// Remove worktree
+		if err := yas.git.WorktreeRemove(worktreePath, force); err != nil {
+			return fmt.Errorf("failed to remove worktree: %w", err)
+		}
+	} else if currentBranch == branchName {
+		// Not in a worktree - switch off branch if needed
 		if err := yas.git.QuietCheckout(yas.cfg.TrunkBranch); err != nil {
 			return fmt.Errorf("can't delete branch while on it; failed to checkout trunk: %w", err)
 		}
 	}
 
-	if err := yas.git.DeleteBranch(name); err != nil {
+	// Delete branch
+	if err := yas.git.DeleteBranch(branchName); err != nil {
 		return err
 	}
 
-	if err := yas.markBranchDeleted(name); err != nil {
+	// Mark the branch as deleted
+	if err := yas.markBranchDeleted(branchName); err != nil {
 		return err
 	}
 
@@ -279,17 +298,7 @@ func (yas *YAS) SwitchBranch(branchName string) error {
 		return nil
 	}
 
-	// Check if we're currently in a worktree
-	// We need to check based on the current working directory, not the repo directory
-	// because the repo directory may have been resolved to the primary repo
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("failed to get current directory: %w", err)
-	}
-
-	cwdRepo := gitexec.WithRepo(cwd)
-
-	inWorktree, err := cwdRepo.IsLinkedWorktree()
+	inWorktree, err := yas.git.IsLinkedWorktree()
 	if err != nil {
 		return fmt.Errorf("failed to check if in worktree: %w", err)
 	}

@@ -12,7 +12,7 @@ import (
 	"gotest.tools/v3/assert/cmp"
 )
 
-// resolvePath resolves symlinks in a path (e.g. /var -> /private/var on macOS)
+// resolvePath resolves symlinks in a path (e.g. /var -> /private/var on macOS).
 func resolvePath(path string) string {
 	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
@@ -323,7 +323,8 @@ func TestDelete_ConfirmationPromptWithoutForce(t *testing.T) {
 
 	result := cliWithStdin.Run("delete", "feature-a")
 	assert.NilError(t, result.Err())
-	assert.Assert(t, cmp.Contains(result.Stdout(), "Delete branch 'feature-a'? (y/N)"))
+	// Prompt is written to stderr by the cliutil.Prompt function
+	assert.Assert(t, cmp.Contains(result.Stderr(), "Delete branch 'feature-a'? (y/N)"))
 	assert.Assert(t, cmp.Contains(result.Stdout(), "Deleted branch 'feature-a'"))
 
 	// Verify branch is deleted
@@ -367,7 +368,8 @@ func TestDelete_ConfirmationPromptDeclined(t *testing.T) {
 
 	result := cliWithStdin.Run("delete", "feature-a")
 	assert.NilError(t, result.Err())
-	assert.Assert(t, cmp.Contains(result.Stdout(), "Delete branch 'feature-a'? (y/N)"))
+	// Prompt is written to stderr by the cliutil.Prompt function
+	assert.Assert(t, cmp.Contains(result.Stderr(), "Delete branch 'feature-a'? (y/N)"))
 	assert.Assert(t, !cmp.Contains(result.Stdout(), "Deleted branch")().Success())
 
 	// Verify branch still exists
@@ -413,6 +415,105 @@ func TestDelete_ConfirmationShowsWorktreePath(t *testing.T) {
 
 	result := cliWithStdin.Run("delete", "feature-a")
 	assert.NilError(t, result.Err())
-	// Verify the prompt includes the worktree path
-	assert.Assert(t, cmp.Contains(result.Stdout(), "Delete branch 'feature-a' at "+worktreePath+"? (y/N)"))
+	// Verify the prompt includes the worktree path (prompt is written to stderr)
+	assert.Assert(t, cmp.Contains(result.Stderr(), "Delete branch 'feature-a' at "+worktreePath+"? (y/N)"))
+}
+
+func TestDelete_DeleteFromWithinWorktreeSwitchesToPrimaryRepo(t *testing.T) {
+	t.Parallel()
+
+	tempDir := resolvePath(t.TempDir())
+
+	// Create repo with a branch and worktree
+	worktreePath := filepath.Join(tempDir, ".yas", "worktrees", "feature-a")
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+		touch main
+		git add main
+		git commit -m "main-0"
+
+		git checkout -b feature-a
+		touch a
+		git add a
+		git commit -m "feature-a-0"
+
+		git checkout main
+		git worktree add `+worktreePath+` feature-a
+	`)
+
+	// Set up yas from primary repo
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "feature-a", "--parent=main").Err())
+
+	// Now run delete from within the worktree with shell exec enabled
+	tempFile := filepath.Join(t.TempDir(), "shell-exec")
+
+	cliInWorktree := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(worktreePath),
+		gocmdtester.WithEnv("YAS_SHELL_EXEC", tempFile),
+	)
+
+	result := cliInWorktree.Run("delete", "--force")
+	assert.NilError(t, result.Err())
+	assert.Assert(t, cmp.Contains(result.Stdout(), "Deleted branch 'feature-a' and worktree at "+worktreePath))
+
+	// Verify the shell exec file contains a cd command to the primary repo
+	content, err := os.ReadFile(tempFile)
+	assert.NilError(t, err)
+
+	contentStr := string(content)
+	assert.Assert(t, cmp.Contains(contentStr, "cd "))
+	assert.Assert(t, cmp.Contains(contentStr, tempDir))
+}
+
+func TestDelete_DeleteFromWithinWorktreeFailsWithoutShellHook(t *testing.T) {
+	t.Parallel()
+
+	tempDir := resolvePath(t.TempDir())
+
+	// Create repo with a branch and worktree
+	worktreePath := filepath.Join(tempDir, ".yas", "worktrees", "feature-a")
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+		touch main
+		git add main
+		git commit -m "main-0"
+
+		git checkout -b feature-a
+		touch a
+		git add a
+		git commit -m "feature-a-0"
+
+		git checkout main
+		git worktree add `+worktreePath+` feature-a
+	`)
+
+	// Set up yas from primary repo
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "feature-a", "--parent=main").Err())
+
+	// Run delete from within the worktree WITHOUT shell exec (no YAS_SHELL_EXEC)
+	cliInWorktree := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(worktreePath),
+	)
+
+	result := cliInWorktree.Run("delete", "--force")
+	assert.Equal(t, result.ExitCode(), 1)
+	assert.Assert(t, cmp.Contains(result.Stderr(), "cannot delete worktree from within: shell hook not installed"))
+
+	// Verify the worktree and branch were NOT deleted
+	info, err := os.Stat(worktreePath)
+	assert.NilError(t, err)
+	assert.Assert(t, info.IsDir())
+
+	output := mustExecOutput(tempDir, "git", "branch", "--list", "feature-a")
+	assert.Assert(t, cmp.Contains(output, "feature-a"))
 }
