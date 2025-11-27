@@ -608,3 +608,71 @@ func TestWorktree_CreateWorktreeForRemoteOnlyBranchMiddleOfStack(t *testing.T) {
 	assert.Assert(t, cmp.Contains(stdout, "topic-b"), "branch should appear in list output")
 	assert.Assert(t, cmp.Contains(stdout, "[https://github.com/test/test/pull/42]"), "PR URL should appear in list output")
 }
+
+func TestWorktree_CreateWorktreeFromInsideWorktree(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	// Create main repo with feature-a branch and a worktree for it
+	worktreePathA := filepath.Join(tempDir, ".yas", "worktrees", "feature-a")
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+		touch main
+		git add main
+		git commit -m "main-0"
+
+		git checkout -b feature-a
+		touch a
+		git add a
+		git commit -m "feature-a-0"
+
+		git checkout main
+		mkdir -p .yas/worktrees
+		git worktree add `+worktreePathA+` feature-a
+	`)
+
+	// Initialize yas from main repo
+	cliMain := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+	assert.NilError(t, cliMain.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cliMain.Run("add", "feature-a", "--parent=main").Err())
+
+	// Now run branch --worktree from inside the worktree
+	tempFile := filepath.Join(t.TempDir(), "shell-exec")
+	cliInWorktree := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(worktreePathA),
+		gocmdtester.WithEnv("YAS_SHELL_EXEC", tempFile),
+	)
+
+	// Create a new branch with --worktree flag from inside existing worktree
+	assert.NilError(t, cliInWorktree.Run("branch", "feature-b", "--worktree").Err())
+
+	// This tests the bug fix: the new worktree should be created in the primary repo,
+	// NOT nested inside the current worktree
+	// Previously it would create at: tempDir/.yas/worktrees/feature-a/.yas/worktrees/feature-b
+	// Fixed behavior creates at: tempDir/.yas/worktrees/feature-b
+	worktreePathB := filepath.Join(tempDir, ".yas", "worktrees", "feature-b")
+	info, err := os.Stat(worktreePathB)
+	assert.NilError(t, err, "worktree should be created in primary repo location")
+	assert.Assert(t, info.IsDir())
+
+	// Verify the worktree was NOT created nested inside the current worktree
+	nestedPath := filepath.Join(worktreePathA, ".yas", "worktrees", "feature-b")
+	_, err = os.Stat(nestedPath)
+	assert.Assert(t, os.IsNotExist(err), "worktree should NOT be nested inside current worktree")
+
+	// Verify the branch was created
+	output := mustExecOutput(tempDir, "git", "branch", "--list", "feature-b")
+	assert.Assert(t, cmp.Contains(output, "feature-b"))
+
+	// Verify the shell exec file contains cd command to the correct worktree path
+	content, err := os.ReadFile(tempFile)
+	assert.NilError(t, err)
+
+	contentStr := string(content)
+	assert.Assert(t, cmp.Contains(contentStr, "cd "))
+	// The path should be in the primary repo, not nested
+	assert.Assert(t, cmp.Contains(contentStr, tempDir+"/.yas/worktrees/feature-b"))
+}

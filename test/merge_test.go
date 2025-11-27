@@ -625,3 +625,91 @@ func TestMerge_WithBranchNameReturnsToOriginalBranch(t *testing.T) {
 	currentBranch = mustExecOutput(tempDir, "git", "branch", "--show-current")
 	equalLines(t, currentBranch, "other-branch")
 }
+
+func TestMerge_SucceedsFromWorktree(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	fakeOrigin := t.TempDir()
+
+	// Set up EDITOR to auto-approve merge message
+	editorScript := filepath.Join(tempDir, "editor.sh")
+	err := os.WriteFile(editorScript, []byte("#!/bin/bash\nprintf '\\n# User edited merge message' >> \"$1\"\n"), 0o755)
+	assert.NilError(t, err)
+
+	// Create main repo with topic-a branch and a worktree for it
+	worktreePath := filepath.Join(tempDir, "worktrees", "topic-a")
+	testutil.ExecOrFail(t, tempDir, stringutil.MustInterpolate(`
+		# Set up "remote" repository
+		git init --bare {{.fakeOrigin}}
+
+		git init --initial-branch=main
+		git remote add origin {{.fakeOrigin}}
+
+		# main
+		touch main
+		git add main
+		git commit -m "main-0"
+
+		# Set up remote tracking for main
+		git config branch.main.remote origin
+		git config branch.main.merge refs/heads/main
+
+		# topic-a
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+
+		# Push topic-a to simulate submitted state
+		git push -u origin topic-a
+
+		# Go back to main and create worktree for topic-a
+		git checkout main
+		git worktree add {{.worktreePath}} topic-a
+	`, map[string]string{
+		"fakeOrigin":   fakeOrigin,
+		"worktreePath": worktreePath,
+	}))
+
+	// Initialize yas from main repo
+	cliMain := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	// Mock basic PR info for topic-a (used by refresh)
+	mockGitHubPRForBranch(cliMain, "topic-a", yas.PullRequestMetadata{
+		ID:          "PR_kwDOTest123",
+		State:       "OPEN",
+		URL:         "https://github.com/test/test/pull/42",
+		BaseRefName: "main",
+	})
+
+	assert.NilError(t, cliMain.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cliMain.Run("add", "topic-a", "--parent=main").Err())
+	assert.NilError(t, cliMain.Run("refresh", "topic-a").Err())
+
+	// Now run merge from inside the worktree
+	cliWorktree := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(worktreePath),
+		gocmdtester.WithEnv("EDITOR", editorScript),
+	)
+
+	// Mock gh pr view for merge (to get title and body)
+	cliWorktree.Mock("gh", "pr", "view", "42", "--json", "title,body", "-q", ".title + \"\n---SEPARATOR---\n\" + .body").WithStdout("Test PR Title\n---SEPARATOR---\nTest PR Body")
+
+	// Mock gh pr merge command
+	cliWorktree.Mock("gh", "pr", "merge", "42", "--squash", "--auto", "--subject", "Test PR Title", "--body", "Test PR Body\n# User edited merge message")
+
+	// This tests the bug fix: merge should succeed from worktree
+	// Previously it would fail with "not a directory" when trying to write to .git/yas-merge-msg
+	// because .git is a file in worktrees, not a directory
+	result := cliWorktree.Run("merge", "--force")
+	assert.NilError(t, result.Err())
+
+	// Verify merge message file was written to .yas directory (not .git)
+	// and was cleaned up after merge
+	mergeFilePath := filepath.Join(tempDir, ".yas", "yas-merge-msg")
+	_, err = os.Stat(mergeFilePath)
+	assert.Assert(t, os.IsNotExist(err), "merge message file should be cleaned up")
+}

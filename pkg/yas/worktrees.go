@@ -57,8 +57,13 @@ func (yas *YAS) EnsureLinkedWorktreeForBranch(branchName string) error {
 		}
 	}
 
-	// Create the worktree for existing branch
-	fullWorktreePath := path.Join(yas.cfg.RepoDirectory, worktreePath, branchName)
+	// Create the worktree for existing branch (use primary worktree path to avoid nesting)
+	primaryWorktreePath, err := yas.git.PrimaryWorktreePath()
+	if err != nil {
+		return fmt.Errorf("failed to get primary worktree path: %w", err)
+	}
+
+	fullWorktreePath := path.Join(primaryWorktreePath, worktreePath, branchName)
 	if err := yas.git.WorktreeAddExisting(fullWorktreePath, branchName); err != nil {
 		return fmt.Errorf("failed to create worktree: %w", err)
 	}
