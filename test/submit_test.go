@@ -621,6 +621,47 @@ func TestSubmit_NonDraftPRShowsAsNotDraft(t *testing.T) {
 	assert.NilError(t, result.Err())
 }
 
+func TestSubmit_RefusesTrunkBranch(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	fakeOrigin := filepath.Join(tempDir, "origin.git")
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	testutil.ExecOrFail(t, tempDir, stringutil.MustInterpolate(`
+		# Create fake origin
+		git init --bare {{.fakeOrigin}}
+
+		git init --initial-branch=main
+		git remote add origin {{.fakeOrigin}}
+
+		# main
+		touch main
+		git add main
+		git commit -m "main-0"
+		git push -u origin main
+
+		# Set up remote tracking for main
+		git config branch.main.remote origin
+		git config branch.main.merge refs/heads/main
+	`, map[string]string{"fakeOrigin": fakeOrigin}))
+
+	// Initialize yas config
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+
+	// Ensure we're on the trunk branch
+	testutil.ExecOrFail(t, tempDir, "git checkout main")
+
+	// Try to submit trunk branch - should fail
+	result := cli.Run("submit")
+	assert.Assert(t, result.Err() != nil, "submit should fail on trunk branch")
+	assert.Assert(t, strings.Contains(result.Stderr(), "cannot submit trunk branch"),
+		"error should mention trunk branch, got: %s", result.Stderr())
+}
+
 func TestSubmit_DraftPRShowsAsDraft(t *testing.T) {
 	t.Parallel()
 
