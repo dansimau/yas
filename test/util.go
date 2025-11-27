@@ -10,7 +10,6 @@ import (
 	"github.com/dansimau/yas/pkg/fsutil"
 	"github.com/dansimau/yas/pkg/gitexec"
 	"github.com/dansimau/yas/pkg/xexec"
-	"github.com/dansimau/yas/pkg/yas"
 	"gotest.tools/v3/assert"
 )
 
@@ -81,13 +80,21 @@ func assertFileExists(t *testing.T, path string) bool {
 	return exists
 }
 
-// assertRestackStateExists is a test helper that calls yas.RestackStateExists
-// and asserts that no error occurred, returning the boolean result.
+// assertRestackStateExists is a test helper that checks if a restack state file exists.
 func assertRestackStateExists(t *testing.T, repoDir string) bool {
 	t.Helper()
 
-	exists, err := yas.RestackStateExists(repoDir)
-	assert.NilError(t, err, "RestackStateExists should not error")
+	// Check both possible locations for the restack state file
+	restackStateFiles := []string{".yas/yas.restack.json", ".git/.yasrestack"}
+	for _, filename := range restackStateFiles {
+		fullPath := repoDir + "/" + filename
+		exists, err := fsutil.FileExists(fullPath)
+		assert.NilError(t, err, "FileExists should not error")
 
-	return exists
+		if exists {
+			return true
+		}
+	}
+
+	return false
 }

@@ -62,8 +62,8 @@ func Run(args ...string) (exitCode int) {
 			// If we're in a worktree, resolve to the primary repo directory
 			// to ensure config and state files are found correctly
 			repo := gitexec.WithRepo(repoDir)
-			if isWorktree, err := repo.IsWorktree(); err == nil && isWorktree {
-				if primaryPath, err := repo.WorktreeGetPrimaryRepoWorkingDirPath(); err == nil {
+			if isWorktree, err := repo.IsLinkedWorktree(); err == nil && isWorktree {
+				if primaryPath, err := repo.PrimaryWorktreePath(); err == nil {
 					repoDir = primaryPath
 				}
 			}

@@ -9,25 +9,31 @@ import (
 	"github.com/heimdalr/dag"
 )
 
-// checkRestackInProgress returns an error if a restack operation is in progress.
-func (yas *YAS) checkRestackInProgress() error {
-	exists, err := RestackStateExists(yas.cfg.RepoDirectory)
+var ErrRestackInProgress = errors.New("a restack operation is already in progress\n\nRun 'yas continue' to resume or 'yas abort' to cancel")
+
+// errIfRestackInProgress returns an error if a restack operation is in progress.
+func (yas *YAS) errIfRestackInProgress() error {
+	exists, err := yas.restackStateExists()
 	if err != nil {
 		return err
 	}
 
 	if exists {
-		return errors.New("a restack operation is already in progress\n\nRun 'yas continue' to resume or 'yas abort' to cancel")
+		return ErrRestackInProgress
 	}
 
 	return nil
+}
+
+func (yas *YAS) RestackInProgress() (bool, error) {
+	return yas.restackStateExists()
 }
 
 // Restack rebases all branches starting from trunk, including all descendants
 // and forks.
 func (yas *YAS) Restack(branch string, dryRun bool) error {
 	// Check if a restack is already in progress
-	if err := yas.checkRestackInProgress(); err != nil {
+	if err := yas.errIfRestackInProgress(); err != nil {
 		return err
 	}
 
@@ -91,6 +97,17 @@ func (yas *YAS) Restack(branch string, dryRun bool) error {
 			break
 		}
 
+		// Write initial restack state
+		if err := yas.saveRestackState(&RestackState{
+			StartingBranch:  startingBranch,
+			CurrentBranch:   workQueue[0][0],
+			CurrentParent:   workQueue[0][1],
+			RemainingWork:   workQueue,
+			RebasedBranches: rebasedBranches,
+		}); err != nil {
+			return fmt.Errorf("rebase failed and unable to save restack state: %w", err)
+		}
+
 		// Process the work queue
 		if err := yas.processRestackWorkQueue(startingBranch, workQueue, &rebasedBranches); err != nil {
 			return err
@@ -98,7 +115,7 @@ func (yas *YAS) Restack(branch string, dryRun bool) error {
 	}
 
 	// Clean up any restack state file (in case it exists)
-	if err := DeleteRestackState(yas.cfg.RepoDirectory); err != nil {
+	if err := yas.deleteRestackState(); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to delete restack state: %v\n", err)
 	}
 
@@ -285,30 +302,36 @@ func (yas *YAS) processRestackWorkQueue(startingBranch string, workQueue [][2]st
 			return fmt.Errorf("branch point is not set for %s", childBranch)
 		}
 
-		rebaseErr := yas.git.RebaseOntoWithBranchPoint(parentBranch, childMetadata.BranchPoint, childBranch)
+		// Switch to the next branch in the work queue that we need to rebase
+		branch, err := yas.git.WithBranchContext(childBranch)
+		if err != nil {
+			return err
+		}
+
+		rebaseErr := branch.RebaseOntoWithBranchPoint(parentBranch, childMetadata.BranchPoint, childBranch)
 		if rebaseErr != nil {
 			// Check if a rebase is actually in progress
-			rebaseInProgress, err := yas.git.IsRebaseInProgress()
+			rebaseInProgress, err := branch.IsRebaseInProgress()
 			if err != nil {
 				return fmt.Errorf("rebase failed and unable to check rebase status: %w", err)
 			}
 
 			// If no rebase is in progress, this is a fatal error (e.g., unstashed changes)
-			// Don't save state, just return the error
+			// Clean up any saved state and return the error
 			if !rebaseInProgress {
+				_ = yas.deleteRestackState()
+
 				return fmt.Errorf("rebase failed for %s onto %s: %w", childBranch, parentBranch, rebaseErr)
 			}
 
 			// Rebase is in progress (e.g., conflicts), save state for resuming later
-			state := &RestackState{
+			if err := yas.saveRestackState(&RestackState{
 				StartingBranch:  startingBranch,
 				CurrentBranch:   childBranch,
 				CurrentParent:   parentBranch,
 				RemainingWork:   workQueue[i+1:],
 				RebasedBranches: *rebasedBranches,
-			}
-
-			if err := SaveRestackState(yas.cfg.RepoDirectory, state); err != nil {
+			}); err != nil {
 				return fmt.Errorf("rebase failed and unable to save restack state: %w", err)
 			}
 
@@ -339,7 +362,7 @@ func (yas *YAS) processRestackWorkQueue(startingBranch string, workQueue [][2]st
 // Continue resumes a restack operation that was interrupted by conflicts.
 func (yas *YAS) Continue() error {
 	// Check if there's a saved restack state
-	exists, err := RestackStateExists(yas.cfg.RepoDirectory)
+	exists, err := yas.restackStateExists()
 	if err != nil {
 		return fmt.Errorf("failed to check restack state: %w", err)
 	}
@@ -349,13 +372,22 @@ func (yas *YAS) Continue() error {
 	}
 
 	// Load the saved state
-	state, err := LoadRestackState(yas.cfg.RepoDirectory)
+	state, err := yas.loadRestackState()
 	if err != nil {
 		return fmt.Errorf("failed to load restack state: %w", err)
 	}
 
+	// Get the branch context for the current branch being rebased
+	// This ensures we check/continue the rebase in the correct worktree
+	branch, err := yas.git.WithBranchContext(state.CurrentBranch)
+	if err != nil {
+		return fmt.Errorf("failed to get branch context for %s: %w", state.CurrentBranch, err)
+	}
+
+	defer branch.RestoreOriginal()
+
 	// Check if a rebase is currently in progress
-	rebaseInProgress, err := yas.git.IsRebaseInProgress()
+	rebaseInProgress, err := branch.IsRebaseInProgress()
 	if err != nil {
 		return fmt.Errorf("failed to check if rebase is in progress: %w", err)
 	}
@@ -365,12 +397,12 @@ func (yas *YAS) Continue() error {
 		fmt.Printf("Continuing rebase for %s...\n", state.CurrentBranch)
 
 		for {
-			if err := yas.git.RebaseContinue(); err != nil {
+			if err := branch.RebaseContinue(); err != nil {
 				return fmt.Errorf("rebase continue failed: %w\n\nFix conflicts and run 'yas continue' again", err)
 			}
 
 			// Check if rebase is still in progress
-			stillInProgress, err := yas.git.IsRebaseInProgress()
+			stillInProgress, err := branch.IsRebaseInProgress()
 			if err != nil {
 				return fmt.Errorf("failed to check if rebase is in progress: %w", err)
 			}
@@ -386,12 +418,12 @@ func (yas *YAS) Continue() error {
 	} else {
 		// No rebase in progress - check if it was aborted or already completed
 		// Verify the rebase actually happened by checking if the branch's merge-base with parent equals parent's current commit
-		mergeBase, err := yas.git.GetMergeBase(state.CurrentBranch, state.CurrentParent)
+		mergeBase, err := branch.GetMergeBase(state.CurrentBranch, state.CurrentParent)
 		if err != nil {
 			return fmt.Errorf("failed to get merge-base: %w", err)
 		}
 
-		parentCommit, err := yas.git.GetCommitHash(state.CurrentParent)
+		parentCommit, err := branch.GetCommitHash(state.CurrentParent)
 		if err != nil {
 			return fmt.Errorf("failed to get parent commit: %w", err)
 		}
@@ -407,7 +439,7 @@ func (yas *YAS) Continue() error {
 	// Update the branch point for the just-completed rebase
 	childMetadata := yas.data.Branches.Get(state.CurrentBranch)
 
-	parentCommit, err := yas.git.GetCommitHash(state.CurrentParent)
+	parentCommit, err := branch.GetCommitHash(state.CurrentParent)
 	if err != nil {
 		return fmt.Errorf("failed to get parent commit after rebase: %w", err)
 	}
@@ -450,7 +482,7 @@ func (yas *YAS) Continue() error {
 	}
 
 	// Clean up the restack state file
-	if err := DeleteRestackState(yas.cfg.RepoDirectory); err != nil {
+	if err := yas.deleteRestackState(); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to delete restack state: %v\n", err)
 	}
 
@@ -490,7 +522,7 @@ func (yas *YAS) Continue() error {
 // to its state before the rebase started.
 func (yas *YAS) Abort() error {
 	// Check if there's a saved restack state
-	exists, err := RestackStateExists(yas.cfg.RepoDirectory)
+	exists, err := yas.restackStateExists()
 	if err != nil {
 		return fmt.Errorf("failed to check restack state: %w", err)
 	}
@@ -500,15 +532,24 @@ func (yas *YAS) Abort() error {
 	}
 
 	// Load the saved state
-	state, err := LoadRestackState(yas.cfg.RepoDirectory)
+	state, err := yas.loadRestackState()
 	if err != nil {
 		return fmt.Errorf("failed to load restack state: %w", err)
 	}
 
 	fmt.Printf("Aborting restack operation...\n")
 
+	// Get the branch context for the current branch being rebased
+	// This ensures we check/abort the rebase in the correct worktree
+	branch, err := yas.git.WithBranchContext(state.CurrentBranch)
+	if err != nil {
+		return fmt.Errorf("failed to get branch context for %s: %w", state.CurrentBranch, err)
+	}
+
+	defer branch.RestoreOriginal()
+
 	// Check if a rebase is currently in progress
-	rebaseInProgress, err := yas.git.IsRebaseInProgress()
+	rebaseInProgress, err := branch.IsRebaseInProgress()
 	if err != nil {
 		return fmt.Errorf("failed to check if rebase is in progress: %w", err)
 	}
@@ -517,13 +558,13 @@ func (yas *YAS) Abort() error {
 	if rebaseInProgress {
 		fmt.Printf("Aborting in-progress rebase for %s...\n", state.CurrentBranch)
 
-		if err := yas.git.RebaseAbort(); err != nil {
+		if err := branch.RebaseAbort(); err != nil {
 			return fmt.Errorf("failed to abort rebase: %w", err)
 		}
 	}
 
 	// Delete the restack state
-	if err := DeleteRestackState(yas.cfg.RepoDirectory); err != nil {
+	if err := yas.deleteRestackState(); err != nil {
 		return fmt.Errorf("failed to delete restack state: %w", err)
 	}
 

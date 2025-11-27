@@ -13,7 +13,7 @@ import (
 func (yas *YAS) Submit(draft bool) error {
 	// Check if a restack is in progress (do this before getting branch name
 	// which would fail in detached HEAD state during rebase)
-	if err := yas.checkRestackInProgress(); err != nil {
+	if err := yas.errIfRestackInProgress(); err != nil {
 		return err
 	}
 
@@ -102,7 +102,7 @@ func (yas *YAS) SubmitStack(draft bool) error {
 func (yas *YAS) submitBranches(branches []string, draft bool) error {
 	// Check if a restack is in progress (do this before getting branch name
 	// which would fail in detached HEAD state during rebase)
-	if err := yas.checkRestackInProgress(); err != nil {
+	if err := yas.errIfRestackInProgress(); err != nil {
 		return err
 	}
 

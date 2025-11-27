@@ -1,36 +1,13 @@
 package yas
 
 import (
-	"encoding/json"
-	"os"
-	"path"
 	"slices"
 	"time"
 
-	"github.com/dansimau/yas/pkg/fsutil"
 	"github.com/dansimau/yas/pkg/sliceutil"
 )
 
 var restackStateFiles = []string{".yas/yas.restack.json", ".git/.yasrestack"}
-
-// resolveRestackStatePath returns the first restack state path that exists,
-// or the first path if none exist (for writing to the new location).
-func resolveRestackStatePath(repoDir string) (string, error) {
-	for _, filename := range restackStateFiles {
-		fullPath := path.Join(repoDir, filename)
-
-		exists, err := fsutil.FileExists(fullPath)
-		if err != nil {
-			return "", err
-		}
-
-		if exists {
-			return fullPath, nil
-		}
-	}
-	// No file exists - use first (new) path for writing
-	return path.Join(repoDir, restackStateFiles[0]), nil
-}
 
 type BranchMetadata struct {
 	Name              string
@@ -174,78 +151,4 @@ type RestackState struct {
 	RemainingWork [][2]string `json:"remaining_work"`
 	// RebasedBranches tracks which branches were rebased (for the PR reminder)
 	RebasedBranches []string `json:"rebased_branches"`
-}
-
-// SaveRestackState saves the restack state to disk.
-func SaveRestackState(repoDir string, state *RestackState) error {
-	filePath, err := resolveRestackStatePath(repoDir)
-	if err != nil {
-		return err
-	}
-
-	b, err := json.MarshalIndent(state, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	// Ensure the directory exists
-	if err := os.MkdirAll(path.Dir(filePath), 0o755); err != nil {
-		return err
-	}
-
-	return os.WriteFile(filePath, b, 0o644)
-}
-
-// LoadRestackState loads the restack state from disk.
-func LoadRestackState(repoDir string) (*RestackState, error) {
-	filePath, err := resolveRestackStatePath(repoDir)
-	if err != nil {
-		return nil, err
-	}
-
-	b, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, err
-	}
-
-	state := &RestackState{}
-	if err := json.Unmarshal(b, state); err != nil {
-		return nil, err
-	}
-
-	return state, nil
-}
-
-// DeleteRestackState removes the restack state file.
-func DeleteRestackState(repoDir string) error {
-	filePath, err := resolveRestackStatePath(repoDir)
-	if err != nil {
-		return err
-	}
-
-	err = os.Remove(filePath)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-
-	return nil
-}
-
-// RestackStateExists checks if a restack state file exists.
-func RestackStateExists(repoDir string) (bool, error) {
-	filePath, err := resolveRestackStatePath(repoDir)
-	if err != nil {
-		return false, err
-	}
-
-	_, err = os.Stat(filePath)
-	if err == nil {
-		return true, nil
-	}
-
-	if os.IsNotExist(err) {
-		return false, nil
-	}
-
-	return false, err
 }
