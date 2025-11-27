@@ -8,16 +8,7 @@ import (
 	"github.com/dansimau/yas/pkg/fsutil"
 )
 
-func (r *Repo) WorktreeGetPrimaryRepoPath() (string, error) {
-	s, err := r.output("git", "rev-parse", "--git-common-dir")
-	if err != nil {
-		return "", err
-	}
-
-	return s, nil
-}
-
-func (r *Repo) WorktreeGetPrimaryRepoWorkingDirPath() (string, error) {
+func (r *Repo) PrimaryWorktreePath() (string, error) {
 	s, err := r.output("git", "rev-parse", "--git-common-dir")
 	if err != nil {
 		return "", err
@@ -126,8 +117,8 @@ func (r *Repo) LinkedWorktreePathForBranch(branch string) (string, error) {
 	return "", nil
 }
 
-// IsWorktree returns true if the current directory is a worktree (not the primary repo).
-func (r *Repo) IsWorktree() (bool, error) {
+// IsLinkedWorktree returns true if the current directory is a worktree (not the primary repo).
+func (r *Repo) IsLinkedWorktree() (bool, error) {
 	// In a worktree, .git is a file, not a directory
 	// We can also check if git-common-dir differs from git-dir
 	gitDir, err := r.output("git", "rev-parse", "--git-dir")

@@ -270,7 +270,7 @@ func (yas *YAS) SwitchBranch(branchName string) error {
 
 	cwdRepo := gitexec.WithRepo(cwd)
 
-	inWorktree, err := cwdRepo.IsWorktree()
+	inWorktree, err := cwdRepo.IsLinkedWorktree()
 	if err != nil {
 		return fmt.Errorf("failed to check if in worktree: %w", err)
 	}
@@ -290,7 +290,7 @@ func (yas *YAS) SwitchBranch(branchName string) error {
 		}()
 
 		// Get primary repo working directory
-		primaryRepoPath, err := yas.git.WorktreeGetPrimaryRepoWorkingDirPath()
+		primaryRepoPath, err := yas.git.PrimaryWorktreePath()
 		if err != nil {
 			return fmt.Errorf("failed to get primary repo path: %w", err)
 		}

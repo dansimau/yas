@@ -13,28 +13,18 @@ import (
 // Merge merges the PR for the current branch using gh pr merge.
 func (yas *YAS) Merge(branchName string, force bool) error {
 	// Check if a restack is in progress
-	if err := yas.checkRestackInProgress(); err != nil {
+	if err := yas.errIfRestackInProgress(); err != nil {
 		return err
 	}
 
-	startingBranch, err := yas.git.GetCurrentBranchName()
-	if err != nil {
-		return err
-	}
-
-	// Get current branch
+	// Get current branch if not specified
 	if branchName == "" {
-		branchName = startingBranch
-	} else {
-		if err := yas.git.QuietCheckout(branchName); err != nil {
-			return fmt.Errorf("failed to checkout branch %s: %w", branchName, err)
+		currentBranch, err := yas.git.GetCurrentBranchName()
+		if err != nil {
+			return err
 		}
 
-		defer func() {
-			if err := yas.git.QuietCheckout(startingBranch); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to return to starting branch %s: %v\n", startingBranch, err)
-			}
-		}()
+		branchName = currentBranch
 	}
 
 	// Get branch metadata
@@ -69,6 +59,13 @@ func (yas *YAS) Merge(branchName string, force bool) error {
 	if needsSubmit {
 		return errors.New("branch needs submit. Run 'yas submit' first")
 	}
+
+	branch, err := yas.git.WithBranchContext(branchName)
+	if err != nil {
+		return err
+	}
+
+	defer branch.RestoreOriginal()
 
 	// Check CI and review status (unless --force)
 	if !force {
