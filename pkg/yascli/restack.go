@@ -19,13 +19,23 @@ func (c *restackCmd) Execute(args []string) error {
 		return NewError(err.Error())
 	}
 
+	branch := c.Args.Branch
+
 	if c.All {
-		if c.Args.Branch != "" {
+		if branch != "" {
 			return NewError("specifying a branch is incompatible with --all")
 		}
 
-		c.Args.Branch = yasInstance.Config().TrunkBranch
+		branch = yasInstance.Config().TrunkBranch
+	} else if branch == "" {
+		// Default to current branch when no branch specified and --all not used
+		currentBranch, err := yasInstance.CurrentBranchName()
+		if err != nil {
+			return NewError(err.Error())
+		}
+
+		branch = currentBranch
 	}
 
-	return yasInstance.Restack(c.Args.Branch, c.DryRun)
+	return yasInstance.Restack(branch, c.DryRun)
 }

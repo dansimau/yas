@@ -37,10 +37,6 @@ func (yas *YAS) Restack(branch string, dryRun bool) error {
 		return err
 	}
 
-	if branch == "" {
-		branch = yas.cfg.TrunkBranch
-	}
-
 	// Remember the starting branch
 	startingBranch, err := yas.git.GetCurrentBranchName()
 	if err != nil {

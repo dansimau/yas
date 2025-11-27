@@ -59,7 +59,8 @@ func TestUpdateTrunk(t *testing.T) {
 	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
 	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
 	assert.NilError(t, cli.Run("add", "topic-b", "--parent=topic-a").Err())
-	assert.NilError(t, cli.Run("restack").Err())
+	// Use --all to restack all branches (not just current branch and descendants)
+	assert.NilError(t, cli.Run("restack", "--all").Err())
 
 	equalLines(t, mustExecOutput(tempDir, "git", "log", "--pretty=%D : %s"), `
 		HEAD -> topic-b : topic-b-0
@@ -129,7 +130,8 @@ func TestUpdateTrunkTopicA(t *testing.T) {
 	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
 	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
 	assert.NilError(t, cli.Run("add", "topic-b", "--parent=topic-a").Err())
-	assert.NilError(t, cli.Run("restack").Err())
+	// Use --all to restack all branches (not just current branch and descendants)
+	assert.NilError(t, cli.Run("restack", "--all").Err())
 
 	equalLines(t, mustExecOutput(tempDir, "git", "log", "--pretty=%D : %s"), `
 		HEAD -> topic-b : topic-b-0
@@ -283,10 +285,10 @@ func TestRestack_ShowsReminderWhenBranchesWithPRsAreRestacked(t *testing.T) {
 	testutil.ExecOrFail(t, tempDir, "git checkout topic-a")
 	assert.NilError(t, cli.Run("refresh", "topic-a").Err())
 
-	// Go back to topic-b and restack
+	// Go back to topic-b and restack --all to restack all branches
 	testutil.ExecOrFail(t, tempDir, "git checkout topic-b")
 
-	result := cli.Run("restack")
+	result := cli.Run("restack", "--all")
 	assert.NilError(t, result.Err())
 
 	// Verify reminder message appears
@@ -354,8 +356,8 @@ func TestRestack_OnlyRebasesWhenNeeded(t *testing.T) {
 	assert.NilError(t, cli.Run("add", "topic-b", "--parent=topic-a").Err())
 	assert.NilError(t, cli.Run("add", "topic-c", "--parent=topic-b").Err())
 
-	// Run restack
-	result := cli.Run("restack")
+	// Run restack --all to restack all branches
+	result := cli.Run("restack", "--all")
 	assert.NilError(t, result.Err())
 
 	// Verify the result - all branches should include main-1
@@ -557,7 +559,8 @@ func TestRestack_WithDeletedParentBranch(t *testing.T) {
 
 	// Restack should succeed by reparenting topic-b to trunk
 	// and then restacking topic-c onto topic-b
-	assert.NilError(t, cli.Run("restack").Err())
+	// Use --all to restack all branches (not just current branch and descendants)
+	assert.NilError(t, cli.Run("restack", "--all").Err())
 
 	// Verify that topic-b and topic-c are now based on main (not topic-a)
 	// topic-b should be rebased onto main
@@ -576,4 +579,99 @@ func TestRestack_WithDeletedParentBranch(t *testing.T) {
 		main : main-1
 		: main-0
 	`)
+}
+
+// TestRestack_DefaultsToCurrentBranch verifies that `yas restack` with no arguments
+// only restacks the current branch and its descendants, not all branches.
+// This tests the fix for https://github.com/dansimau/yas/issues/65
+func TestRestack_DefaultsToCurrentBranch(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+
+		# main
+		touch main
+		git add main
+		git commit -m "main-0"
+
+		# Set up remote tracking for main
+		git config branch.main.remote origin
+		git config branch.main.merge refs/heads/main
+
+		# Create first stack: main -> topic-a -> topic-b
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+
+		git checkout -b topic-b
+		touch b
+		git add b
+		git commit -m "topic-b-0"
+
+		# Create second (sibling) stack: main -> topic-x
+		git checkout main
+		git checkout -b topic-x
+		touch x
+		git add x
+		git commit -m "topic-x-0"
+
+		# Update main - this makes both topic-a and topic-x need rebasing
+		git checkout main
+		echo 1 > main
+		git add main
+		git commit -m "main-1"
+
+		# Go to topic-a (we will run restack from here)
+		git checkout topic-a
+	`)
+
+	// Initialize yas config
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-b", "--parent=topic-a").Err())
+	assert.NilError(t, cli.Run("add", "topic-x", "--parent=main").Err())
+
+	// Record topic-x's commit before restack (it should NOT change)
+	topicXCommitBefore := mustExecOutput(tempDir, "git", "rev-parse", "topic-x")
+
+	// Run restack WITHOUT arguments - should only restack topic-a and topic-b
+	result := cli.Run("restack")
+	assert.NilError(t, result.Err())
+
+	// Verify topic-a was rebased onto main-1
+	testutil.ExecOrFail(t, tempDir, "git checkout topic-a")
+	equalLines(t, mustExecOutput(tempDir, "git", "log", "--pretty=%D : %s"), `
+		HEAD -> topic-a : topic-a-0
+		main : main-1
+		: main-0
+	`)
+
+	// Verify topic-b was rebased onto the updated topic-a
+	testutil.ExecOrFail(t, tempDir, "git checkout topic-b")
+	equalLines(t, mustExecOutput(tempDir, "git", "log", "--pretty=%D : %s"), `
+		HEAD -> topic-b : topic-b-0
+		topic-a : topic-a-0
+		main : main-1
+		: main-0
+	`)
+
+	// Verify topic-x was NOT rebased (still points to same commit)
+	topicXCommitAfter := mustExecOutput(tempDir, "git", "rev-parse", "topic-x")
+	assert.Equal(t, topicXCommitBefore, topicXCommitAfter,
+		"topic-x should NOT have been rebased when running 'yas restack' from topic-a")
+
+	// Verify topic-x is still based on main-0 (not main-1)
+	testutil.ExecOrFail(t, tempDir, "git checkout topic-x")
+	logOutput := mustExecOutput(tempDir, "git", "log", "--pretty=%s")
+	assert.Assert(t, strings.Contains(logOutput, "topic-x-0"), "topic-x should have its commit")
+	assert.Assert(t, strings.Contains(logOutput, "main-0"), "topic-x should still be based on main-0")
+	assert.Assert(t, !strings.Contains(logOutput, "main-1"), "topic-x should NOT include main-1")
 }

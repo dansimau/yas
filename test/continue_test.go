@@ -54,8 +54,9 @@ func TestContinue_ResumeAfterConflict(t *testing.T) {
 	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
 	assert.NilError(t, cli.Run("add", "topic-b", "--parent=topic-a").Err())
 
-	// Run restack - it should fail due to conflict on topic-a
-	result := cli.Run("restack")
+	// Run restack --all - it should fail due to conflict on topic-a
+	// (using --all to restack all branches, not just current branch and descendants)
+	result := cli.Run("restack", "--all")
 	assert.Equal(t, result.ExitCode(), 1, "restack should fail due to conflict")
 
 	// Verify that restack state was saved
@@ -306,8 +307,9 @@ func TestContinue_MultipleConflicts(t *testing.T) {
 	assert.NilError(t, cli.Run("add", "topic-b", "--parent=topic-a").Err())
 	assert.NilError(t, cli.Run("add", "topic-c", "--parent=topic-b").Err())
 
-	// Run restack - it should fail on topic-a
-	result := cli.Run("restack")
+	// Run restack --all - it should fail on topic-a
+	// (using --all to restack all branches, not just current branch and descendants)
+	result := cli.Run("restack", "--all")
 	assert.Equal(t, result.ExitCode(), 1, "restack should fail on topic-a")
 
 	// Fix conflict for topic-a
