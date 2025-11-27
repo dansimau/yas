@@ -4,6 +4,7 @@ go 1.24.0
 
 require (
 	al.essio.dev/pkg/shellescape v1.6.0
+	dario.cat/mergo v1.0.2
 	github.com/davecgh/go-spew v1.1.1
 	github.com/fatih/color v1.18.0
 	github.com/go-git/go-git/v5 v5.16.3
@@ -12,14 +13,13 @@ require (
 	github.com/heimdalr/dag v1.5.0
 	github.com/jessevdk/go-flags v1.6.1
 	github.com/sourcegraph/conc v0.3.0
-	golang.org/x/term v0.35.0
+	golang.org/x/term v0.37.0
 	gopkg.in/alessio/shellescape.v1 v1.0.0-20170105083845-52074bc9df61
 	gopkg.in/yaml.v2 v2.4.0
 	gotest.tools/v3 v3.5.2
 )
 
 require (
-	dario.cat/mergo v1.0.2 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/ProtonMail/go-crypto v1.3.0 // indirect
 	github.com/alessio/shellescape v1.4.2 // indirect
@@ -42,8 +42,8 @@ require (
 	github.com/skeema/knownhosts v1.3.1 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/crypto v0.42.0 // indirect
-	golang.org/x/net v0.44.0 // indirect
-	golang.org/x/sys v0.36.0 // indirect
+	golang.org/x/crypto v0.45.0 // indirect
+	golang.org/x/net v0.47.0 // indirect
+	golang.org/x/sys v0.38.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 )
