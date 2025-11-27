@@ -8,6 +8,11 @@ import (
 
 const worktreePath = ".yas/worktrees"
 
+// WorktreePathForBranch returns the worktree path for a branch, or empty string if none exists.
+func (yas *YAS) WorktreePathForBranch(branchName string) (string, error) {
+	return yas.git.LinkedWorktreePathForBranch(branchName)
+}
+
 // EnsureLinkedWorktreeForBranch creates a worktree for an existing branch.
 // The worktree is created at the specified path relative to the repo root.
 // After creation, it switches to the worktree using SwitchBranch.

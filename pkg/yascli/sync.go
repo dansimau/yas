@@ -36,12 +36,25 @@ func (c *syncCmd) checkForClosedPRs() error {
 			continue
 		}
 
+		// Check if there's a worktree for this branch
+		worktreePath, _ := c.yasInstance.WorktreePathForBranch(branch.Name)
+
 		if !cmd.DryRun {
 			if err := c.yasInstance.DeleteBranch(branch.Name); err != nil {
 				return fmt.Errorf("error deleting branch %s: %w", branch.Name, err)
 			}
+
+			if worktreePath != "" {
+				fmt.Printf("Deleted branch '%s' and worktree at %s\n", branch.Name, worktreePath)
+			} else {
+				fmt.Printf("Deleted branch '%s'\n", branch.Name)
+			}
 		} else {
-			fmt.Printf("Would delete branch: %s [DRY-RUN]\n", branch.Name)
+			if worktreePath != "" {
+				fmt.Printf("Would delete branch '%s' and worktree at %s [DRY-RUN]\n", branch.Name, worktreePath)
+			} else {
+				fmt.Printf("Would delete branch: %s [DRY-RUN]\n", branch.Name)
+			}
 		}
 	}
 

@@ -178,3 +178,13 @@ func (r *Repo) WorktreeAdd(path, branchName, startPoint string) error {
 func (r *Repo) WorktreeAddExisting(path, branchName string) error {
 	return r.run("git", "worktree", "add", path, branchName)
 }
+
+// WorktreeRemove removes a worktree at the specified path.
+// If force is true, it will remove the worktree even if it has uncommitted changes.
+func (r *Repo) WorktreeRemove(worktreePath string, force bool) error {
+	if force {
+		return r.run("git", "worktree", "remove", worktreePath, "--force")
+	}
+
+	return r.run("git", "worktree", "remove", worktreePath)
+}
