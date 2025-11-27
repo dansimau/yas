@@ -3,10 +3,13 @@ package cliutil
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 )
+
+var ErrAbort = errors.New("Aborting")
 
 type PromptOptions struct {
 	Text      string
@@ -41,6 +44,10 @@ Prompt:
 
 	if opts.Validator != nil {
 		if err := opts.Validator(input); err != nil {
+			if errors.Is(err, ErrAbort) {
+				os.Exit(1)
+			}
+
 			fmt.Fprintln(os.Stderr, err)
 
 			goto Prompt
@@ -48,4 +55,18 @@ Prompt:
 	}
 
 	return input
+}
+
+// Confirm prompts the user for a yes/no confirmation.
+func Confirm(prompt string) bool {
+	switch Prompt(PromptOptions{
+		Text: prompt,
+	}) {
+	case "y", "yes":
+		return true
+	case "n", "no":
+		return false
+	}
+
+	return false
 }

@@ -1,11 +1,9 @@
 package yascli
 
 import (
-	"bufio"
 	"fmt"
-	"os"
-	"strings"
 
+	"github.com/dansimau/yas/pkg/cliutil"
 	"github.com/dansimau/yas/pkg/yas"
 )
 
@@ -50,12 +48,14 @@ func (c *deleteCmd) Execute(args []string) error {
 	if !c.Force {
 		var promptMsg string
 		if worktreePath != "" {
-			promptMsg = fmt.Sprintf("Delete branch '%s' at %s? (y/N) ", branchName, worktreePath)
+			promptMsg = fmt.Sprintf("Delete branch '%s' at %s? (y/N)", branchName, worktreePath)
 		} else {
-			promptMsg = fmt.Sprintf("Delete branch '%s'? (y/N) ", branchName)
+			promptMsg = fmt.Sprintf("Delete branch '%s'? (y/N)", branchName)
 		}
 
-		if !confirm(promptMsg) {
+		if !cliutil.Confirm(promptMsg) {
+			fmt.Println("Aborting.")
+
 			return nil
 		}
 	}
@@ -71,21 +71,4 @@ func (c *deleteCmd) Execute(args []string) error {
 	}
 
 	return nil
-}
-
-// confirm prompts the user for a yes/no confirmation.
-// Returns true if the user enters 'y' or 'Y', false otherwise.
-func confirm(prompt string) bool {
-	fmt.Print(prompt)
-
-	reader := bufio.NewReader(os.Stdin)
-
-	response, err := reader.ReadString('\n')
-	if err != nil {
-		return false
-	}
-
-	response = strings.TrimSpace(strings.ToLower(response))
-
-	return response == "y" || response == "yes"
 }
