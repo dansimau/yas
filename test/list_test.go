@@ -1,6 +1,7 @@
 package test
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1100,4 +1101,68 @@ func TestList_HidesDeletedLeafBranch(t *testing.T) {
 	// topic-a should still appear
 	assert.Assert(t, strings.Contains(output, "topic-a"),
 		"topic-a should still appear in list, but got: %s", output)
+}
+
+func TestList_FromInsideWorktree(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	worktreePath := filepath.Join(tempDir, "worktrees", "feature-a")
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	// Create main repo with branches and worktree
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+		touch main
+		git add main
+		git commit -m "main-0"
+
+		git config branch.main.remote origin
+		git config branch.main.merge refs/heads/main
+
+		git checkout -b feature-a
+		touch a
+		git add a
+		git commit -m "feature-a-0"
+
+		git checkout -b feature-b
+		touch b
+		git add b
+		git commit -m "feature-b-0"
+
+		git checkout main
+		mkdir -p `+filepath.Dir(worktreePath)+`
+		git worktree add `+worktreePath+` feature-a
+	`)
+
+	// Initialize yas from main repo
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "feature-a", "--parent=main").Err())
+	assert.NilError(t, cli.Run("add", "feature-b", "--parent=feature-a").Err())
+
+	// Run 'yas ls' from inside the worktree
+	cliInWorktree := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(worktreePath),
+	)
+
+	result := cliInWorktree.Run("list")
+	assert.NilError(t, result.Err())
+	output := result.Stdout()
+
+	// Verify feature-a is marked as current branch (with *)
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "feature-a") {
+			assert.Assert(t, strings.Contains(line, "*"),
+				"feature-a should show '*' (current branch) when run from worktree, got: %s", line)
+		}
+
+		if strings.Contains(line, "feature-b") {
+			assert.Assert(t, !strings.Contains(line, "*"),
+				"feature-b should NOT show '*' when run from worktree, got: %s", line)
+		}
+	}
 }
