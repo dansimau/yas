@@ -100,8 +100,13 @@ func (yas *YAS) Merge(branchName string, force bool) error {
 	// Strip stack section from body
 	body = removeStackSection(body)
 
-	// Write merge message to file
-	mergeFilePath := path.Join(yas.cfg.RepoDirectory, ".git", "yas-merge-msg")
+	// Write merge message to file (use YAS config base to handle worktrees correctly)
+	yasConfigBase, err := getYASConfigBase(yas.cfg.RepoDirectory)
+	if err != nil {
+		return fmt.Errorf("failed to get YAS config base: %w", err)
+	}
+
+	mergeFilePath := path.Join(yasConfigBase, ".yas", "yas-merge-msg")
 
 	mergeMsg := title + "\n\n" + body
 	if err := os.WriteFile(mergeFilePath, []byte(mergeMsg), 0o644); err != nil {
