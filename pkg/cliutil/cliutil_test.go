@@ -11,7 +11,6 @@ import (
 )
 
 func TestPrompt_WithDefaultAndValidator_AcceptsEmptyInput(t *testing.T) {
-	t.Parallel()
 	// Save original stdin
 	oldStdin := os.Stdin
 
@@ -48,7 +47,6 @@ func TestPrompt_WithDefaultAndValidator_AcceptsEmptyInput(t *testing.T) {
 }
 
 func TestPrompt_WithDefaultAndValidator_AcceptsCustomInput(t *testing.T) {
-	t.Parallel()
 	// Save original stdin
 	oldStdin := os.Stdin
 
@@ -85,7 +83,6 @@ func TestPrompt_WithDefaultAndValidator_AcceptsCustomInput(t *testing.T) {
 }
 
 func TestPrompt_WithoutDefault_NoValidator(t *testing.T) {
-	t.Parallel()
 	// Save original stdin
 	oldStdin := os.Stdin
 
@@ -112,7 +109,6 @@ func TestPrompt_WithoutDefault_NoValidator(t *testing.T) {
 }
 
 func TestPrompt_WithDefaultNoValidator(t *testing.T) {
-	t.Parallel()
 	// Save original stdin
 	oldStdin := os.Stdin
 
