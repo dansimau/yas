@@ -125,8 +125,9 @@ func TestAbort_ReturnsToStartingBranch(t *testing.T) {
 	// Verify we're on topic-b
 	equalLines(t, mustExecOutput(tempDir, "git", "branch", "--show-current"), "topic-b")
 
-	// Run restack - it should fail due to conflict on topic-a
-	result := cli.Run("restack")
+	// Run restack --all - it should fail due to conflict on topic-a
+	// (using --all to restack all branches, not just current branch and descendants)
+	result := cli.Run("restack", "--all")
 	assert.Equal(t, result.ExitCode(), 1, "restack should fail due to conflict")
 
 	// During a rebase conflict, we're in detached HEAD state
@@ -190,8 +191,9 @@ func TestAbort_LeavesRebasedBranchesIntact(t *testing.T) {
 	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
 	assert.NilError(t, cli.Run("add", "topic-b", "--parent=topic-a").Err())
 
-	// Run restack - topic-a will succeed, topic-b will fail
-	result := cli.Run("restack")
+	// Run restack --all - topic-a will succeed, topic-b will fail
+	// (using --all to restack all branches, not just current branch and descendants)
+	result := cli.Run("restack", "--all")
 	assert.Equal(t, result.ExitCode(), 1, "restack should fail due to conflict on topic-b")
 
 	// Verify restack state exists and shows the correct branch
