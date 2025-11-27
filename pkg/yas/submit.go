@@ -26,6 +26,10 @@ func (yas *YAS) Submit(draft bool) error {
 		return errors.New("cannot submit in detached HEAD state")
 	}
 
+	if currentBranch == yas.cfg.TrunkBranch {
+		return errors.New("cannot submit trunk branch")
+	}
+
 	// Submit and annotate the current branch
 	return yas.submitBranches([]string{currentBranch}, draft)
 }
