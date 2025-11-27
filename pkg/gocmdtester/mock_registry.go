@@ -150,6 +150,7 @@ func loadInvocationsFromFile(path string) ([]Invocation, error) {
 
 // verifyAllCalled checks that all registered mocks were called at least once.
 // Returns an error listing any uncalled mocks.
+// Pattern-based mocks (using Any or AnyFurtherArgs) are verified using pattern matching.
 func (r *mockRegistry) verifyAllCalled() error {
 	invocations, err := r.loadInvocations()
 	if err != nil {
@@ -166,7 +167,7 @@ func (r *mockRegistry) verifyAllCalled() error {
 		found := false
 
 		for _, inv := range invocations {
-			if inv.Command == mock.command && argsEqual(inv.Args, mock.args) {
+			if inv.Command == mock.command && argsMatch(mock.args, inv.Args) {
 				found = true
 
 				break

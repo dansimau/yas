@@ -17,6 +17,12 @@ import (
 	"time"
 )
 
+// Matcher constants - must match the values in gocmdtester/matchers.go.
+const (
+	matcherAny            = "__MOCKSHIM_ANY__"
+	matcherAnyFurtherArgs = "__MOCKSHIM_ANY_FURTHER__"
+)
+
 // MockConfig represents a single mock configuration.
 type MockConfig struct {
 	Command     string   `json:"command"`
@@ -65,9 +71,9 @@ func run() int {
 		return 255
 	}
 
-	// Find matching mock (exact match on command and args)
+	// Find matching mock (first match wins - order matters for pattern matching)
 	for _, mock := range mocks {
-		if mock.Command == command && argsEqual(mock.Args, args) {
+		if mock.Command == command && argsMatch(mock.Args, args) {
 			// Handle passthrough - execute real command
 			if mock.Passthrough {
 				return executePassthrough(command, args)
@@ -136,19 +142,43 @@ func logInvocation(mockDir, command string, args []string) error {
 	return nil
 }
 
-func argsEqual(a, b []string) bool {
-	// Handle nil vs empty slice comparison
-	if len(a) != len(b) {
-		return false
-	}
+// argsMatch checks if actual arguments match a pattern.
+// The pattern can contain special matcher strings (Any, AnyFurtherArgs).
+// Mocks are matched in registration order, so more specific patterns should be registered first.
+func argsMatch(pattern, actual []string) bool {
+	patternIdx := 0
+	actualIdx := 0
 
-	for i := range a {
-		if a[i] != b[i] {
+	for patternIdx < len(pattern) {
+		if pattern[patternIdx] == matcherAnyFurtherArgs {
+			// AnyFurtherArgs must be the last element in pattern
+			// It matches zero or more remaining arguments
+			return patternIdx == len(pattern)-1
+		}
+
+		if actualIdx >= len(actual) {
+			return false // More pattern elements than actual args
+		}
+
+		if pattern[patternIdx] == matcherAny {
+			// Any matches exactly one argument
+			patternIdx++
+			actualIdx++
+
+			continue
+		}
+
+		// Exact match required
+		if pattern[patternIdx] != actual[actualIdx] {
 			return false
 		}
+
+		patternIdx++
+		actualIdx++
 	}
 
-	return true
+	// All pattern elements consumed; actual args must also be consumed
+	return actualIdx == len(actual)
 }
 
 // executePassthrough executes the real command and passes through its output.

@@ -67,8 +67,8 @@ func (m *Mock) CalledTimes() int {
 }
 
 // CalledWithArgs returns true if this mock was invoked with the given arguments.
-// Note: Since mocks use exact matching, this is equivalent to Called() for the
-// same args used when creating the mock.
+// The args parameter should be the actual arguments (not patterns).
+// For pattern-based mocks, use this to verify specific invocations.
 func (m *Mock) CalledWithArgs(args ...string) bool {
 	calls := m.Calls()
 	for _, call := range calls {
@@ -81,6 +81,8 @@ func (m *Mock) CalledWithArgs(args ...string) bool {
 }
 
 // Calls returns all invocations that match this mock.
+// For pattern-based mocks (using Any or AnyFurtherArgs), this returns
+// all invocations that match the pattern.
 func (m *Mock) Calls() []Invocation {
 	if m.registry == nil {
 		return nil
@@ -94,7 +96,7 @@ func (m *Mock) Calls() []Invocation {
 	var matches []Invocation
 
 	for _, inv := range invocations {
-		if inv.Command == m.command && argsEqual(inv.Args, m.args) {
+		if inv.Command == m.command && argsMatch(m.args, inv.Args) {
 			matches = append(matches, inv)
 		}
 	}

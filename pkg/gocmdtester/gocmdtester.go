@@ -488,6 +488,9 @@ func (ct *CmdTester) CoverageDir() string {
 // The mock intercepts calls to the command when Run() is called.
 // Returns a Mock that can be configured with builder methods.
 //
+// Arguments can be strings (for exact match) or ArgMatcher values (Any, AnyFurtherArgs)
+// for pattern matching.
+//
 // All mocks are automatically verified at the end of the test.
 // If any mock was not called, the test will fail.
 // Use SkipMockVerification() to disable this check for tests that
@@ -495,16 +498,25 @@ func (ct *CmdTester) CoverageDir() string {
 //
 // Example:
 //
+//	// Exact match
 //	mock := tester.Mock("gh", "pr", "create").
 //	    WithStdout("https://github.com/user/repo/pull/1").
 //	    WithCode(0)
+//
+//	// Pattern match - Any matches exactly one argument
+//	tester.Mock("git", "merge-base", gocmdtester.Any).
+//	    WithStdout("abc123\n")
+//
+//	// Pattern match - AnyFurtherArgs matches zero or more remaining arguments
+//	tester.Mock("git", "push", gocmdtester.AnyFurtherArgs).
+//	    WithPassthroughExec()
 //
 //	result := tester.Run("submit")
 //
 //	if !mock.Called() {
 //	    t.Error("expected gh pr create to be called")
 //	}
-func (ct *CmdTester) Mock(command string, args ...string) *Mock {
+func (ct *CmdTester) Mock(command string, args ...any) *Mock {
 	ct.t.Helper()
 
 	// Create mock registry if this is the first mock
@@ -528,9 +540,22 @@ func (ct *CmdTester) Mock(command string, args ...string) *Mock {
 		})
 	}
 
+	// Convert args to strings, handling ArgMatcher types
+	stringArgs := make([]string, len(args))
+	for i, arg := range args {
+		switch v := arg.(type) {
+		case string:
+			stringArgs[i] = v
+		case ArgMatcher:
+			stringArgs[i] = string(v)
+		default:
+			ct.t.Fatalf("Mock: argument %d must be string or ArgMatcher, got %T", i, arg)
+		}
+	}
+
 	mock := &Mock{
 		command:  command,
-		args:     args,
+		args:     stringArgs,
 		exitCode: 0,
 	}
 

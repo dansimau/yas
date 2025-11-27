@@ -420,3 +420,302 @@ func main() {
 	// Test should pass - verification happens at t.Cleanup()
 	// If mocks weren't called, the test would fail during cleanup
 }
+
+// TestMock_AnyMatcher tests the Any matcher that matches exactly one argument.
+func TestMock_AnyMatcher(t *testing.T) {
+	t.Parallel()
+
+	mainGo := createTestModuleWithExec(t, `package main
+
+import (
+	"fmt"
+	"os/exec"
+)
+
+func main() {
+	// Call with one argument - should match
+	cmd := exec.Command("git", "merge-base", "HEAD")
+	out, _ := cmd.Output()
+	fmt.Print(string(out))
+}
+`)
+
+	tester := gocmdtester.FromPath(t, mainGo)
+
+	// Set up mock with Any matcher
+	mock := tester.Mock("git", "merge-base", gocmdtester.Any).
+		WithStdout("abc123\n")
+
+	result := tester.Run()
+
+	assert.Assert(t, result.Success(), "expected success, got exit code %d, stderr: %s", result.ExitCode(), result.Stderr())
+	assert.Assert(t, mock.Called(), "expected mock to be called")
+	assert.Assert(t, result.StdoutContains("abc123"))
+}
+
+// TestMock_AnyMatcher_NoMatch tests that Any doesn't match zero or two arguments.
+func TestMock_AnyMatcher_NoMatch(t *testing.T) {
+	t.Parallel()
+
+	mainGo := createTestModuleWithExec(t, `package main
+
+import (
+	"os"
+	"os/exec"
+)
+
+func main() {
+	// Call with two arguments - should NOT match the mock with only one Any
+	cmd := exec.Command("git", "merge-base", "HEAD", "main")
+	err := cmd.Run()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			os.Exit(exitErr.ExitCode())
+		}
+		os.Exit(1)
+	}
+}
+`)
+
+	tester := gocmdtester.FromPath(t, mainGo)
+	tester.SkipMockVerification()
+
+	// Set up mock with Any matcher - should NOT match two args
+	mock := tester.Mock("git", "merge-base", gocmdtester.Any).
+		WithStdout("abc123\n")
+
+	result := tester.Run()
+
+	// Should return 254 (no match)
+	assert.Equal(t, result.ExitCode(), 254)
+	assert.Assert(t, !mock.Called(), "mock should not be called")
+}
+
+// TestMock_AnyFurtherArgs tests the AnyFurtherArgs matcher.
+func TestMock_AnyFurtherArgs(t *testing.T) {
+	t.Parallel()
+
+	mainGo := createTestModuleWithExec(t, `package main
+
+import (
+	"fmt"
+	"os/exec"
+)
+
+func main() {
+	// Call with multiple arguments
+	cmd := exec.Command("git", "push", "origin", "main", "--force")
+	out, _ := cmd.Output()
+	fmt.Print(string(out))
+}
+`)
+
+	tester := gocmdtester.FromPath(t, mainGo)
+
+	// Set up mock with AnyFurtherArgs matcher
+	mock := tester.Mock("git", "push", gocmdtester.AnyFurtherArgs).
+		WithStdout("pushed\n")
+
+	result := tester.Run()
+
+	assert.Assert(t, result.Success(), "expected success, got exit code %d, stderr: %s", result.ExitCode(), result.Stderr())
+	assert.Assert(t, mock.Called(), "expected mock to be called")
+	assert.Assert(t, result.StdoutContains("pushed"))
+}
+
+// TestMock_AnyFurtherArgs_ZeroArgs tests that AnyFurtherArgs matches zero additional arguments.
+func TestMock_AnyFurtherArgs_ZeroArgs(t *testing.T) {
+	t.Parallel()
+
+	mainGo := createTestModuleWithExec(t, `package main
+
+import (
+	"fmt"
+	"os/exec"
+)
+
+func main() {
+	// Call with just "git push" - no additional args
+	cmd := exec.Command("git", "push")
+	out, _ := cmd.Output()
+	fmt.Print(string(out))
+}
+`)
+
+	tester := gocmdtester.FromPath(t, mainGo)
+
+	// Set up mock with AnyFurtherArgs - should match even with zero additional args
+	mock := tester.Mock("git", "push", gocmdtester.AnyFurtherArgs).
+		WithStdout("pushed\n")
+
+	result := tester.Run()
+
+	assert.Assert(t, result.Success(), "expected success, got exit code %d, stderr: %s", result.ExitCode(), result.Stderr())
+	assert.Assert(t, mock.Called(), "expected mock to be called")
+}
+
+// TestMock_PatternWithPassthrough tests pattern matching combined with passthrough.
+func TestMock_PatternWithPassthrough(t *testing.T) {
+	t.Parallel()
+
+	mainGo := createTestModuleWithExec(t, `package main
+
+import (
+	"fmt"
+	"os/exec"
+)
+
+func main() {
+	cmd := exec.Command("echo", "hello", "world")
+	out, _ := cmd.Output()
+	fmt.Print("output: " + string(out))
+}
+`)
+
+	tester := gocmdtester.FromPath(t, mainGo)
+
+	// Set up mock with pattern matching and passthrough
+	mock := tester.Mock("echo", gocmdtester.AnyFurtherArgs).
+		WithPassthroughExec()
+
+	result := tester.Run()
+
+	assert.Assert(t, result.Success(), "expected success, got exit code %d, stderr: %s", result.ExitCode(), result.Stderr())
+	assert.Assert(t, mock.Called(), "expected mock to be called")
+	assert.Assert(t, result.StdoutContains("hello world"), "expected real echo output")
+}
+
+// TestMock_PatternPriority tests that mocks are matched in registration order.
+func TestMock_PatternPriority(t *testing.T) {
+	t.Parallel()
+
+	mainGo := createTestModuleWithExec(t, `package main
+
+import (
+	"fmt"
+	"os/exec"
+)
+
+func main() {
+	// This should match the specific mock, not the general one
+	cmd := exec.Command("git", "push", "origin")
+	out, _ := cmd.Output()
+	fmt.Print(string(out))
+}
+`)
+
+	tester := gocmdtester.FromPath(t, mainGo)
+	tester.SkipMockVerification() // General mock won't be called
+
+	// Register specific mock FIRST
+	specificMock := tester.Mock("git", "push", "origin").
+		WithStdout("specific\n")
+
+	// Register general mock SECOND - it won't be executed but its pattern matches
+	tester.Mock("git", "push", gocmdtester.AnyFurtherArgs).
+		WithStdout("general\n")
+
+	result := tester.Run()
+
+	assert.Assert(t, result.Success())
+	assert.Assert(t, specificMock.Called(), "specific mock should be called")
+	// The specific mock's output should be used (not general)
+	assert.Assert(t, result.StdoutContains("specific"))
+	assert.Assert(t, !result.StdoutContains("general"), "general mock output should not appear")
+}
+
+// TestMock_MultipleAnyMatchers tests using multiple Any matchers.
+func TestMock_MultipleAnyMatchers(t *testing.T) {
+	t.Parallel()
+
+	mainGo := createTestModuleWithExec(t, `package main
+
+import (
+	"fmt"
+	"os/exec"
+)
+
+func main() {
+	cmd := exec.Command("git", "diff", "HEAD", "main")
+	out, _ := cmd.Output()
+	fmt.Print(string(out))
+}
+`)
+
+	tester := gocmdtester.FromPath(t, mainGo)
+
+	// Set up mock with multiple Any matchers
+	mock := tester.Mock("git", "diff", gocmdtester.Any, gocmdtester.Any).
+		WithStdout("diff output\n")
+
+	result := tester.Run()
+
+	assert.Assert(t, result.Success(), "expected success, got exit code %d, stderr: %s", result.ExitCode(), result.Stderr())
+	assert.Assert(t, mock.Called(), "expected mock to be called")
+	assert.Assert(t, result.StdoutContains("diff output"))
+}
+
+// TestMock_CalledWithArgs_PatternMock tests CalledWithArgs with pattern-based mocks.
+func TestMock_CalledWithArgs_PatternMock(t *testing.T) {
+	t.Parallel()
+
+	mainGo := createTestModuleWithExec(t, `package main
+
+import (
+	"os/exec"
+)
+
+func main() {
+	exec.Command("git", "push", "origin", "main").Run()
+	exec.Command("git", "push", "upstream", "feature").Run()
+}
+`)
+
+	tester := gocmdtester.FromPath(t, mainGo)
+
+	// Set up mock with AnyFurtherArgs
+	mock := tester.Mock("git", "push", gocmdtester.AnyFurtherArgs)
+
+	tester.Run()
+
+	// Verify specific invocations
+	assert.Assert(t, mock.CalledWithArgs("push", "origin", "main"), "should have been called with origin main")
+	assert.Assert(t, mock.CalledWithArgs("push", "upstream", "feature"), "should have been called with upstream feature")
+	assert.Assert(t, !mock.CalledWithArgs("push", "other"), "should not have been called with other")
+	assert.Equal(t, mock.CalledTimes(), 2)
+}
+
+// TestMock_Calls_PatternMock tests the Calls() method with pattern-based mocks.
+func TestMock_Calls_PatternMock(t *testing.T) {
+	t.Parallel()
+
+	mainGo := createTestModuleWithExec(t, `package main
+
+import (
+	"os/exec"
+)
+
+func main() {
+	exec.Command("git", "merge-base", "HEAD").Run()
+	exec.Command("git", "merge-base", "main").Run()
+	exec.Command("git", "status").Run()
+}
+`)
+
+	tester := gocmdtester.FromPath(t, mainGo)
+
+	// Set up pattern mock
+	mergeBaseMock := tester.Mock("git", "merge-base", gocmdtester.Any)
+	statusMock := tester.Mock("git", "status")
+
+	tester.Run()
+
+	// Check Calls() returns all matching invocations
+	calls := mergeBaseMock.Calls()
+	assert.Equal(t, len(calls), 2)
+	assert.DeepEqual(t, calls[0].Args, []string{"merge-base", "HEAD"})
+	assert.DeepEqual(t, calls[1].Args, []string{"merge-base", "main"})
+
+	// status mock should have one call
+	assert.Equal(t, statusMock.CalledTimes(), 1)
+}
