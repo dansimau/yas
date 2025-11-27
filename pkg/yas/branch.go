@@ -219,7 +219,7 @@ func (yas *YAS) SwitchBranchInteractive() error {
 	}
 
 	// Check out the selected branch
-	if err := yas.git.Checkout(selected.ID); err != nil {
+	if err := yas.SwitchBranch(selected.ID); err != nil {
 		return fmt.Errorf("failed to checkout branch: %w", err)
 	}
 
