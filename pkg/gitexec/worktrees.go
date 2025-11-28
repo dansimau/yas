@@ -77,6 +77,11 @@ func (r *Repo) Worktrees() ([]WorktreeEntry, error) {
 
 // LinkedWorktrees returns all linked/child worktrees for the repository (i.e. excluding the primary worktree).
 func (r *Repo) LinkedWorktrees() ([]WorktreeEntry, error) {
+	primaryWorktreePath, err := r.PrimaryWorktreePath()
+	if err != nil {
+		return nil, err
+	}
+
 	worktrees, err := r.Worktrees()
 	if err != nil {
 		return nil, err
@@ -85,7 +90,7 @@ func (r *Repo) LinkedWorktrees() ([]WorktreeEntry, error) {
 	linkedWorktrees := []WorktreeEntry{}
 
 	for _, wt := range worktrees {
-		isSameRealPath, err := fsutil.IsSameRealPath(wt.Path, r.path)
+		isSameRealPath, err := fsutil.IsSameRealPath(wt.Path, primaryWorktreePath)
 		if err != nil {
 			return nil, err
 		}

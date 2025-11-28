@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dansimau/yas/pkg/gitexec"
 	"github.com/go-git/go-git/v5/plumbing"
 )
 
@@ -69,6 +70,10 @@ func (yas *YAS) DeleteBranch(branchName string, force bool) error {
 		return fmt.Errorf("failed to check for worktree: %w", err)
 	}
 
+	// We may need to switch to another branch or even worktree before deleting.
+	// However, by default, we can just delete from where we are.
+	deleteBranchContext := yas.git
+
 	// Deleting a branch with a worktree
 	if worktreePath != "" {
 		inWorktree, err := yas.git.IsLinkedWorktree()
@@ -94,19 +99,31 @@ func (yas *YAS) DeleteBranch(branchName string, force bool) error {
 			}
 		}
 
+		// We need to delete the branch from the primary worktree, not the
+		// worktree we're currently on, because we're about to delete it.
+		primaryRepoPath, err := yas.git.PrimaryWorktreePath()
+		if err != nil {
+			return fmt.Errorf("failed to get primary repo path: %w", err)
+		}
+
+		deleteBranchContext = gitexec.WithRepo(primaryRepoPath)
+
 		// Remove worktree
 		if err := yas.git.WorktreeRemove(worktreePath, force); err != nil {
 			return fmt.Errorf("failed to remove worktree: %w", err)
 		}
 	} else if currentBranch == branchName {
-		// Not in a worktree - switch off branch if needed
-		if err := yas.git.QuietCheckout(yas.cfg.TrunkBranch); err != nil {
-			return fmt.Errorf("can't delete branch while on it; failed to checkout trunk: %w", err)
+		// We're deleting the current branch, so we need to switch to the trunk branch
+		trunkBranchContext, err := yas.trunkBranchContext()
+		if err != nil {
+			return fmt.Errorf("failed to get trunk branch context: %w", err)
 		}
+
+		deleteBranchContext = trunkBranchContext.Repo
 	}
 
 	// Delete branch
-	if err := yas.git.DeleteBranch(branchName); err != nil {
+	if err := deleteBranchContext.DeleteBranch(branchName); err != nil {
 		return err
 	}
 
@@ -398,4 +415,8 @@ func (yas *YAS) pruneMetadata() error {
 	}
 
 	return yas.data.Save()
+}
+
+func (yas *YAS) trunkBranchContext() (*gitexec.BranchContext, error) {
+	return yas.git.WithBranchContext(yas.cfg.TrunkBranch)
 }

@@ -507,7 +507,7 @@ func TestDelete_DeleteFromWithinWorktreeFailsWithoutShellHook(t *testing.T) {
 
 	result := cliInWorktree.Run("delete", "--force")
 	assert.Equal(t, result.ExitCode(), 1)
-	assert.Assert(t, cmp.Contains(result.Stderr(), "cannot delete worktree from within: shell hook not installed"))
+	assert.Assert(t, cmp.Contains(result.Stderr(), "ERROR: failed to delete branch: YAS_SHELL_EXEC environment variable not set"))
 
 	// Verify the worktree and branch were NOT deleted
 	info, err := os.Stat(worktreePath)
