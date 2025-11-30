@@ -232,6 +232,10 @@ func (r *Repo) GetRemoteShortHash(branchName string) (string, error) {
 	return r.output("git", "rev-parse", "--short", "origin/"+branchName)
 }
 
+func (r *Repo) Path() string {
+	return r.path
+}
+
 func (r *Repo) Rebase(upstream, branchName string) error {
 	return xexec.Command("git", "-c", "core.hooksPath=/dev/null", "rebase", upstream, branchName, "--update-refs").
 		WithEnvVars(CleanedGitEnv()).
