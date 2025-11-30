@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dansimau/yas/pkg/fsutil"
 	"github.com/dansimau/yas/pkg/gitexec"
 	"github.com/go-git/go-git/v5/plumbing"
 )
@@ -95,7 +96,10 @@ func (yas *YAS) deleteWorktreeBranch(worktreePath string, branchName string, for
 		return fmt.Errorf("failed to get primary repo path: %w", err)
 	}
 
-	deletingCurrentWorktree := worktreePath == yas.git.Path()
+	deletingCurrentWorktree, err := fsutil.IsSameRealPath(worktreePath, yas.git.Path())
+	if err != nil {
+		return fmt.Errorf("failed to check if directories match: %w", err)
+	}
 
 	// Verify shell exec is available before any destructive operations
 	if deletingCurrentWorktree {
