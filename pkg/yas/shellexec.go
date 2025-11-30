@@ -9,6 +9,16 @@ import (
 	"al.essio.dev/pkg/shellescape"
 )
 
+var ErrShellHookNotInstalled = errors.New("YAS_SHELL_EXEC environment variable not set\n\nTo enable worktree directory switching, install the yas shell hook:\n\n  # For bash, add to ~/.bashrc:\n  eval \"$(yas hook bash)\"\n\n  # For zsh, add to ~/.zshrc:\n  eval \"$(yas hook zsh)\"")
+
+func errIfShellHookNotInstalled() error {
+	if os.Getenv("YAS_SHELL_EXEC") == "" {
+		return ErrShellHookNotInstalled
+	}
+
+	return nil
+}
+
 // ShellExecWriter writes shell commands to the YAS_SHELL_EXEC file.
 type ShellExecWriter struct {
 	filePath string
@@ -20,7 +30,7 @@ type ShellExecWriter struct {
 func NewShellExecWriter() (*ShellExecWriter, error) {
 	filePath := os.Getenv("YAS_SHELL_EXEC")
 	if filePath == "" {
-		return nil, errors.New("YAS_SHELL_EXEC environment variable not set\n\nTo enable worktree directory switching, install the yas shell hook:\n\n  # For bash, add to ~/.bashrc:\n  eval \"$(yas hook bash)\"\n\n  # For zsh, add to ~/.zshrc:\n  eval \"$(yas hook zsh)\"")
+		return nil, ErrShellHookNotInstalled
 	}
 
 	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)

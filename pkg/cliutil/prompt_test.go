@@ -134,3 +134,47 @@ func TestPrompt_WithDefaultNoValidator(t *testing.T) {
 
 	assert.Equal(t, result, "master")
 }
+
+func TestConfirm(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		{"lowercase y", "y\n", true},
+		{"uppercase Y", "Y\n", true},
+		{"lowercase yes", "yes\n", true},
+		{"uppercase YES", "YES\n", true},
+		{"mixed case Yes", "Yes\n", true},
+		{"lowercase n", "n\n", false},
+		{"uppercase N", "N\n", false},
+		{"lowercase no", "no\n", false},
+		{"uppercase NO", "NO\n", false},
+		{"empty input", "\n", false},
+		{"whitespace around y", "  y  \n", true},
+		{"whitespace around yes", "  yes  \n", true},
+		{"random input", "maybe\n", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			oldStdin := os.Stdin
+
+			defer func() { os.Stdin = oldStdin }()
+
+			r, w, err := os.Pipe()
+			assert.NilError(t, err)
+
+			os.Stdin = r
+
+			go func() {
+				_, err := io.WriteString(w, tt.input)
+				assert.NilError(t, err)
+				assert.NilError(t, w.Close())
+			}()
+
+			result := cliutil.Confirm("Continue?")
+			assert.Equal(t, result, tt.expected)
+		})
+	}
+}

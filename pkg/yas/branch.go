@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dansimau/yas/pkg/fsutil"
 	"github.com/dansimau/yas/pkg/gitexec"
 	"github.com/go-git/go-git/v5/plumbing"
 )
@@ -43,38 +44,113 @@ func (yas *YAS) BranchExistsRemotely(branchName string) (bool, error) {
 	return yas.git.RemoteBranchExists(branchName)
 }
 
-func (yas *YAS) DeleteBranch(name string) error {
-	branchExists, err := yas.git.BranchExists(name)
+// DeleteBranch deletes a branch and its associated worktree if one exists.
+// If force is true, it will remove the worktree even if it has uncommitted changes.
+func (yas *YAS) DeleteBranch(branchName string, force bool) error {
+	branchExists, err := yas.git.BranchExists(branchName)
 	if err != nil {
 		return err
 	}
 
 	if !branchExists {
-		if err := yas.markBranchDeleted(name); err != nil {
-			return err
-		}
-
-		return nil
+		return yas.markBranchDeleted(branchName)
 	}
 
-	currentBranchName, err := yas.git.GetCurrentBranchName()
+	currentBranch, err := yas.git.GetCurrentBranchName()
 	if err != nil {
 		return err
 	}
 
-	// Can't delete the branch while we're on it; switch to trunk
-	if currentBranchName == name {
+	worktreePath, err := yas.git.LinkedWorktreePathForBranch(branchName)
+	if err != nil {
+		return fmt.Errorf("failed to check for worktree: %w", err)
+	}
+
+	if worktreePath != "" {
+		return yas.deleteWorktreeBranch(worktreePath, branchName, force)
+	}
+
+	return yas.deleteNonWorktreeBranch(branchName, currentBranch)
+}
+
+// deleteNonWorktreeBranch deletes a branch that does not have a worktree.
+func (yas *YAS) deleteNonWorktreeBranch(branchName string, currentBranch string) error {
+	// If deleting the current branch, we need to switch to trunk first
+	if currentBranch == branchName {
 		if err := yas.git.QuietCheckout(yas.cfg.TrunkBranch); err != nil {
-			return fmt.Errorf("can't delete branch while on it; failed to checkout trunk: %w", err)
+			return err
 		}
 	}
 
-	if err := yas.git.DeleteBranch(name); err != nil {
+	if err := yas.git.DeleteBranch(branchName); err != nil {
 		return err
 	}
 
-	if err := yas.markBranchDeleted(name); err != nil {
+	return yas.markBranchDeleted(branchName)
+}
+
+// deleteWorktreeBranch deletes a branch that has an associated worktree.
+func (yas *YAS) deleteWorktreeBranch(worktreePath string, branchName string, force bool) error {
+	primaryRepoPath, err := yas.git.PrimaryWorktreePath()
+	if err != nil {
+		return fmt.Errorf("failed to get primary repo path: %w", err)
+	}
+
+	deletingCurrentWorktree, err := fsutil.IsSameRealPath(worktreePath, yas.git.Path())
+	if err != nil {
+		return fmt.Errorf("failed to check if directories match: %w", err)
+	}
+
+	// Verify shell exec is available before any destructive operations
+	if deletingCurrentWorktree {
+		if err := errIfShellHookNotInstalled(); err != nil {
+			return err
+		}
+	}
+
+	// Remove the worktree
+	if err := yas.git.WorktreeRemove(worktreePath, force); err != nil {
+		return fmt.Errorf("failed to remove worktree: %w", err)
+	}
+
+	// Delete the branch from primary repo dir
+	if err := gitexec.WithRepo(primaryRepoPath).DeleteBranch(branchName); err != nil {
 		return err
+	}
+
+	// Mark as deleted in metadata
+	if err := yas.markBranchDeleted(branchName); err != nil {
+		return err
+	}
+
+	// Switch to primary repo if we deleted the current worktree
+	if deletingCurrentWorktree {
+		return yas.switchDirectoryAfterDeletion(primaryRepoPath)
+	}
+
+	return nil
+}
+
+// switchDirectoryAfterDeletion uses ShellExecWriter to change the shell's
+// working directory after a worktree has been deleted.
+func (yas *YAS) switchDirectoryAfterDeletion(targetDir string) error {
+	shellExec, err := NewShellExecWriter()
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		if closeErr := shellExec.Close(); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "WARNING: failed to close shell exec file: %v\n", closeErr)
+		}
+	}()
+
+	if err := shellExec.WriteCommand("cd", targetDir); err != nil {
+		return fmt.Errorf("failed to write cd command: %w", err)
+	}
+
+	if err := shellExec.WriteCommand("echo", "Switched to main worktree"); err != nil {
+		return fmt.Errorf("failed to write cd command: %w", err)
 	}
 
 	return nil
@@ -260,17 +336,7 @@ func (yas *YAS) SwitchBranch(branchName string) error {
 		return nil
 	}
 
-	// Check if we're currently in a worktree
-	// We need to check based on the current working directory, not the repo directory
-	// because the repo directory may have been resolved to the primary repo
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("failed to get current directory: %w", err)
-	}
-
-	cwdRepo := gitexec.WithRepo(cwd)
-
-	inWorktree, err := cwdRepo.IsLinkedWorktree()
+	inWorktree, err := yas.git.IsLinkedWorktree()
 	if err != nil {
 		return fmt.Errorf("failed to check if in worktree: %w", err)
 	}

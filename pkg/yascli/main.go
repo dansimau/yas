@@ -79,6 +79,7 @@ func Run(args ...string) (exitCode int) {
 	mustAddCommand(parser.AddCommand("branch", "Work with branches", branchCmdLongHelp, &branchCmd{})).Aliases = []string{"nb", "br"}
 	mustAddCommand(parser.AddCommand("config", "Manage repository-specific configuration", "", &configCmd{}))
 	mustAddCommand(parser.AddCommand("continue", "Continue a restack operation after fixing conflicts", "", &continueCmd{}))
+	mustAddCommand(parser.AddCommand("delete", "Delete a branch and its worktree", "", &deleteCmd{}))
 	mustAddCommand(parser.AddCommand("hook", "Print shell integration hook for bash or zsh", "", &hookCmd{}))
 	mustAddCommand(parser.AddCommand("init", "Set up initial configuration", "", &initCmd{}))
 	mustAddCommand(parser.AddCommand("list", "List stacks", "", &listCmd{})).Aliases = []string{"ls"}
