@@ -1,6 +1,7 @@
 package test
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/dansimau/yas/pkg/gocmdtester"
@@ -286,4 +287,67 @@ func TestSync_DeleteBranchWithNoParent(t *testing.T) {
 	branchMetadata := yasInstance.TrackedBranches()
 	_, exists := branchMetadata.Get("topic-a")
 	assert.Assert(t, !exists, "topic-a should be deleted from tracked branches")
+}
+
+func TestSync_RunFromWorktree(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	fakeOrigin := t.TempDir()
+	worktreePath := filepath.Join(tempDir, "worktrees", "topic-a")
+
+	// Set up CLI for the primary repo (for initial setup)
+	cliPrimary := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	// Set up CLI for the worktree
+	cliWorktree := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(worktreePath),
+	)
+
+	// Mock gh pr list for topic-a (sync refreshes PR status)
+	mockGitHubPRForBranch(cliWorktree, "topic-a", yas.PullRequestMetadata{})
+
+	// Mock git pull in the worktree CLI (sync calls UpdateTrunk which calls Pull)
+	cliWorktree.Mock("git", "pull", gocmdtester.AnyFurtherArgs).WithStdout("Already up to date.\n")
+	cliWorktree.Mock("git", gocmdtester.AnyFurtherArgs).WithPassthroughExec()
+
+	testutil.ExecOrFail(t, tempDir, stringutil.MustInterpolate(`
+		# Set up "remote" bare repository
+		git init --bare {{.fakeOrigin}}
+
+		# Initialize local repo with main branch
+		git init --initial-branch=main
+		git remote add origin {{.fakeOrigin}}
+
+		touch main
+		git add main
+		git commit -m "main-0"
+
+		git push -u origin main
+		git branch --set-upstream-to=origin/main main
+
+		# Create topic-a branch
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+
+		# Go back to main and create worktree for topic-a
+		git checkout main
+		mkdir -p worktrees
+		git worktree add {{.worktreePath}} topic-a
+	`, map[string]string{
+		"fakeOrigin":   fakeOrigin,
+		"worktreePath": worktreePath,
+	}))
+
+	// Initialize yas config from primary repo
+	assert.NilError(t, cliPrimary.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cliPrimary.Run("add", "topic-a", "--parent=main").Err())
+
+	// Run sync from inside the worktree
+	result := cliWorktree.Run("sync")
+	assert.NilError(t, result.Err(), "yas sync should succeed from worktree; stderr: %s", result.Stderr())
 }
