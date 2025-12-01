@@ -1,6 +1,9 @@
 package gitexec
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 var noop = func() error { return nil }
 
@@ -25,6 +28,8 @@ func (r *Repo) WithBranchContext(branchName string) (*BranchContext, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	fmt.Println("worktreePath", worktreePath)
 
 	if worktreePath != "" {
 		return &BranchContext{

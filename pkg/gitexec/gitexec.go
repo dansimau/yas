@@ -49,7 +49,7 @@ func (r *Repo) output(args ...string) (string, error) {
 	b, err := xexec.Command(args...).
 		WithEnvVars(CleanedGitEnv()).
 		WithWorkingDir(r.path).
-		WithStdout(nil).
+		// WithStdout(nil).
 		Output()
 	if err != nil {
 		return "", err
