@@ -12,14 +12,15 @@ Checkout/switch to a branch:
 - yas branch (With no arguments, will open interactive branch switcher)
 
 Create a new branch:
-- yas branch <new-branch-name>`
+- yas branch <new-branch-name>
+- yas branch <new-branch-name> --parent <branch> (create from specific branch)`
 
 type branchCmd struct {
 	Arguments struct {
 		BranchName string `description:"Branch name" positional-args:"true"`
 	} `positional-args:"true"`
 
-	Parent   string `description:"Parent branch name (default: current branch)" long:"parent"   required:"false"`
+	Parent   string `description:"Create branch from and set as parent (default: current branch)" long:"parent"   required:"false"`
 	Worktree bool   `description:"Create branch in a new worktree"              long:"worktree"`
 }
 

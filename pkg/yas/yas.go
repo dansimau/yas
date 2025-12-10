@@ -101,6 +101,7 @@ func (yas *YAS) validate() error {
 
 // CreateBranch creates a new branch with the given name, optionally applying a user prefix.
 // If parentBranch is empty, it uses the current branch as the parent.
+// If parentBranch is specified, the new branch is created from that branch.
 // The new branch is created, checked out, and added to the stack.
 // If there are staged changes, they are automatically committed.
 func (yas *YAS) CreateBranch(branchName string, parentBranch string) (string, error) {
@@ -139,11 +140,16 @@ func (yas *YAS) CreateBranch(branchName string, parentBranch string) (string, er
 		}
 
 		parentBranch = currentBranch
-	}
 
-	// Create the new branch
-	if err := yas.git.CreateBranch(fullBranchName); err != nil {
-		return "", fmt.Errorf("failed to create branch: %w", err)
+		// Create the new branch from the current branch
+		if err := yas.git.CreateBranch(fullBranchName); err != nil {
+			return "", fmt.Errorf("failed to create branch: %w", err)
+		}
+	} else {
+		// Create the new branch from the specified parent branch
+		if err := yas.git.CreateBranchFrom(fullBranchName, parentBranch); err != nil {
+			return "", fmt.Errorf("failed to create branch from %s: %w", parentBranch, err)
+		}
 	}
 
 	// Add to stack with parent

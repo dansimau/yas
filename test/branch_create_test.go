@@ -177,3 +177,100 @@ func TestConfigSet_AutoPrefixBranch(t *testing.T) {
 		grep -q "autoPrefixBranch: false" .yas/yas.yaml
 	`)
 }
+
+func TestBranchCreate_FromParentBranch(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+		gocmdtester.WithEnv("GIT_AUTHOR_EMAIL", "testuser@example.com"),
+	)
+
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+		touch main
+		git add main
+		git commit -m "main-0"
+
+		# Create feature-a branch with a commit
+		git checkout -b feature-a
+		touch a
+		git add a
+		git commit -m "feature-a-0"
+
+		# Create another branch to be "current" when we create from main
+		git checkout -b other-branch
+		touch other
+		git add other
+		git commit -m "other-0"
+	`)
+
+	// Initialize yas with auto-prefix disabled
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("config", "set", "--no-auto-prefix-branch").Err())
+	assert.NilError(t, cli.Run("add", "feature-a", "--parent=main").Err())
+	assert.NilError(t, cli.Run("add", "other-branch", "--parent=main").Err())
+
+	// We're currently on other-branch, but we want to create from main
+	currentBranch := mustExecOutput(tempDir, "git", "branch", "--show-current")
+	equalLines(t, currentBranch, "other-branch")
+
+	// Create new branch from main without checking out main first
+	assert.NilError(t, cli.Run("branch", "new-feature", "--parent=main").Err())
+
+	// Verify we're now on new-feature
+	currentBranch = mustExecOutput(tempDir, "git", "branch", "--show-current")
+	equalLines(t, currentBranch, "new-feature")
+
+	// Verify the branch was created from main (should not have commits from other-branch)
+	// The log should only show main-0 commit
+	output := mustExecOutput(tempDir, "git", "log", "--oneline")
+	assert.Assert(t, strings.Contains(output, "main-0"), "Expected new-feature to contain main-0 commit")
+	assert.Assert(t, !strings.Contains(output, "other-0"), "Expected new-feature to NOT contain other-0 commit")
+	assert.Assert(t, !strings.Contains(output, "feature-a-0"), "Expected new-feature to NOT contain feature-a-0 commit")
+}
+
+func TestBranchCreate_FromParentBranchWithWorktree(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+		gocmdtester.WithEnv("GIT_AUTHOR_EMAIL", "testuser@example.com"),
+	)
+
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+		touch main
+		git add main
+		git commit -m "main-0"
+
+		# Create feature-a branch with a commit
+		git checkout -b feature-a
+		touch a
+		git add a
+		git commit -m "feature-a-0"
+		git checkout main
+	`)
+
+	// Initialize yas with auto-prefix disabled
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("config", "set", "--no-auto-prefix-branch").Err())
+	assert.NilError(t, cli.Run("add", "feature-a", "--parent=main").Err())
+
+	// We're currently on main, create from feature-a in a worktree
+	currentBranch := mustExecOutput(tempDir, "git", "branch", "--show-current")
+	equalLines(t, currentBranch, "main")
+
+	// Create new branch from feature-a with worktree
+	assert.NilError(t, cli.Run("branch", "new-feature", "--parent=feature-a", "--worktree").Err())
+
+	// Verify the branch was created from feature-a
+	// The log should show both main-0 and feature-a-0 commits
+	output := mustExecOutput(tempDir, "git", "-C", "../new-feature", "log", "--oneline")
+	assert.Assert(t, strings.Contains(output, "main-0"), "Expected new-feature to contain main-0 commit")
+	assert.Assert(t, strings.Contains(output, "feature-a-0"), "Expected new-feature to contain feature-a-0 commit")
+}
