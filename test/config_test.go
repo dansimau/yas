@@ -152,7 +152,7 @@ func TestConfig_WorktreeBranch(t *testing.T) {
 	assert.NilError(t, result.Err())
 
 	// Verify that a worktree was created
-	worktreeList := testutil.MustExecOutput(t, tempDir, "git worktree list")
+	worktreeList := mustExecOutput(tempDir, "git", "worktree", "list")
 	assert.Assert(t, strings.Contains(worktreeList, "worktrees/feature-a"), "Expected worktree to be created")
 
 	// Disable worktree-branch config
@@ -164,6 +164,6 @@ func TestConfig_WorktreeBranch(t *testing.T) {
 	assert.NilError(t, result.Err())
 
 	// Verify that no new worktree was created for feature-b
-	worktreeList = testutil.MustExecOutput(t, tempDir, "git worktree list")
+	worktreeList = mustExecOutput(tempDir, "git", "worktree", "list")
 	assert.Assert(t, !strings.Contains(worktreeList, "worktrees/feature-b"), "Expected no worktree for feature-b")
 }
