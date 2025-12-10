@@ -53,19 +53,17 @@ func (c *branchCmd) Execute(args []string) error {
 
 	branchExists := branchExistsLocally || branchExistsRemotely
 
-	// Create branch if it doesn't exist
-	if !branchExists {
-		fullBranchName, err = yasInstance.CreateBranch(c.Arguments.BranchName, c.Parent)
-		if err != nil {
-			return NewError(err.Error())
-		}
-	}
-
 	// Determine if we should use worktree: either explicitly via flag or via config
 	useWorktree := c.Worktree || yasInstance.Config().WorktreeBranch
 
-	// Ensure worktree exists for branch
-	if useWorktree {
+	// Create branch if it doesn't exist
+	if !branchExists {
+		fullBranchName, err = yasInstance.CreateBranch(c.Arguments.BranchName, c.Parent, useWorktree)
+		if err != nil {
+			return NewError(err.Error())
+		}
+	} else if useWorktree {
+		// For existing branches, ensure worktree exists
 		if err := yasInstance.EnsureLinkedWorktreeForBranch(fullBranchName); err != nil {
 			return NewError(err.Error())
 		}

@@ -1,6 +1,7 @@
 package test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/dansimau/yas/pkg/gocmdtester"
@@ -270,7 +271,7 @@ func TestBranchCreate_FromParentBranchWithWorktree(t *testing.T) {
 
 	// Verify the branch was created from feature-a
 	// The log should show both main-0 and feature-a-0 commits
-	output := mustExecOutput(tempDir, "git", "-C", "../new-feature", "log", "--oneline")
+	output := mustExecOutput(tempDir, "git", "-C", ".yas/worktrees/new-feature", "log", "--oneline")
 	assert.Assert(t, strings.Contains(output, "main-0"), "Expected new-feature to contain main-0 commit")
 	assert.Assert(t, strings.Contains(output, "feature-a-0"), "Expected new-feature to contain feature-a-0 commit")
 }
