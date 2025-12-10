@@ -116,3 +116,54 @@ func TestInit_FromInsideWorktree(t *testing.T) {
 	resultFromWorktree := cliInWorktree.Run("list")
 	assert.NilError(t, resultFromWorktree.Err(), "yas list should work from worktree after init from worktree")
 }
+
+func TestConfig_WorktreeBranch(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+		touch main
+		git add main
+		git commit -m "main-0"
+	`)
+
+	// Initialize yas
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+
+	// Enable worktree-branch config
+	result := cli.Run("config", "set", "--worktree-branch")
+	assert.NilError(t, result.Err())
+	assert.Assert(t, strings.Contains(result.Stdout(), "Wrote config to:"))
+
+	// Create a new branch - should automatically create a worktree
+	tempFile := filepath.Join(t.TempDir(), "shell-exec")
+	cliWithEnv := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+		gocmdtester.WithEnv("YAS_SHELL_EXEC", tempFile),
+	)
+
+	result = cliWithEnv.Run("branch", "feature-a")
+	assert.NilError(t, result.Err())
+
+	// Verify that a worktree was created
+	worktreeList := mustExecOutput(tempDir, "git", "worktree", "list")
+	assert.Assert(t, strings.Contains(worktreeList, "worktrees/feature-a"), "Expected worktree to be created")
+
+	// Disable worktree-branch config
+	result = cli.Run("config", "set", "--no-worktree-branch")
+	assert.NilError(t, result.Err())
+
+	// Create another branch - should NOT create a worktree
+	result = cli.Run("branch", "feature-b")
+	assert.NilError(t, result.Err())
+
+	// Verify that no new worktree was created for feature-b
+	worktreeList = mustExecOutput(tempDir, "git", "worktree", "list")
+	assert.Assert(t, !strings.Contains(worktreeList, "worktrees/feature-b"), "Expected no worktree for feature-b")
+}

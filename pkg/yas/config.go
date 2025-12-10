@@ -28,6 +28,7 @@ type Config struct {
 	RepoDirectory    string `yaml:"-"`
 	TrunkBranch      string `yaml:"trunkBranch"`
 	AutoPrefixBranch bool   `yaml:"autoPrefixBranch"`
+	WorktreeBranch   bool   `yaml:"worktreeBranch"`
 	WorktreesPath    string `yaml:"worktreesPath"`
 }
 
