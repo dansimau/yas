@@ -141,6 +141,10 @@ func (r *Repo) CreateBranch(branch string) error {
 	return r.run("git", "checkout", "-b", branch)
 }
 
+func (r *Repo) CreateBranchFrom(branch string, fromRef string) error {
+	return r.run("git", "checkout", "-b", branch, fromRef)
+}
+
 func (r *Repo) DeleteBranch(branch string) error {
 	return xexec.Command("git", "branch", "-D", branch).
 		WithEnvVars(CleanedGitEnv()).

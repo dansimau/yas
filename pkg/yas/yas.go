@@ -101,9 +101,10 @@ func (yas *YAS) validate() error {
 
 // CreateBranch creates a new branch with the given name, optionally applying a user prefix.
 // If parentBranch is empty, it uses the current branch as the parent.
+// If fromBranch is empty, it creates from the current branch.
 // The new branch is created, checked out, and added to the stack.
 // If there are staged changes, they are automatically committed.
-func (yas *YAS) CreateBranch(branchName string, parentBranch string) (string, error) {
+func (yas *YAS) CreateBranch(branchName string, parentBranch string, fromBranch string) (string, error) {
 	// Determine full branch name (with or without prefix based on config)
 	fullBranchName := branchName
 
@@ -132,7 +133,7 @@ func (yas *YAS) CreateBranch(branchName string, parentBranch string) (string, er
 
 	// Determine parent branch
 	if parentBranch == "" {
-		// Use current branch as parent
+		// Use current branch as parent if not specified
 		currentBranch, err := yas.git.GetCurrentBranchName()
 		if err != nil {
 			return "", fmt.Errorf("failed to get current branch: %w", err)
@@ -141,8 +142,19 @@ func (yas *YAS) CreateBranch(branchName string, parentBranch string) (string, er
 		parentBranch = currentBranch
 	}
 
-	// Create the new branch
-	if err := yas.git.CreateBranch(fullBranchName); err != nil {
+	// Determine source branch (where to create from)
+	if fromBranch == "" {
+		// Use current branch as source if not specified
+		currentBranch, err := yas.git.GetCurrentBranchName()
+		if err != nil {
+			return "", fmt.Errorf("failed to get current branch: %w", err)
+		}
+
+		fromBranch = currentBranch
+	}
+
+	// Create the new branch from the specified source
+	if err := yas.git.CreateBranchFrom(fullBranchName, fromBranch); err != nil {
 		return "", fmt.Errorf("failed to create branch: %w", err)
 	}
 

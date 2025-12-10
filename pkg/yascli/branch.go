@@ -12,7 +12,9 @@ Checkout/switch to a branch:
 - yas branch (With no arguments, will open interactive branch switcher)
 
 Create a new branch:
-- yas branch <new-branch-name>`
+- yas branch <new-branch-name>
+- yas branch <new-branch-name> --from <source-branch>
+- yas branch <new-branch-name> --from <source-branch> --worktree`
 
 type branchCmd struct {
 	Arguments struct {
@@ -20,6 +22,7 @@ type branchCmd struct {
 	} `positional-args:"true"`
 
 	Parent   string `description:"Parent branch name (default: current branch)" long:"parent"   required:"false"`
+	From     string `description:"Create branch from this branch (default: current branch)" long:"from" required:"false"`
 	Worktree bool   `description:"Create branch in a new worktree"              long:"worktree"`
 }
 
@@ -54,7 +57,7 @@ func (c *branchCmd) Execute(args []string) error {
 
 	// Create branch if it doesn't exist
 	if !branchExists {
-		fullBranchName, err = yasInstance.CreateBranch(c.Arguments.BranchName, c.Parent)
+		fullBranchName, err = yasInstance.CreateBranch(c.Arguments.BranchName, c.Parent, c.From)
 		if err != nil {
 			return NewError(err.Error())
 		}
