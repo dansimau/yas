@@ -263,7 +263,7 @@ func (yas *YAS) SwitchBranchInteractive() error {
 	}
 
 	// Get the list of branches
-	items, err := yas.GetBranchList(false, false)
+	items, err := yas.GetBranchList(false, false, false)
 	if err != nil {
 		return fmt.Errorf("failed to get branch list: %w", err)
 	}
@@ -384,6 +384,63 @@ func (yas *YAS) SwitchBranch(branchName string) error {
 
 func (yas *YAS) TrackedBranches() Branches {
 	return yas.data.Branches.ToSlice().NotDeleted()
+}
+
+func (yas *YAS) GetAllLocalBranches() ([]string, error) {
+	iter, err := yas.repo.Branches()
+	if err != nil {
+		return nil, err
+	}
+
+	branches := []string{}
+
+	if err := iter.ForEach(func(r *plumbing.Reference) error {
+		name := r.Name().Short()
+		branches = append(branches, name)
+
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	return branches, nil
+}
+
+// detectParentBranch attempts to detect the parent branch for an untracked branch.
+// It uses git merge-base with fork-point to find where the branch diverged,
+// then finds which branch is at that commit.
+// Always returns a parent branch (falls back to trunk), so error is always nil.
+func (yas *YAS) detectParentBranch(branchName string) string {
+	// Try to get fork point first
+	forkPoint, err := yas.git.GetForkPoint(branchName)
+	if err == nil && forkPoint != "" {
+		// Find the local branch at the fork point's parent commit
+		parentBranch, err := yas.git.GetLocalBranchNameForCommit(forkPoint + "^")
+		if err == nil && parentBranch != "" {
+			return parentBranch
+		}
+	}
+
+	// If fork point detection fails, try merge-base with trunk
+	mergeBase, err := yas.git.GetMergeBase(branchName, yas.cfg.TrunkBranch)
+	if err == nil && mergeBase != "" {
+		// Check if merge base is the tip of trunk (direct child)
+		trunkHash, err := yas.git.GetCommitHash(yas.cfg.TrunkBranch)
+		if err == nil && mergeBase == trunkHash {
+			return yas.cfg.TrunkBranch
+		}
+
+		// Try to find a tracked branch at the merge base
+		for _, branch := range yas.data.Branches.ToSlice() {
+			branchHash, err := yas.git.GetCommitHash(branch.Name)
+			if err == nil && branchHash == mergeBase {
+				return branch.Name
+			}
+		}
+	}
+
+	// Fall back to trunk branch
+	return yas.cfg.TrunkBranch
 }
 
 func (yas *YAS) UntrackedBranches() ([]string, error) {

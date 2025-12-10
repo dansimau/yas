@@ -41,7 +41,7 @@ func TestBranch_GetBranchList_ForInteractiveSwitcher(t *testing.T) {
 	y, err := yas.NewFromRepository(tempDir)
 	assert.NilError(t, err)
 
-	items, err := y.GetBranchList(false, false)
+	items, err := y.GetBranchList(false, false, false)
 	assert.NilError(t, err)
 
 	// Verify we get the expected branches
@@ -106,7 +106,7 @@ func TestBranch_GetBranchList_MultiLevelStack(t *testing.T) {
 	y, err := yas.NewFromRepository(tempDir)
 	assert.NilError(t, err)
 
-	items, err := y.GetBranchList(false, false)
+	items, err := y.GetBranchList(false, false, false)
 	assert.NilError(t, err)
 
 	// Verify we get all branches in the stack
@@ -168,7 +168,7 @@ func TestBranch_GetBranchList_ForkedBranches(t *testing.T) {
 	y, err := yas.NewFromRepository(tempDir)
 	assert.NilError(t, err)
 
-	items, err := y.GetBranchList(false, false)
+	items, err := y.GetBranchList(false, false, false)
 	assert.NilError(t, err)
 
 	// Verify we get all branches including the fork
@@ -221,7 +221,7 @@ func TestBranch_GetBranchList_CurrentBranchHighlight(t *testing.T) {
 	y, err := yas.NewFromRepository(tempDir)
 	assert.NilError(t, err)
 
-	items, err := y.GetBranchList(false, false)
+	items, err := y.GetBranchList(false, false, false)
 	assert.NilError(t, err)
 
 	// Verify current branch is highlighted with *
@@ -261,7 +261,7 @@ func TestBranch_GetBranchList_EmptyBranchList(t *testing.T) {
 	y, err := yas.NewFromRepository(tempDir)
 	assert.NilError(t, err)
 
-	items, err := y.GetBranchList(false, false)
+	items, err := y.GetBranchList(false, false, false)
 	assert.NilError(t, err)
 
 	// Should only have main branch
@@ -292,7 +292,7 @@ func TestBranch_GetBranchList_SingleBranch(t *testing.T) {
 	y, err := yas.NewFromRepository(tempDir)
 	assert.NilError(t, err)
 
-	items, err := y.GetBranchList(false, false)
+	items, err := y.GetBranchList(false, false, false)
 	assert.NilError(t, err)
 
 	// Should have only main branch
@@ -329,7 +329,7 @@ func TestBranch_GetBranchList_BranchNameFormatting(t *testing.T) {
 	y, err := yas.NewFromRepository(tempDir)
 	assert.NilError(t, err)
 
-	items, err := y.GetBranchList(false, false)
+	items, err := y.GetBranchList(false, false, false)
 	assert.NilError(t, err)
 
 	// Should display formatted branch name with greyed prefix

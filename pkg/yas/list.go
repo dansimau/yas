@@ -9,8 +9,8 @@ import (
 	"github.com/heimdalr/dag"
 )
 
-func (yas *YAS) List(currentStackOnly bool, showStatus bool) error {
-	items, err := yas.GetBranchList(currentStackOnly, showStatus)
+func (yas *YAS) List(currentStackOnly bool, showStatus bool, showAll bool) error {
+	items, err := yas.GetBranchList(currentStackOnly, showStatus, showAll)
 	if err != nil {
 		return err
 	}
@@ -22,9 +22,62 @@ func (yas *YAS) List(currentStackOnly bool, showStatus bool) error {
 	return nil
 }
 
+// augmentGraphWithAllBranches adds all local git branches to the graph,
+// detecting their parent branches using git helpers.
+func (yas *YAS) augmentGraphWithAllBranches(graph *dag.DAG) error {
+	// Get all local branches
+	allBranches, err := yas.GetAllLocalBranches()
+	if err != nil {
+		return fmt.Errorf("failed to get all local branches: %w", err)
+	}
+
+	// Add vertices for branches not already in the graph
+	for _, branchName := range allBranches {
+		// Skip if already in graph (either trunk or tracked branch)
+		if _, err := graph.GetVertex(branchName); err == nil {
+			continue
+		}
+
+		// Add vertex for this untracked branch
+		if err := graph.AddVertexByID(branchName, branchName); err != nil {
+			return fmt.Errorf("failed to add vertex for %s: %w", branchName, err)
+		}
+	}
+
+	// Add edges for untracked branches
+	for _, branchName := range allBranches {
+		// Skip if this is a tracked branch (it already has edges)
+		if yas.data.Branches.Get(branchName).Parent != "" {
+			continue
+		}
+
+		// Skip trunk branch
+		if branchName == yas.cfg.TrunkBranch {
+			continue
+		}
+
+		// Detect parent branch
+		parentBranch := yas.detectParentBranch(branchName)
+
+		// Ensure parent exists in graph
+		if _, err := graph.GetVertex(parentBranch); err != nil {
+			// Parent not in graph, skip
+			continue
+		}
+
+		// Add edge from parent to this branch
+		if err := graph.AddEdge(parentBranch, branchName); err != nil {
+			// Edge might already exist or create a cycle, skip
+			continue
+		}
+	}
+
+	return nil
+}
+
 // GetBranchList returns a list of SelectionItems representing all branches
 // Each item contains the branch name (ID) and the formatted display line.
-func (yas *YAS) GetBranchList(currentStackOnly bool, showStatus bool) ([]SelectionItem, error) {
+func (yas *YAS) GetBranchList(currentStackOnly bool, showStatus bool, showAll bool) ([]SelectionItem, error) {
 	graph, err := yas.graph()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get graph: %w", err)
@@ -33,6 +86,13 @@ func (yas *YAS) GetBranchList(currentStackOnly bool, showStatus bool) ([]Selecti
 	currentBranch, err := yas.git.GetCurrentBranchName()
 	if err != nil {
 		return nil, err
+	}
+
+	// If showAll flag is set, augment graph with untracked branches
+	if showAll {
+		if err := yas.augmentGraphWithAllBranches(graph); err != nil {
+			return nil, fmt.Errorf("failed to augment graph with all branches: %w", err)
+		}
 	}
 
 	// If status flag is set, fetch PR status for all branches with PRs
@@ -90,72 +150,99 @@ func (yas *YAS) collectBranchItems(items *[]SelectionItem, graph *dag.DAG, paren
 	}
 
 	// Sort by Created timestamp (ascending), then by name alphabetically
+	// Untracked branches (without metadata) are sorted alphabetically after tracked ones
 	sort.Slice(childIDs, func(i, j int) bool {
 		metaI := yas.data.Branches.Get(childIDs[i])
 		metaJ := yas.data.Branches.Get(childIDs[j])
 
-		// If timestamps differ, sort by timestamp (older first)
-		if !metaI.Created.Equal(metaJ.Created) {
-			return metaI.Created.Before(metaJ.Created)
+		// Check if branches are tracked
+		isTrackedI := !metaI.Created.IsZero()
+		isTrackedJ := !metaJ.Created.IsZero()
+
+		// If one is tracked and the other isn't, tracked comes first
+		if isTrackedI != isTrackedJ {
+			return isTrackedI
 		}
 
-		// If timestamps are equal, sort by name alphabetically
+		// Both are tracked: sort by timestamp (older first)
+		if isTrackedI && isTrackedJ {
+			// If timestamps differ, sort by timestamp
+			if !metaI.Created.Equal(metaJ.Created) {
+				return metaI.Created.Before(metaJ.Created)
+			}
+		}
+
+		// Both untracked or timestamps are equal: sort by name alphabetically
 		return childIDs[i] < childIDs[j]
 	})
 
 	for i, childID := range childIDs {
 		isLastChild := i == len(childIDs)-1
 
-		// Build branch label (same as addNodesFromGraph)
-		branchLabel := formatBranchName(childID)
+		// Check if this is a tracked or untracked branch
 		branchMetadata := yas.data.Branches.Get(childID)
+		isTracked := branchMetadata.Parent != ""
 
-		// Check if this branch needs rebasing or submitting
-		var statusParts []string
-
-		yellow := color.New(color.FgYellow).SprintFunc()
-
-		branchExists, err := yas.git.BranchExists(childID)
-		if err != nil {
-			return err
+		// Build branch label
+		var branchLabel string
+		if isTracked {
+			// Tracked branch: use normal formatting
+			branchLabel = formatBranchName(childID)
+		} else {
+			// Untracked branch: grey out the entire name
+			darkGray := color.New(color.FgHiBlack).SprintFunc()
+			branchLabel = darkGray(childID)
 		}
 
-		if !branchExists {
-			statusParts = append(statusParts, "deleted")
-		} else {
-			needsRebase, err := yas.needsRebase(childID, parentID)
-			if err == nil && needsRebase {
-				statusParts = append(statusParts, "needs restack")
+		// Only add status information for tracked branches
+		if isTracked {
+			// Check if this branch needs rebasing or submitting
+			var statusParts []string
+
+			yellow := color.New(color.FgYellow).SprintFunc()
+
+			branchExists, err := yas.git.BranchExists(childID)
+			if err != nil {
+				return err
 			}
 
-			// Check submit status
-			if branchMetadata.GitHubPullRequest.ID == "" {
-				statusParts = append(statusParts, "not submitted")
+			if !branchExists {
+				statusParts = append(statusParts, "deleted")
 			} else {
-				needsSubmit, err := yas.needsSubmit(childID)
-				if err == nil && needsSubmit {
-					statusParts = append(statusParts, "needs submit")
+				needsRebase, err := yas.needsRebase(childID, parentID)
+				if err == nil && needsRebase {
+					statusParts = append(statusParts, "needs restack")
+				}
+
+				// Check submit status
+				if branchMetadata.GitHubPullRequest.ID == "" {
+					statusParts = append(statusParts, "not submitted")
+				} else {
+					needsSubmit, err := yas.needsSubmit(childID)
+					if err == nil && needsSubmit {
+						statusParts = append(statusParts, "needs submit")
+					}
 				}
 			}
-		}
 
-		// Add combined status if any
-		if len(statusParts) > 0 {
-			branchLabel = fmt.Sprintf("%s %s", branchLabel, yellow(fmt.Sprintf("(%s)", strings.Join(statusParts, ", "))))
-		}
+			// Add combined status if any
+			if len(statusParts) > 0 {
+				branchLabel = fmt.Sprintf("%s %s", branchLabel, yellow(fmt.Sprintf("(%s)", strings.Join(statusParts, ", "))))
+			}
 
-		// Add PR information if available
-		if branchMetadata.GitHubPullRequest.ID != "" {
-			pr := branchMetadata.GitHubPullRequest
-			cyan := color.New(color.FgCyan).SprintFunc()
-			branchLabel = fmt.Sprintf("%s %s", branchLabel, cyan(fmt.Sprintf("[%s]", pr.URL)))
+			// Add PR information if available
+			if branchMetadata.GitHubPullRequest.ID != "" {
+				pr := branchMetadata.GitHubPullRequest
+				cyan := color.New(color.FgCyan).SprintFunc()
+				branchLabel = fmt.Sprintf("%s %s", branchLabel, cyan(fmt.Sprintf("[%s]", pr.URL)))
 
-			// Add review and CI status if requested
-			if showStatus {
-				reviewStatus := getReviewStatusIcon(pr.ReviewDecision)
-				ciStatus := getCIStatusIcon(pr.GetOverallCIStatus())
-				darkGray := color.New(color.FgHiBlack).SprintFunc()
-				branchLabel = fmt.Sprintf("%s %s", branchLabel, darkGray(fmt.Sprintf("(review: %s, CI: %s)", reviewStatus, ciStatus)))
+				// Add review and CI status if requested
+				if showStatus {
+					reviewStatus := getReviewStatusIcon(pr.ReviewDecision)
+					ciStatus := getCIStatusIcon(pr.GetOverallCIStatus())
+					darkGray := color.New(color.FgHiBlack).SprintFunc()
+					branchLabel = fmt.Sprintf("%s %s", branchLabel, darkGray(fmt.Sprintf("(review: %s, CI: %s)", reviewStatus, ciStatus)))
+				}
 			}
 		}
 
