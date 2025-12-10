@@ -60,8 +60,11 @@ func (c *branchCmd) Execute(args []string) error {
 		}
 	}
 
+	// Determine if we should use worktree: either explicitly via flag or via config
+	useWorktree := c.Worktree || yasInstance.Config().WorktreeBranch
+
 	// Ensure worktree exists for branch
-	if c.Worktree {
+	if useWorktree {
 		if err := yasInstance.EnsureLinkedWorktreeForBranch(fullBranchName); err != nil {
 			return NewError(err.Error())
 		}
