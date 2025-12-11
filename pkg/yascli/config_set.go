@@ -15,6 +15,10 @@ type configSetCmd struct {
 }
 
 func (c *configSetCmd) Execute(args []string) error {
+	if len(args) > 0 {
+		return NewError("unknown argument: " + args[0])
+	}
+
 	cfg := &yas.Config{
 		RepoDirectory: cmd.RepoDirectory,
 	}
