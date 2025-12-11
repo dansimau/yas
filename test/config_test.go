@@ -167,3 +167,29 @@ func TestConfig_WorktreeBranch(t *testing.T) {
 	worktreeList = mustExecOutput(tempDir, "git", "worktree", "list")
 	assert.Assert(t, !strings.Contains(worktreeList, "worktrees/feature-b"), "Expected no worktree for feature-b")
 }
+
+func TestConfigSet_RejectsPositionalArguments(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+		touch main
+		git add main
+		git commit -m "main-0"
+	`)
+
+	// Initialize yas
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+
+	// Try to set config with a positional argument (typo: missing --)
+	result := cli.Run("config", "set", "worktree-branch")
+	assert.Equal(t, result.ExitCode(), 1)
+	assert.Assert(t, result.StderrContains("unknown argument: worktree-branch"),
+		"Expected 'unknown argument' error, got: %s", result.Stderr())
+}
