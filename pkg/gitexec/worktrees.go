@@ -132,6 +132,23 @@ func (r *Repo) LinkedWorktreePathForBranch(branch string) (string, error) {
 	return "", nil
 }
 
+// BranchHasWorktree checks if a branch is checked out in any worktree (including primary).
+// Returns true if the branch has a worktree, false otherwise.
+func (r *Repo) BranchHasWorktree(branch string) (bool, error) {
+	worktrees, err := r.Worktrees()
+	if err != nil {
+		return false, err
+	}
+
+	for _, wt := range worktrees {
+		if wt.Branch == branch {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
 // getRebaseBranchInWorktree checks if a rebase is in progress in the given worktree
 // and returns the branch name being rebased.
 func (r *Repo) getRebaseBranchInWorktree(worktreePath string) (string, error) {
