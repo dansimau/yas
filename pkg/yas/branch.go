@@ -47,6 +47,11 @@ func (yas *YAS) BranchExistsRemotely(branchName string) (bool, error) {
 // DeleteBranch deletes a branch and its associated worktree if one exists.
 // If force is true, it will remove the worktree even if it has uncommitted changes.
 func (yas *YAS) DeleteBranch(branchName string, force bool) error {
+	// Refuse to delete trunk branch
+	if branchName == yas.cfg.TrunkBranch {
+		return errors.New("refusing to delete trunk branch")
+	}
+
 	branchExists, err := yas.git.BranchExists(branchName)
 	if err != nil {
 		return err
@@ -67,7 +72,20 @@ func (yas *YAS) DeleteBranch(branchName string, force bool) error {
 	}
 
 	if worktreePath != "" {
-		return yas.deleteWorktreeBranch(worktreePath, branchName, force)
+		// Check if this is the primary worktree - can't delete that with git worktree remove
+		primaryPath, err := yas.git.PrimaryWorktreePath()
+		if err != nil {
+			return fmt.Errorf("failed to get primary worktree path: %w", err)
+		}
+
+		isPrimary, err := fsutil.IsSameRealPath(worktreePath, primaryPath)
+		if err != nil {
+			return fmt.Errorf("failed to check if primary worktree: %w", err)
+		}
+
+		if !isPrimary {
+			return yas.deleteWorktreeBranch(worktreePath, branchName, force)
+		}
 	}
 
 	return yas.deleteNonWorktreeBranch(branchName, currentBranch)

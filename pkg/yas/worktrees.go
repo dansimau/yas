@@ -22,13 +22,20 @@ func (yas *YAS) PrimaryRepoPath() (string, error) {
 // The worktree is created at the specified path relative to the repo root.
 // After creation, it switches to the worktree using SwitchBranch.
 func (yas *YAS) EnsureLinkedWorktreeForBranch(branchName string) error {
+	// Don't create a worktree for the trunk branch - it should stay in the primary worktree.
+	// This also handles the case where trunk is already checked out in primary worktree,
+	// which would otherwise cause "branch is already used by worktree" error.
+	if branchName == yas.cfg.TrunkBranch {
+		return nil
+	}
+
 	// Check if worktree already exists for this branch
 	existingWorktreePath, err := yas.git.LinkedWorktreePathForBranch(branchName)
 	if err != nil {
 		return fmt.Errorf("failed to check for existing worktree: %w", err)
 	}
 
-	// Check if the existing worktree is the primary repo (not a separate worktree)
+	// Check if the found worktree is different from where we're running
 	// Use filepath.EvalSymlinks to resolve symlinks like /private/tmp -> /tmp on macOS
 	existingResolved, err := filepath.EvalSymlinks(existingWorktreePath)
 	if err != nil {
@@ -40,7 +47,9 @@ func (yas *YAS) EnsureLinkedWorktreeForBranch(branchName string) error {
 		repoResolved = yas.cfg.RepoDirectory
 	}
 
-	// Worktree already exists (and it's not the primary repo)
+	// Worktree already exists for this branch in a DIFFERENT location than current directory.
+	// If the branch is just temporarily checked out in the current worktree (same as RepoDirectory),
+	// we still want to create a dedicated worktree for it.
 	if existingWorktreePath != "" && existingResolved != repoResolved {
 		return nil
 	}
