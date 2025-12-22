@@ -674,3 +674,73 @@ func TestWorktree_CreateWorktreeFromInsideWorktree(t *testing.T) {
 	// The path should be in the primary repo, not nested
 	assert.Assert(t, cmp.Contains(contentStr, tempDir+"/.yas/worktrees/feature-b"))
 }
+
+// TestWorktree_SwitchToTrunkWithWorktreeBranchConfig tests that switching to the trunk
+// branch with worktree-branch config enabled does NOT try to create a new worktree.
+// This was a bug where `yas br master` would fail with:
+// "fatal: 'master' is already used by worktree at '/path/to/primary'".
+func TestWorktree_SwitchToTrunkWithWorktreeBranchConfig(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	// Create main repo with a feature branch
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+		touch main
+		git add main
+		git commit -m "main-0"
+
+		git checkout -b feature-a
+		touch a
+		git add a
+		git commit -m "feature-a-0"
+
+		git checkout main
+	`)
+
+	// Initialize yas with worktree-branch config enabled
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("config", "set", "--worktree-branch").Err())
+	assert.NilError(t, cli.Run("add", "feature-a", "--parent=main").Err())
+
+	// Create worktree for feature-a (this should work)
+	tempFile := filepath.Join(t.TempDir(), "shell-exec")
+	cliWithEnv := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+		gocmdtester.WithEnv("YAS_SHELL_EXEC", tempFile),
+	)
+	assert.NilError(t, cliWithEnv.Run("branch", "feature-a").Err())
+
+	// Verify worktree was created for feature-a
+	worktreePathA := filepath.Join(tempDir, ".yas", "worktrees", "feature-a")
+	_, err := os.Stat(worktreePathA)
+	assert.NilError(t, err, "worktree should be created for feature-a")
+
+	// Now try to switch to trunk (main) from the feature-a worktree
+	// This should NOT try to create a worktree - trunk stays in primary
+	tempFile2 := filepath.Join(t.TempDir(), "shell-exec2")
+	cliInWorktree := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(worktreePathA),
+		gocmdtester.WithEnv("YAS_SHELL_EXEC", tempFile2),
+	)
+
+	// This should succeed (previously would fail with "branch already used by worktree")
+	assert.NilError(t, cliInWorktree.Run("branch", "main").Err())
+
+	// Verify no worktree was created for main
+	worktreePathMain := filepath.Join(tempDir, ".yas", "worktrees", "main")
+	_, err = os.Stat(worktreePathMain)
+	assert.Assert(t, os.IsNotExist(err), "worktree should NOT be created for trunk branch")
+
+	// Verify the shell exec contains command to switch to primary repo
+	content, err := os.ReadFile(tempFile2)
+	assert.NilError(t, err)
+
+	contentStr := string(content)
+	// Should switch to primary repo and run yas br main there
+	assert.Assert(t, cmp.Contains(contentStr, "yas br main"))
+}
