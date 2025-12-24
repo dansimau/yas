@@ -101,9 +101,11 @@ func (yas *YAS) validate() error {
 
 // CreateBranch creates a new branch with the given name, optionally applying a user prefix.
 // If parentBranch is empty, it uses the current branch as the parent.
+// If parentBranch is specified, the new branch is created from that branch.
+// If worktree is true, the branch is created directly in a new worktree using git worktree add.
 // The new branch is created, checked out, and added to the stack.
 // If there are staged changes, they are automatically committed.
-func (yas *YAS) CreateBranch(branchName string, parentBranch string) (string, error) {
+func (yas *YAS) CreateBranch(branchName string, parentBranch string, worktree bool) (string, error) {
 	// Determine full branch name (with or without prefix based on config)
 	fullBranchName := branchName
 
@@ -141,9 +143,26 @@ func (yas *YAS) CreateBranch(branchName string, parentBranch string) (string, er
 		parentBranch = currentBranch
 	}
 
-	// Create the new branch
-	if err := yas.git.CreateBranch(fullBranchName); err != nil {
-		return "", fmt.Errorf("failed to create branch: %w", err)
+	// If worktree flag is set, create the branch directly in a new worktree
+	if worktree {
+		// Get primary worktree path
+		primaryWorktreePath, err := yas.git.PrimaryWorktreePath()
+		if err != nil {
+			return "", fmt.Errorf("failed to get primary worktree path: %w", err)
+		}
+
+		// Create worktree path
+		fullWorktreePath := fmt.Sprintf("%s/%s/%s", primaryWorktreePath, worktreePath, fullBranchName)
+
+		// Create the worktree with the new branch from the parent
+		if err := yas.git.WorktreeAdd(fullWorktreePath, fullBranchName, parentBranch); err != nil {
+			return "", fmt.Errorf("failed to create worktree from %s: %w", parentBranch, err)
+		}
+	} else {
+		// Create the new branch from the parent branch
+		if err := yas.git.CreateBranchFrom(fullBranchName, parentBranch); err != nil {
+			return "", fmt.Errorf("failed to create branch from %s: %w", parentBranch, err)
+		}
 	}
 
 	// Add to stack with parent
@@ -151,15 +170,17 @@ func (yas *YAS) CreateBranch(branchName string, parentBranch string) (string, er
 		return "", err
 	}
 
-	// Check for staged changes and commit automatically
-	hasStagedChanges, err := yas.git.HasStagedChanges()
-	if err != nil {
-		return "", fmt.Errorf("failed to check for staged changes: %w", err)
-	}
+	// Check for staged changes and commit automatically (only if not using worktree)
+	if !worktree {
+		hasStagedChanges, err := yas.git.HasStagedChanges()
+		if err != nil {
+			return "", fmt.Errorf("failed to check for staged changes: %w", err)
+		}
 
-	if hasStagedChanges {
-		if err := yas.git.Commit(); err != nil {
-			return "", fmt.Errorf("failed to commit staged changes: %w", err)
+		if hasStagedChanges {
+			if err := yas.git.Commit(); err != nil {
+				return "", fmt.Errorf("failed to commit staged changes: %w", err)
+			}
 		}
 	}
 

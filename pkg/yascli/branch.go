@@ -12,14 +12,15 @@ Checkout/switch to a branch:
 - yas branch (With no arguments, will open interactive branch switcher)
 
 Create a new branch:
-- yas branch <new-branch-name>`
+- yas branch <new-branch-name>
+- yas branch <new-branch-name> --parent <branch> (create from specific branch)`
 
 type branchCmd struct {
 	Arguments struct {
 		BranchName string `description:"Branch name" positional-args:"true"`
 	} `positional-args:"true"`
 
-	Parent   string `description:"Parent branch name (default: current branch)" long:"parent"   required:"false"`
+	Parent   string `description:"Create branch from and set as parent (default: current branch)" long:"parent"   required:"false"`
 	Worktree bool   `description:"Create branch in a new worktree"              long:"worktree"`
 }
 
@@ -52,19 +53,17 @@ func (c *branchCmd) Execute(args []string) error {
 
 	branchExists := branchExistsLocally || branchExistsRemotely
 
-	// Create branch if it doesn't exist
-	if !branchExists {
-		fullBranchName, err = yasInstance.CreateBranch(c.Arguments.BranchName, c.Parent)
-		if err != nil {
-			return NewError(err.Error())
-		}
-	}
-
 	// Determine if we should use worktree: either explicitly via flag or via config
 	useWorktree := c.Worktree || yasInstance.Config().WorktreeBranch
 
-	// Ensure worktree exists for branch
-	if useWorktree {
+	// Create branch if it doesn't exist
+	if !branchExists {
+		fullBranchName, err = yasInstance.CreateBranch(c.Arguments.BranchName, c.Parent, useWorktree)
+		if err != nil {
+			return NewError(err.Error())
+		}
+	} else if useWorktree {
+		// For existing branches, ensure worktree exists
 		if err := yasInstance.EnsureLinkedWorktreeForBranch(fullBranchName); err != nil {
 			return NewError(err.Error())
 		}
