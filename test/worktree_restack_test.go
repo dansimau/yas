@@ -224,3 +224,88 @@ func TestWorktree_RestackWithMultipleBranchesOneInWorktree(t *testing.T) {
 	assert.Assert(t, strings.Contains(output, "topic-a-0"), "topic-a commit should exist")
 	assert.Assert(t, strings.Contains(output, "main-1"), "main-1 commit should exist after rebase")
 }
+
+// TestWorktree_RestackAllStaysOnCorrectBranchOnConflict tests that when running
+// `yas restack --all` from the primary repo on branch A, and branch B (which has a
+// worktree) has conflicts, the operation returns to branch A in the primary repo.
+// This is a regression test for GitHub issue #84.
+func TestWorktree_RestackAllStaysOnCorrectBranchOnConflict(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	worktreePathA := filepath.Join(tempDir, "worktrees", "topic-a")
+	worktreePathB := filepath.Join(tempDir, "worktrees", "topic-b")
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+
+		# main
+		echo "line1" > file.txt
+		git add file.txt
+		git commit -m "main-0"
+
+		# topic-a: independent change (will rebase cleanly)
+		git checkout -b topic-a
+		echo "topic-a change" > a.txt
+		git add a.txt
+		git commit -m "topic-a-0"
+
+		# topic-b: modify same file as main (will cause conflict)
+		git checkout main
+		git checkout -b topic-b
+		echo "line2-from-b" >> file.txt
+		git add file.txt
+		git commit -m "topic-b-0"
+
+		# Go back to main
+		git checkout main
+	`)
+
+	// Initialize yas config and add branches BEFORE creating main-1
+	// This ensures the branch points are set to main-0
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-b", "--parent=main").Err())
+
+	testutil.ExecOrFail(t, tempDir, `
+		# Create worktrees for both branches
+		git worktree add `+worktreePathA+` topic-a
+		git worktree add `+worktreePathB+` topic-b
+
+		# Update main (will cause conflict with topic-b when rebasing)
+		echo "line2-from-main" >> file.txt
+		git add file.txt
+		git commit -m "main-1"
+	`)
+
+	// Verify we're on main before running restack
+	currentBranch := mustExecOutput(tempDir, "git", "branch", "--show-current")
+	assert.Equal(t, strings.TrimSpace(currentBranch), "main", "should start on main branch")
+
+	// Run restack --all from primary repo while on main
+	// topic-a should rebase cleanly (has worktree), but topic-b should fail with conflict (also has worktree)
+	result := cli.Run("restack", "--all")
+	assert.Equal(t, result.ExitCode(), 1, "restack should fail due to conflict in topic-b")
+
+	// Verify we're still on main branch in primary repo (not left on some other branch)
+	currentBranch = mustExecOutput(tempDir, "git", "branch", "--show-current")
+	assert.Equal(t, strings.TrimSpace(currentBranch), "main", "should still be on main branch after conflict")
+
+	// Verify that restack state was saved with topic-b as the current branch
+	state, err := yas.LoadRestackState(tempDir)
+	assert.NilError(t, err)
+	assert.Equal(t, state.CurrentBranch, "topic-b", "saved state should show topic-b as current branch")
+	assert.Equal(t, state.StartingBranch, "main", "saved state should show main as starting branch")
+
+	// Verify topic-a was successfully rebased in its worktree
+	output := mustExecOutput(worktreePathA, "git", "log", "--pretty=%s")
+	assert.Assert(t, strings.Contains(output, "topic-a-0"), "topic-a commit should exist")
+	assert.Assert(t, strings.Contains(output, "main-1"), "main-1 should be in topic-a history (rebased)")
+
+	// Verify rebase is in progress in topic-b's worktree
+	testutil.ExecOrFail(t, worktreePathB, "test -d $(git rev-parse --git-dir)/rebase-merge || test -d $(git rev-parse --git-dir)/rebase-apply")
+}
