@@ -77,6 +77,7 @@ func Run(args ...string) (exitCode int) {
 	mustAddCommand(parser.AddCommand("add", "Add/set parent of branch", "", &addCmd{}))
 	mustAddCommand(parser.AddCommand("annotate", "Annotate PR with stack information", "", &annotateCmd{})).Hidden = true
 	mustAddCommand(parser.AddCommand("branch", "Work with branches", branchCmdLongHelp, &branchCmd{})).Aliases = []string{"nb", "br"}
+	mustAddCommand(parser.AddCommand("completion", "Generate shell completion script", "", &completionCmd{}))
 	mustAddCommand(parser.AddCommand("config", "Manage repository-specific configuration", "", &configCmd{}))
 	mustAddCommand(parser.AddCommand("continue", "Continue a restack operation after fixing conflicts", "", &continueCmd{}))
 	mustAddCommand(parser.AddCommand("delete", "Delete a branch and its worktree", "", &deleteCmd{}))
