@@ -4,3 +4,5 @@
 ![coverage](https://raw.githubusercontent.com/dansimau/yas/badges/.badges/main/coverage.svg)
 
 yas is a CLI tool for managing stacked PRs on GitHub.
+
+new feature blah blah
