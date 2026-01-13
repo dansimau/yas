@@ -142,6 +142,8 @@ func (b Branches) WithPRStates(states ...string) Branches {
 type RestackState struct {
 	// StartingBranch is the branch to return to after restacking completes
 	StartingBranch string `json:"starting_branch"`
+	// TargetBranch is the branch that was targeted for restacking (limits scope of continue)
+	TargetBranch string `json:"target_branch,omitempty"`
 	// CurrentBranch is the branch currently being rebased
 	CurrentBranch string `json:"current_branch"`
 	// CurrentParent is the parent branch that CurrentBranch is being rebased onto
