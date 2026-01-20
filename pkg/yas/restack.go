@@ -96,6 +96,7 @@ func (yas *YAS) Restack(branch string, dryRun bool) error {
 		// Write initial restack state
 		if err := yas.saveRestackState(&RestackState{
 			StartingBranch:  startingBranch,
+			TargetBranch:    branch,
 			CurrentBranch:   workQueue[0][0],
 			CurrentParent:   workQueue[0][1],
 			RemainingWork:   workQueue,
@@ -105,7 +106,7 @@ func (yas *YAS) Restack(branch string, dryRun bool) error {
 		}
 
 		// Process the work queue
-		if err := yas.processRestackWorkQueue(startingBranch, workQueue, &rebasedBranches); err != nil {
+		if err := yas.processRestackWorkQueue(startingBranch, branch, workQueue, &rebasedBranches); err != nil {
 			return err
 		}
 	}
@@ -254,7 +255,7 @@ func (yas *YAS) buildRestackWorkQueue(graph *dag.DAG, branchName string, workQue
 }
 
 // processRestackWorkQueue processes a queue of rebase operations, saving state on error.
-func (yas *YAS) processRestackWorkQueue(startingBranch string, workQueue [][2]string, rebasedBranches *[]string) error {
+func (yas *YAS) processRestackWorkQueue(startingBranch, targetBranch string, workQueue [][2]string, rebasedBranches *[]string) error {
 	for i, work := range workQueue {
 		childBranch := work[0]
 		parentBranch := work[1]
@@ -325,6 +326,7 @@ func (yas *YAS) processRestackWorkQueue(startingBranch string, workQueue [][2]st
 			// Rebase is in progress (e.g., conflicts), save state for resuming later
 			if err := yas.saveRestackState(&RestackState{
 				StartingBranch:  startingBranch,
+				TargetBranch:    targetBranch,
 				CurrentBranch:   childBranch,
 				CurrentParent:   parentBranch,
 				RemainingWork:   workQueue[i+1:],
@@ -454,6 +456,13 @@ func (yas *YAS) Continue() error {
 	state.RebasedBranches = append(state.RebasedBranches, state.CurrentBranch)
 	rebasedBranches := state.RebasedBranches
 
+	// Determine the target branch for rebuilding work queue
+	// Use TargetBranch if set (new behavior), otherwise fall back to TrunkBranch (backward compatibility)
+	targetBranch := state.TargetBranch
+	if targetBranch == "" {
+		targetBranch = yas.cfg.TrunkBranch
+	}
+
 	// Keep rebuilding and processing until no more work remains
 	// This loop is necessary because completing one rebase may cause descendant branches to need rebasing
 	for {
@@ -463,7 +472,24 @@ func (yas *YAS) Continue() error {
 		}
 
 		var newWorkQueue [][2]string
-		if err := yas.buildRestackWorkQueue(graph, yas.cfg.TrunkBranch, &newWorkQueue); err != nil {
+
+		// Check if the target branch itself needs rebasing (unless it's trunk)
+		if targetBranch != yas.cfg.TrunkBranch {
+			metadata := yas.data.Branches.Get(targetBranch)
+			if metadata.Parent != "" {
+				needsRebase, err := yas.needsRebase(targetBranch, metadata.Parent)
+				if err != nil {
+					return fmt.Errorf("failed to check if target branch needs rebase: %w", err)
+				}
+
+				if needsRebase {
+					newWorkQueue = append(newWorkQueue, [2]string{targetBranch, metadata.Parent})
+				}
+			}
+		}
+
+		// Add descendants of the target branch
+		if err := yas.buildRestackWorkQueue(graph, targetBranch, &newWorkQueue); err != nil {
 			return fmt.Errorf("failed to build work queue: %w", err)
 		}
 
@@ -474,7 +500,7 @@ func (yas *YAS) Continue() error {
 
 		fmt.Printf("\nContinuing restack with %d remaining branch(es)...\n", len(newWorkQueue))
 
-		if err := yas.processRestackWorkQueue(state.StartingBranch, newWorkQueue, &rebasedBranches); err != nil {
+		if err := yas.processRestackWorkQueue(state.StartingBranch, targetBranch, newWorkQueue, &rebasedBranches); err != nil {
 			return err
 		}
 	}
