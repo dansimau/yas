@@ -304,6 +304,8 @@ func (yas *YAS) processRestackWorkQueue(startingBranch string, workQueue [][2]st
 			return err
 		}
 
+		defer branch.RestoreOriginal()
+
 		rebaseErr := branch.RebaseOntoWithBranchPoint(parentBranch, childMetadata.BranchPoint, childBranch)
 		if rebaseErr != nil {
 			// Check if a rebase is actually in progress
