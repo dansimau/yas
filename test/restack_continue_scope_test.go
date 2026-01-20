@@ -92,7 +92,7 @@ func TestContinue_RespectsTargetBranchScope(t *testing.T) {
 		echo "topic-a-conflict" > conflict.txt
 		echo "topic-b-original" >> conflict.txt
 		git add conflict.txt
-		git rebase --continue
+		GIT_EDITOR=true git rebase --continue
 	`)
 
 	// Run continue - it should only process topic-c, not topic-a
