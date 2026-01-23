@@ -106,11 +106,37 @@ func (r *Repo) LinkedWorktrees() ([]WorktreeEntry, error) {
 	return linkedWorktrees, nil
 }
 
-// LinkedWorktreePathForBranch finds the worktree path for a given branch.
-// Returns empty string if no worktree exists for the branch.
+// LinkedWorktreePathForBranch finds the worktree path for a given branch in linked worktrees only.
+// Returns empty string if no linked worktree exists for the branch.
 // Also handles detached worktrees that have a rebase in progress for the target branch.
 func (r *Repo) LinkedWorktreePathForBranch(branch string) (string, error) {
 	worktrees, err := r.LinkedWorktrees()
+	if err != nil {
+		return "", err
+	}
+
+	for _, wt := range worktrees {
+		if wt.Branch == branch {
+			return wt.Path, nil
+		}
+
+		// Check if this is a detached worktree with a rebase in progress for our target branch
+		if wt.Branch == "" {
+			rebaseBranch, err := r.getRebaseBranchInWorktree(wt.Path)
+			if err == nil && rebaseBranch == branch {
+				return wt.Path, nil
+			}
+		}
+	}
+
+	return "", nil
+}
+
+// WorktreePathForBranch finds the worktree path for a given branch in ANY worktree (including primary).
+// Returns empty string if no worktree exists for the branch.
+// Also handles detached worktrees that have a rebase in progress for the target branch.
+func (r *Repo) WorktreePathForBranch(branch string) (string, error) {
+	worktrees, err := r.Worktrees()
 	if err != nil {
 		return "", err
 	}

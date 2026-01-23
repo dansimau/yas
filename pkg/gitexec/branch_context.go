@@ -1,9 +1,6 @@
 package gitexec
 
-import (
-	"errors"
-	"fmt"
-)
+import "errors"
 
 var noop = func() error { return nil }
 
@@ -20,16 +17,14 @@ func (bc *BranchContext) RestoreOriginal() error {
 
 // WithBranchContext switches to the specified branch or executes the specified
 // commands from a worktree on the specified branch, i.e. if there is a worktree
-// for the branch, it will be used, otherwise the commands will be executed in
-// the primary repository after switching to this branch. When the function is
-// complete, the original branch will be restored.
+// for the branch (including the primary worktree), it will be used, otherwise
+// the commands will be executed in the primary repository after switching to
+// this branch. When the function is complete, the original branch will be restored.
 func (r *Repo) WithBranchContext(branchName string) (*BranchContext, error) {
-	worktreePath, err := r.LinkedWorktreePathForBranch(branchName)
+	worktreePath, err := r.WorktreePathForBranch(branchName)
 	if err != nil {
 		return nil, err
 	}
-
-	fmt.Println("worktreePath", worktreePath)
 
 	if worktreePath != "" {
 		return &BranchContext{
