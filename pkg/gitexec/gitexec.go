@@ -137,8 +137,9 @@ func (r *Repo) QuietCheckout(ref string) error {
 	return r.run("git", "-c", "core.hooksPath=/dev/null", "checkout", "-q", ref)
 }
 
-func (r *Repo) CreateBranch(branch string) error {
-	return r.run("git", "checkout", "-b", branch)
+// CreateBranchFrom creates a new branch from a specific branch and checks it out.
+func (r *Repo) CreateBranchFrom(branch, fromBranch string) error {
+	return r.run("git", "checkout", "-b", branch, fromBranch)
 }
 
 func (r *Repo) DeleteBranch(branch string) error {
