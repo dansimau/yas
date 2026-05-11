@@ -256,6 +256,13 @@ func (yas *YAS) buildRestackWorkQueue(graph *dag.DAG, branchName string, workQue
 
 // processRestackWorkQueue processes a queue of rebase operations, saving state on error.
 func (yas *YAS) processRestackWorkQueue(startingBranch, targetBranch string, workQueue [][2]string, rebasedBranches *[]string) error {
+	// On return, attempt to restore the primary repo to the starting branch.
+	// When a conflict occurs in a linked worktree, the primary repo may have been
+	// checked out to an intermediate branch during processing; this restores it.
+	// When a conflict occurs in the primary repo (rebase in progress there), the
+	// checkout fails gracefully and the user remains in the conflict state.
+	defer func() { _ = yas.git.QuietCheckout(startingBranch) }()
+
 	for i, work := range workQueue {
 		childBranch := work[0]
 		parentBranch := work[1]
@@ -305,8 +312,6 @@ func (yas *YAS) processRestackWorkQueue(startingBranch, targetBranch string, wor
 			return err
 		}
 
-		defer branch.RestoreOriginal()
-
 		rebaseErr := branch.RebaseOntoWithBranchPoint(parentBranch, childMetadata.BranchPoint, childBranch)
 		if rebaseErr != nil {
 			// Check if a rebase is actually in progress
@@ -315,15 +320,18 @@ func (yas *YAS) processRestackWorkQueue(startingBranch, targetBranch string, wor
 				return fmt.Errorf("rebase failed and unable to check rebase status: %w", err)
 			}
 
-			// If no rebase is in progress, this is a fatal error (e.g., unstashed changes)
-			// Clean up any saved state and return the error
+			// If no rebase is in progress, this is a fatal error (e.g., unstashed changes).
+			// The defer will restore the starting branch; clean up state and return the error.
 			if !rebaseInProgress {
 				_ = yas.deleteRestackState()
 
 				return fmt.Errorf("rebase failed for %s onto %s: %w", childBranch, parentBranch, rebaseErr)
 			}
 
-			// Rebase is in progress (e.g., conflicts), save state for resuming later
+			// Rebase is in progress (e.g., conflicts), save state for resuming later.
+			// The defer will attempt to restore the starting branch; this succeeds when
+			// the conflict is in a linked worktree (primary repo is unaffected) and
+			// fails gracefully when the conflict is in the primary repo itself.
 			if err := yas.saveRestackState(&RestackState{
 				StartingBranch:  startingBranch,
 				TargetBranch:    targetBranch,
@@ -335,7 +343,7 @@ func (yas *YAS) processRestackWorkQueue(startingBranch, targetBranch string, wor
 				return fmt.Errorf("rebase failed and unable to save restack state: %w", err)
 			}
 
-			return fmt.Errorf("rebase failed for %s onto %s: %w\n\nFix conflicts and run 'yas continue' to resume", childBranch, parentBranch, rebaseErr)
+			return fmt.Errorf("rebase failed for %s onto %s: %w\n\nFix conflicts in %s and run 'yas continue' to resume", childBranch, parentBranch, rebaseErr, branch.Path())
 		}
 
 		// Update the branch point to the new parent commit
