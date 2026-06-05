@@ -153,8 +153,9 @@ func (yas *YAS) CreateBranch(branchName string, parentBranch string) (string, er
 
 	// When an explicit parent different from the current branch is requested,
 	// create a fresh branch based on that parent rather than the current HEAD.
-	// In that case we deliberately do not carry over or commit any staged
-	// changes from the current branch.
+	// In that case we do not auto-commit; any staged changes are preserved in
+	// the index (git only carries them across when they don't conflict with
+	// the switch) rather than being silently discarded.
 	createFromParent := parentBranch != currentBranch
 
 	// Create the new branch
