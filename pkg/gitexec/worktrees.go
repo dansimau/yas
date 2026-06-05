@@ -3,6 +3,7 @@ package gitexec
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -92,6 +93,14 @@ func (r *Repo) LinkedWorktrees() ([]WorktreeEntry, error) {
 	for _, wt := range worktrees {
 		isSameRealPath, err := fsutil.IsSameRealPath(wt.Path, primaryWorktreePath)
 		if err != nil {
+			if os.IsNotExist(err) {
+				// Stale/prunable worktree entry whose path no longer exists
+				// (e.g. git reports it as "prunable gitdir file points to
+				// non-existent location"). There is nothing to operate on, so
+				// skip it rather than aborting the whole operation.
+				continue
+			}
+
 			return nil, err
 		}
 

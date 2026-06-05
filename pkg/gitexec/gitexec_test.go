@@ -1,6 +1,7 @@
 package gitexec
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -260,4 +261,39 @@ func TestGetRemoteForBranch(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLinkedWorktreesTolerateStalePath(t *testing.T) {
+	t.Parallel()
+
+	repoPath := t.TempDir()
+	worktreePath := filepath.Join(t.TempDir(), "stale-worktree")
+
+	testutil.ExecOrFail(t, repoPath, `
+		git init
+		git checkout -b main
+		git config user.email "test@example.com"
+		git config user.name "Test User"
+		git commit --allow-empty -m "initial commit"
+		git branch feature
+		git worktree add `+worktreePath+` feature
+	`)
+
+	// Simulate a stale/prunable worktree by removing its directory without
+	// running `git worktree prune`. Git still lists the entry, but its path no
+	// longer exists on disk.
+	assert.NilError(t, os.RemoveAll(worktreePath))
+
+	repo := WithRepo(repoPath)
+
+	// LinkedWorktrees should not error on the missing path; the stale entry is
+	// skipped.
+	linked, err := repo.LinkedWorktrees()
+	assert.NilError(t, err)
+	assert.Equal(t, 0, len(linked))
+
+	// Deleting an unrelated branch must not be blocked by the stale worktree.
+	path, err := repo.LinkedWorktreePathForBranch("some-other-branch")
+	assert.NilError(t, err)
+	assert.Equal(t, "", path)
 }
