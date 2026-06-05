@@ -171,6 +171,105 @@ func TestBranchCreate_WithDifferentParentBranchesFromParent(t *testing.T) {
 	assert.Equal(t, headRef, mainRef, "Expected feature-b to be based on main's HEAD")
 }
 
+func TestBranchCreate_FromRemoteOnlyParent(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	fakeOrigin := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+		gocmdtester.WithEnv("GIT_AUTHOR_EMAIL", "testuser@example.com"),
+	)
+
+	testutil.ExecOrFail(t, tempDir, `
+		# Set up "remote" bare repository
+		git init --bare `+fakeOrigin+`
+
+		git init --initial-branch=main
+		git remote add origin `+fakeOrigin+`
+		touch main
+		git add main
+		git commit -m "main-0"
+
+		# Create a parent branch, push it, then delete it locally so it only
+		# exists as origin/base.
+		git checkout -b base
+		touch base-file
+		git add base-file
+		git commit -m "base-0"
+		git push origin base
+		git checkout main
+		git branch -D base
+		git fetch origin
+	`)
+
+	// Initialize yas before any detach/remote-only state.
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("config", "set", "--no-auto-prefix-branch").Err())
+
+	// Sanity: the parent does not exist locally, only as origin/base.
+	localBase := mustExecOutput(tempDir, "git", "branch", "--list", "base")
+	equalLines(t, localBase, "")
+
+	// Create a new branch from the remote-only parent.
+	assert.NilError(t, cli.Run("branch", "--parent=base", "feature").Err())
+
+	// Verify we switched to the new branch.
+	currentBranch := mustExecOutput(tempDir, "git", "branch", "--show-current")
+	equalLines(t, currentBranch, "feature")
+
+	// The new branch should be based on origin/base's HEAD.
+	originBaseRef := strings.TrimSpace(mustExecOutput(tempDir, "git", "rev-parse", "origin/base"))
+	headRef := strings.TrimSpace(mustExecOutput(tempDir, "git", "rev-parse", "HEAD"))
+	assert.Equal(t, headRef, originBaseRef, "Expected feature to be based on origin/base")
+}
+
+func TestBranchCreate_DetachedHeadWithExplicitParent(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+		gocmdtester.WithEnv("GIT_AUTHOR_EMAIL", "testuser@example.com"),
+	)
+
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+		touch main
+		git add main
+		git commit -m "main-0"
+		touch main2
+		git add main2
+		git commit -m "main-1"
+	`)
+
+	// Initialize yas while still on a branch.
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("config", "set", "--no-auto-prefix-branch").Err())
+
+	// Detach HEAD.
+	testutil.ExecOrFail(t, tempDir, `git checkout --detach HEAD~1`)
+
+	// Sanity: we are in detached HEAD (no current branch).
+	currentBranch := mustExecOutput(tempDir, "git", "branch", "--show-current")
+	equalLines(t, currentBranch, "")
+
+	// Creating a branch with an explicit parent should work even in detached
+	// HEAD, since the current branch name is not required.
+	assert.NilError(t, cli.Run("branch", "--parent=main", "feature").Err())
+
+	// Verify we are now on the new branch.
+	currentBranch = mustExecOutput(tempDir, "git", "branch", "--show-current")
+	equalLines(t, currentBranch, "feature")
+
+	// The new branch should be based on main's HEAD.
+	mainRef := strings.TrimSpace(mustExecOutput(tempDir, "git", "rev-parse", "main"))
+	headRef := strings.TrimSpace(mustExecOutput(tempDir, "git", "rev-parse", "HEAD"))
+	assert.Equal(t, headRef, mainRef, "Expected feature to be based on main's HEAD")
+}
+
 func TestBranchCreate_ExtractUsernameFromEmail(t *testing.T) {
 	t.Parallel()
 
