@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/heimdalr/dag"
@@ -233,7 +234,19 @@ func (yas *YAS) buildRestackWorkQueue(graph *dag.DAG, branchName string, workQue
 		return err
 	}
 
+	// Iterate children in a deterministic (sorted) order. GetChildren returns a
+	// map, so without sorting the work queue order would be non-deterministic.
+	// This matters when restacking multiple sibling branches: if a sibling that
+	// conflicts is processed before one that rebases cleanly, the clean branch
+	// would never be reached. Sorting makes the behaviour stable and repeatable.
+	childIDs := make([]string, 0, len(children))
 	for childID := range children {
+		childIDs = append(childIDs, childID)
+	}
+
+	sort.Strings(childIDs)
+
+	for _, childID := range childIDs {
 		// Check if this branch needs rebasing
 		needsRebase, err := yas.needsRebase(childID, branchName)
 		if err != nil {

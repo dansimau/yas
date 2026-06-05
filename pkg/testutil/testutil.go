@@ -129,11 +129,13 @@ func ExecOrFail(t *testing.T, workingDir string, lines string) {
 		t.Fatal(err)
 	}
 
-	if err := xexec.Command("chmod", "+x", f.Name()).WithWorkingDir(workingDir).Run(); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := xexec.Command("sh", "-c", f.Name()).WithWorkingDir(workingDir).Run(); err != nil {
+	// Run the script by passing it as an argument to sh (which opens and reads
+	// the file) rather than executing the file directly. Executing the file
+	// (e.g. via chmod +x followed by `sh -c <path>`) is prone to a "text file
+	// busy" (ETXTBSY) race under parallel tests: another goroutine's fork+exec
+	// can transiently inherit the temp file's writable descriptor, causing the
+	// exec of the script to fail. Letting sh read the file avoids exec'ing it.
+	if err := xexec.Command("sh", f.Name()).WithWorkingDir(workingDir).Run(); err != nil {
 		t.Fatal(err)
 	}
 }
