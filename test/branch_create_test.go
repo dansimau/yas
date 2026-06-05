@@ -1,6 +1,7 @@
 package test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/dansimau/yas/pkg/gocmdtester"
@@ -111,6 +112,63 @@ func TestBranchCreate_WithParentAndPrefix(t *testing.T) {
 	// Verify the branch exists
 	exitCode := mustExecExitCode(tempDir, "git", "show-ref", "--verify", "--quiet", "refs/heads/testuser/feature-b")
 	assert.Equal(t, exitCode, 0, "Expected branch testuser/feature-b to exist")
+}
+
+func TestBranchCreate_WithDifferentParentBranchesFromParent(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+		gocmdtester.WithEnv("GIT_AUTHOR_EMAIL", "testuser@example.com"),
+	)
+
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+		touch main
+		git add main
+		git commit -m "main-0"
+
+		git checkout -b feature-a
+		touch a
+		git add a
+		git commit -m "feature-a-0"
+	`)
+
+	// Initialize yas with auto-prefix disabled to keep branch names simple.
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("config", "set", "--no-auto-prefix-branch").Err())
+	assert.NilError(t, cli.Run("add", "feature-a", "--parent=main").Err())
+
+	// We are currently on feature-a (which contains the "a" file). Stage a new
+	// file that should NOT be carried over to the new branch.
+	testutil.ExecOrFail(t, tempDir, `
+		touch staged-file
+		git add staged-file
+	`)
+
+	// Create a new branch with an explicit parent that differs from the
+	// current branch. The branch should be created fresh from main.
+	assert.NilError(t, cli.Run("branch", "--parent=main", "feature-b").Err())
+
+	// Verify we switched to the new branch.
+	currentBranch := mustExecOutput(tempDir, "git", "branch", "--show-current")
+	equalLines(t, currentBranch, "feature-b")
+
+	// The new branch should be based on main, so it must NOT contain the "a"
+	// file that exists only on feature-a.
+	exitCode := mustExecExitCode(tempDir, "git", "cat-file", "-e", "HEAD:a")
+	assert.Assert(t, exitCode != 0, "Expected file 'a' (from feature-a) to NOT exist on feature-b")
+
+	// The staged file should not have been committed to the new branch.
+	exitCode = mustExecExitCode(tempDir, "git", "cat-file", "-e", "HEAD:staged-file")
+	assert.Assert(t, exitCode != 0, "Expected staged file to NOT be committed onto feature-b")
+
+	// HEAD of feature-b should match HEAD of main.
+	mainRef := strings.TrimSpace(mustExecOutput(tempDir, "git", "rev-parse", "main"))
+	headRef := strings.TrimSpace(mustExecOutput(tempDir, "git", "rev-parse", "HEAD"))
+	assert.Equal(t, headRef, mainRef, "Expected feature-b to be based on main's HEAD")
 }
 
 func TestBranchCreate_ExtractUsernameFromEmail(t *testing.T) {

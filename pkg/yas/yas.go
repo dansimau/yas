@@ -130,20 +130,34 @@ func (yas *YAS) CreateBranch(branchName string, parentBranch string) (string, er
 		fullBranchName = fmt.Sprintf("%s/%s", username, branchName)
 	}
 
+	// Determine the current branch so we can decide where to base the new
+	// branch from.
+	currentBranch, err := yas.git.GetCurrentBranchName()
+	if err != nil {
+		return "", fmt.Errorf("failed to get current branch: %w", err)
+	}
+
 	// Determine parent branch
 	if parentBranch == "" {
 		// Use current branch as parent
-		currentBranch, err := yas.git.GetCurrentBranchName()
-		if err != nil {
-			return "", fmt.Errorf("failed to get current branch: %w", err)
-		}
-
 		parentBranch = currentBranch
 	}
 
+	// When an explicit parent different from the current branch is requested,
+	// create a fresh branch based on that parent rather than the current HEAD.
+	// In that case we deliberately do not carry over or commit any staged
+	// changes from the current branch.
+	createFromParent := parentBranch != currentBranch
+
 	// Create the new branch
-	if err := yas.git.CreateBranch(fullBranchName); err != nil {
-		return "", fmt.Errorf("failed to create branch: %w", err)
+	if createFromParent {
+		if err := yas.git.CreateBranchFrom(fullBranchName, parentBranch); err != nil {
+			return "", fmt.Errorf("failed to create branch: %w", err)
+		}
+	} else {
+		if err := yas.git.CreateBranch(fullBranchName); err != nil {
+			return "", fmt.Errorf("failed to create branch: %w", err)
+		}
 	}
 
 	// Add to stack with parent
@@ -151,15 +165,19 @@ func (yas *YAS) CreateBranch(branchName string, parentBranch string) (string, er
 		return "", err
 	}
 
-	// Check for staged changes and commit automatically
-	hasStagedChanges, err := yas.git.HasStagedChanges()
-	if err != nil {
-		return "", fmt.Errorf("failed to check for staged changes: %w", err)
-	}
+	// Check for staged changes and commit automatically. This is skipped when
+	// the branch was created from a different parent, since in that case we
+	// want a fresh branch and leave any staged changes untouched.
+	if !createFromParent {
+		hasStagedChanges, err := yas.git.HasStagedChanges()
+		if err != nil {
+			return "", fmt.Errorf("failed to check for staged changes: %w", err)
+		}
 
-	if hasStagedChanges {
-		if err := yas.git.Commit(); err != nil {
-			return "", fmt.Errorf("failed to commit staged changes: %w", err)
+		if hasStagedChanges {
+			if err := yas.git.Commit(); err != nil {
+				return "", fmt.Errorf("failed to commit staged changes: %w", err)
+			}
 		}
 	}
 
