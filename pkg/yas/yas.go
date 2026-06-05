@@ -130,20 +130,51 @@ func (yas *YAS) CreateBranch(branchName string, parentBranch string) (string, er
 		fullBranchName = fmt.Sprintf("%s/%s", username, branchName)
 	}
 
-	// Determine parent branch
+	// Determine the current branch so we can decide where to base the new
+	// branch from. When no parent is given we require it (it becomes the
+	// parent). When an explicit parent is given we don't strictly need it, so
+	// we ignore errors here (e.g. detached HEAD): it's only used to decide
+	// whether to branch from the parent rather than the current HEAD.
+	var currentBranch string
+
 	if parentBranch == "" {
-		// Use current branch as parent
-		currentBranch, err := yas.git.GetCurrentBranchName()
+		var err error
+
+		currentBranch, err = yas.git.GetCurrentBranchName()
 		if err != nil {
 			return "", fmt.Errorf("failed to get current branch: %w", err)
 		}
 
+		// Use current branch as parent
 		parentBranch = currentBranch
+	} else {
+		currentBranch, _ = yas.git.GetCurrentBranchName()
 	}
 
+	// When an explicit parent different from the current branch is requested,
+	// create a fresh branch based on that parent rather than the current HEAD.
+	// In that case we do not auto-commit; any staged changes are preserved in
+	// the index (git only carries them across when they don't conflict with
+	// the switch) rather than being silently discarded.
+	createFromParent := parentBranch != currentBranch
+
 	// Create the new branch
-	if err := yas.git.CreateBranch(fullBranchName); err != nil {
-		return "", fmt.Errorf("failed to create branch: %w", err)
+	if createFromParent {
+		// Resolve the parent to a ref git can use as a start point. When the
+		// parent only exists remotely (e.g. origin/main with no local main),
+		// fall back to the remote-tracking ref.
+		startPoint, err := yas.resolveBranchStartPoint(parentBranch)
+		if err != nil {
+			return "", err
+		}
+
+		if err := yas.git.CreateBranchFrom(fullBranchName, startPoint); err != nil {
+			return "", fmt.Errorf("failed to create branch: %w", err)
+		}
+	} else {
+		if err := yas.git.CreateBranch(fullBranchName); err != nil {
+			return "", fmt.Errorf("failed to create branch: %w", err)
+		}
 	}
 
 	// Add to stack with parent
@@ -151,19 +182,50 @@ func (yas *YAS) CreateBranch(branchName string, parentBranch string) (string, er
 		return "", err
 	}
 
-	// Check for staged changes and commit automatically
-	hasStagedChanges, err := yas.git.HasStagedChanges()
-	if err != nil {
-		return "", fmt.Errorf("failed to check for staged changes: %w", err)
-	}
+	// Check for staged changes and commit automatically. This is skipped when
+	// the branch was created from a different parent, since in that case we
+	// want a fresh branch and leave any staged changes untouched.
+	if !createFromParent {
+		hasStagedChanges, err := yas.git.HasStagedChanges()
+		if err != nil {
+			return "", fmt.Errorf("failed to check for staged changes: %w", err)
+		}
 
-	if hasStagedChanges {
-		if err := yas.git.Commit(); err != nil {
-			return "", fmt.Errorf("failed to commit staged changes: %w", err)
+		if hasStagedChanges {
+			if err := yas.git.Commit(); err != nil {
+				return "", fmt.Errorf("failed to commit staged changes: %w", err)
+			}
 		}
 	}
 
 	return fullBranchName, nil
+}
+
+// resolveBranchStartPoint resolves a parent branch name to a git ref usable as
+// the start point for a new branch. It prefers a local branch, then falls back
+// to the remote-tracking ref (origin/<branch>) for parents that only exist
+// remotely. If neither exists it returns the name unchanged so git can surface
+// a clear error.
+func (yas *YAS) resolveBranchStartPoint(parentBranch string) (string, error) {
+	localExists, err := yas.git.BranchExists(parentBranch)
+	if err != nil {
+		return "", fmt.Errorf("failed to check if parent branch exists: %w", err)
+	}
+
+	if localExists {
+		return parentBranch, nil
+	}
+
+	remoteExists, err := yas.git.RemoteBranchExists(parentBranch)
+	if err != nil {
+		return "", fmt.Errorf("failed to check if parent branch exists remotely: %w", err)
+	}
+
+	if remoteExists {
+		return "origin/" + parentBranch, nil
+	}
+
+	return parentBranch, nil
 }
 
 func (yas *YAS) Reload() error {
