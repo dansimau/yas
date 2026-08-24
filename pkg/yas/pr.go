@@ -68,12 +68,14 @@ func (yas *YAS) refreshRemoteStatus(name string) error {
 
 	branchMetadata.GitHubPullRequest = *pullRequestMetadata
 
-	yas.data.Branches.Set(name, branchMetadata)
-
-	// Set parent based on PR base ref name
-	if branchMetadata.Parent == "" {
+	// Set parent based on PR base ref name. This must happen before the branch
+	// metadata is stored, otherwise the parent is written to a discarded copy.
+	// The trunk branch never has a parent, and no branch can be its own parent.
+	if branchMetadata.Parent == "" && name != yas.cfg.TrunkBranch && pullRequestMetadata.BaseRefName != name {
 		branchMetadata.Parent = pullRequestMetadata.BaseRefName
 	}
+
+	yas.data.Branches.Set(name, branchMetadata)
 
 	if err := yas.data.Save(); err != nil {
 		return err

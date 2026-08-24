@@ -276,3 +276,88 @@ Stacked PRs:
 	// Submit to create a PR - this calls annotate internally which should remove the stack section
 	assert.NilError(t, cli.Run("submit").Err())
 }
+
+// TestRefreshRemoteStatus_PersistsParentForUntrackedBranch verifies that
+// refreshing a branch that has not been explicitly added records the parent
+// from the PR's base ref. Branches stored without a parent are missing from the
+// branch graph, which previously made `yas annotate` fail.
+func TestRefreshRemoteStatus_PersistsParentForUntrackedBranch(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	mockGitHubPRForBranch(cli, "topic-a", yas.PullRequestMetadata{URL: githubPRURL("42"), BaseRefName: "main"})
+
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+
+		touch main
+		git add main
+		git commit -m "main-0"
+
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+	`)
+
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+
+	// Refresh without adding the branch first
+	assert.NilError(t, cli.Run("refresh", "topic-a").Err())
+
+	state := readStateFileFromDir(t, tempDir)
+	assert.Equal(t, state.Branches["topic-a"].Parent, "main")
+}
+
+// TestAnnotate_BranchWithoutParent verifies that annotating a branch that is
+// not part of the branch graph (because it has no parent) does not error.
+func TestAnnotate_BranchWithoutParent(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	cli.Mock("gh", "pr", "view", "42", "--json", "body", "-q", ".body").WithStdout("This is my PR description.")
+	cli.Mock("gh", "pr", "edit", "42", "--body", "This is my PR description.")
+
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+
+		touch main
+		git add main
+		git commit -m "main-0"
+
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+	`)
+
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+
+	// Simulate state written before the parent was persisted correctly: a
+	// branch with a PR but no parent.
+	writeStateFileToDir(t, tempDir, yasState{
+		Branches: map[string]yas.BranchMetadata{
+			"topic-a": {
+				Name: "topic-a",
+				GitHubPullRequest: yas.PullRequestMetadata{
+					ID:          "fakeid",
+					State:       "OPEN",
+					URL:         githubPRURL("42"),
+					BaseRefName: "main",
+				},
+			},
+		},
+	})
+
+	assert.NilError(t, cli.Run("annotate").Err())
+}
