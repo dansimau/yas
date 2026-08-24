@@ -132,6 +132,13 @@ func (yas *YAS) currentStackGraph(fullGraph *dag.DAG, currentBranch string) (*da
 
 func (yas *YAS) collectDescendants(graph *dag.DAG, branchName string, descendants *[]string) error {
 	children, err := graph.GetChildren(branchName)
+
+	// Branches without a parent are not part of the graph, so they have no
+	// descendants we can know about.
+	if errors.As(err, &dag.IDUnknownError{}) {
+		return nil
+	}
+
 	if err != nil {
 		return err
 	}

@@ -675,3 +675,47 @@ func TestRestack_DefaultsToCurrentBranch(t *testing.T) {
 	assert.Assert(t, strings.Contains(logOutput, "main-0"), "topic-x should still be based on main-0")
 	assert.Assert(t, !strings.Contains(logOutput, "main-1"), "topic-x should NOT include main-1")
 }
+
+// TestRestack_UntrackedBranchAdoptedFromPR verifies that a branch adopted into
+// the stack by refreshing its PR status records a branch point as well as a
+// parent, otherwise restacking it fails with "branch point is not set".
+func TestRestack_UntrackedBranchAdoptedFromPR(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	mockGitHubPRForBranch(cli, "topic-a", yas.PullRequestMetadata{URL: githubPRURL("42"), BaseRefName: "main"})
+
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+
+		touch main
+		git add main
+		git commit -m "main-0"
+
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+
+		git checkout main
+		touch main-1
+		git add main-1
+		git commit -m "main-1"
+	`)
+
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+
+	// Adopt topic-a into the stack without adding it explicitly
+	assert.NilError(t, cli.Run("refresh", "topic-a").Err())
+
+	state := readStateFileFromDir(t, tempDir)
+	assert.Equal(t, state.Branches["topic-a"].Parent, "main")
+	assert.Assert(t, state.Branches["topic-a"].BranchPoint != "", "branch point should be recorded alongside the parent")
+
+	assert.NilError(t, cli.Run("restack", "--all").Err())
+}

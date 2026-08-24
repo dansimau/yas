@@ -220,28 +220,17 @@ func (yas *YAS) SetParent(branchName, parentBranchName, branchPoint string) erro
 	branchMetdata.Parent = parentBranchName
 
 	// Capture the branch point - this is where the branch actually diverged from its parent.
-	// Try to autodetect: Use merge-base to find the common ancestor, which is the true branch point.
 	if branchPoint == "" {
-		var err error
-
-		branchesToTry := []string{
-			parentBranchName,
-			// Handle case where we are checking out a remote-only branch and we don't have the parent locally
-			"origin/" + parentBranchName,
-		}
-
-		for _, branch := range branchesToTry {
-			branchPoint, err = yas.git.GetMergeBase(branchName, branch)
-			if err != nil {
-				continue
-			}
-
-			break
-		}
-
-		if branchPoint == "" {
+		detectedBranchPoint, err := yas.detectBranchPoint(branchName, parentBranchName)
+		if err != nil {
 			return fmt.Errorf("failed to get branch point: %w", err)
 		}
+
+		if detectedBranchPoint == "" {
+			return errors.New("failed to get branch point")
+		}
+
+		branchPoint = detectedBranchPoint
 	}
 
 	branchMetdata.BranchPoint = branchPoint
@@ -270,6 +259,33 @@ func (yas *YAS) SetParent(branchName, parentBranchName, branchPoint string) erro
 	fmt.Printf("Set '%s' as parent of '%s' (branched after %s)\n", parentBranchName, branchName, shortHash)
 
 	return nil
+}
+
+// detectBranchPoint returns the commit where branchName diverged from
+// parentBranchName, which is the merge base of the two.
+func (yas *YAS) detectBranchPoint(branchName, parentBranchName string) (string, error) {
+	branchesToTry := []string{
+		parentBranchName,
+		// Handle case where we are checking out a remote-only branch and we don't have the parent locally
+		"origin/" + parentBranchName,
+	}
+
+	var err error
+
+	for _, branch := range branchesToTry {
+		branchPoint, mergeBaseErr := yas.git.GetMergeBase(branchName, branch)
+		if mergeBaseErr != nil {
+			err = mergeBaseErr
+
+			continue
+		}
+
+		if branchPoint != "" {
+			return branchPoint, nil
+		}
+	}
+
+	return "", err
 }
 
 // SwitchBranchInteractive shows an interactive selector and switches to the chosen branch.
