@@ -97,6 +97,21 @@ func (yas *YAS) annotateBranch(branchName string) error {
 	return nil
 }
 
+// parentBranchName returns the parent of a branch. Branches tracked before
+// their parent could be recorded don't have one, in which case the base ref of
+// their PR is the best available answer.
+func (yas *YAS) parentBranchName(branchMetadata BranchMetadata) string {
+	if branchMetadata.Parent != "" {
+		return branchMetadata.Parent
+	}
+
+	if branchMetadata.GitHubPullRequest.BaseRefName == branchMetadata.Name {
+		return ""
+	}
+
+	return branchMetadata.GitHubPullRequest.BaseRefName
+}
+
 func (yas *YAS) countPRsInStack(currentBranch string) (int, error) {
 	// Get the graph
 	graph, err := yas.graph()
@@ -114,11 +129,12 @@ func (yas *YAS) countPRsInStack(currentBranch string) (int, error) {
 			count++
 		}
 
-		if metadata.Parent == "" || metadata.Parent == yas.cfg.TrunkBranch {
+		parent := yas.parentBranchName(metadata)
+		if parent == "" || parent == yas.cfg.TrunkBranch {
 			break
 		}
 
-		branch = metadata.Parent
+		branch = parent
 	}
 
 	// Count descendants (walking down from current)
@@ -150,12 +166,14 @@ func (yas *YAS) buildStackVisualization(currentBranch string) (string, error) {
 	branch := currentBranch
 	for {
 		metadata := yas.data.Branches.Get(branch)
-		if metadata.Parent == "" || metadata.Parent == yas.cfg.TrunkBranch {
+
+		parent := yas.parentBranchName(metadata)
+		if parent == "" || parent == yas.cfg.TrunkBranch {
 			break
 		}
 
-		ancestors = append([]string{metadata.Parent}, ancestors...)
-		branch = metadata.Parent
+		ancestors = append([]string{parent}, ancestors...)
+		branch = parent
 	}
 
 	// Get descendants (walking down from current)

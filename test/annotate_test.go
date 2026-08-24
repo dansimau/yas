@@ -361,3 +361,69 @@ func TestAnnotate_BranchWithoutParent(t *testing.T) {
 
 	assert.NilError(t, cli.Run("annotate").Err())
 }
+
+// TestAnnotate_BranchWithoutParent_UsesPRBaseRef verifies that a branch stored
+// without a parent still finds its ancestors via the base ref of its PR, so
+// annotate does not mistake a stacked PR for a standalone one.
+func TestAnnotate_BranchWithoutParent_UsesPRBaseRef(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	cli.Mock("gh", "pr", "view", "42", "--json", "body", "-q", ".body").WithStdout("Foo body")
+	cli.Mock("gh", "pr", "edit", "42", "--body", `Foo body
+
+---
+
+Stacked PRs:
+
+* https://github.com/test/test/pull/41
+  * https://github.com/test/test/pull/42 👈 (this PR)`)
+
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+
+		touch main
+		git add main
+		git commit -m "main-0"
+
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+
+		git checkout -b topic-b
+		touch b
+		git add b
+		git commit -m "topic-b-0"
+	`)
+
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+
+	// topic-b is stacked on topic-a, but was stored without a parent
+	writeStateFileToDir(t, tempDir, yasState{
+		Branches: map[string]yas.BranchMetadata{
+			"topic-a": {
+				Name:   "topic-a",
+				Parent: "main",
+				GitHubPullRequest: yas.PullRequestMetadata{
+					ID: "fakeid-a", State: "OPEN", URL: githubPRURL("41"), BaseRefName: "main",
+				},
+			},
+			"topic-b": {
+				Name: "topic-b",
+				GitHubPullRequest: yas.PullRequestMetadata{
+					ID: "fakeid-b", State: "OPEN", URL: githubPRURL("42"), BaseRefName: "topic-a",
+				},
+			},
+		},
+	})
+
+	testutil.ExecOrFail(t, tempDir, "git checkout topic-b")
+
+	assert.NilError(t, cli.Run("annotate").Err())
+}

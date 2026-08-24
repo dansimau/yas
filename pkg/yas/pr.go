@@ -68,11 +68,11 @@ func (yas *YAS) refreshRemoteStatus(name string) error {
 
 	branchMetadata.GitHubPullRequest = *pullRequestMetadata
 
-	// Set parent based on PR base ref name. This must happen before the branch
-	// metadata is stored, otherwise the parent is written to a discarded copy.
-	// The trunk branch never has a parent, and no branch can be its own parent.
-	if branchMetadata.Parent == "" && name != yas.cfg.TrunkBranch && pullRequestMetadata.BaseRefName != name {
-		branchMetadata.Parent = pullRequestMetadata.BaseRefName
+	// Adopt the PR base ref as the parent for branches that aren't tracked yet.
+	// This must happen before the branch metadata is stored, otherwise the
+	// parent is written to a discarded copy.
+	if branchMetadata.Parent == "" {
+		yas.adoptPullRequestBaseAsParent(&branchMetadata)
 	}
 
 	yas.data.Branches.Set(name, branchMetadata)
@@ -82,6 +82,29 @@ func (yas *YAS) refreshRemoteStatus(name string) error {
 	}
 
 	return nil
+}
+
+// adoptPullRequestBaseAsParent records the base ref of a branch's PR as its
+// parent, which is how branches that were never explicitly added become part of
+// the branch graph. A branch is only usable in the graph if its branch point is
+// known as well, so the parent is left unset when it cannot be determined.
+func (yas *YAS) adoptPullRequestBaseAsParent(branchMetadata *BranchMetadata) {
+	baseRefName := branchMetadata.GitHubPullRequest.BaseRefName
+
+	// The trunk branch never has a parent, and no branch can be its own parent.
+	if baseRefName == "" || baseRefName == branchMetadata.Name || branchMetadata.Name == yas.cfg.TrunkBranch {
+		return
+	}
+
+	branchPoint, err := yas.detectBranchPoint(branchMetadata.Name, baseRefName)
+	if err != nil || branchPoint == "" {
+		log.Info("Unable to determine branch point for", branchMetadata.Name, "- leaving it untracked:", err)
+
+		return
+	}
+
+	branchMetadata.Parent = baseRefName
+	branchMetadata.BranchPoint = branchPoint
 }
 
 func (yas *YAS) RefreshRemoteStatus(branchNames ...string) error {
