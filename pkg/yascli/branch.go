@@ -52,10 +52,19 @@ func (c *branchCmd) Execute(args []string) error {
 
 	branchExists := branchExistsLocally || branchExistsRemotely
 
-	// Create branch if it doesn't exist
-	if !branchExists {
+	switch {
+	// Create branch if it doesn't exist anywhere
+	case !branchExists:
 		fullBranchName, err = yasInstance.CreateBranch(c.Arguments.BranchName, c.Parent)
 		if err != nil {
+			return NewError(err.Error())
+		}
+
+	// Branch only exists on the remote: create a local branch that tracks it,
+	// rather than leaving it to git's DWIM (which gives up when the branch name
+	// exists on more than one remote).
+	case !branchExistsLocally:
+		if err := yasInstance.CreateTrackingBranch(fullBranchName); err != nil {
 			return NewError(err.Error())
 		}
 	}

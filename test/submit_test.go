@@ -719,3 +719,114 @@ func TestSubmit_DraftPRShowsAsDraft(t *testing.T) {
 	result := cli.Run("submit")
 	assert.NilError(t, result.Err())
 }
+
+func TestSubmit_SetsUpstreamTrackingWhenPushing(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	fakeOrigin := filepath.Join(tempDir, "origin.git")
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	cli.SkipMockVerification()
+
+	mockGitHubPRForBranch(cli, "topic-a", yas.PullRequestMetadata{
+		ID:          "PR_kwDOTest123",
+		State:       "OPEN",
+		URL:         githubPRURL("42"),
+		BaseRefName: "main",
+	})
+
+	cli.Mock("gh", "pr", "view", "42", "--json", "body", "-q", ".body").WithStdout("")
+	cli.Mock("gh", "pr", "edit", "42", "--body", "")
+
+	testutil.ExecOrFail(t, tempDir, stringutil.MustInterpolate(`
+		# Create fake origin
+		git init --bare {{.fakeOrigin}}
+
+		git init --initial-branch=main
+		git remote add origin {{.fakeOrigin}}
+
+		# main
+		touch main
+		git add main
+		git commit -m "main-0"
+		git push -u origin main
+	`, map[string]string{"fakeOrigin": fakeOrigin}))
+
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+
+	// Create the branch with yas, so it starts out with no upstream
+	assert.NilError(t, cli.Run("branch", "topic-a").Err())
+
+	testutil.ExecOrFail(t, tempDir, `
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+	`)
+
+	// The branch does not track anything yet
+	assert.Assert(t, mustExecExitCode(tempDir, "git", "rev-parse", "topic-a@{upstream}") != 0,
+		"newly created branch should have no upstream")
+
+	assert.NilError(t, cli.Run("submit").Err())
+
+	// Pushing sets the upstream to the same-named branch on the remote
+	assert.Equal(t, "origin/topic-a",
+		strings.TrimSpace(mustExecOutput(tempDir, "git", "rev-parse", "--abbrev-ref", "topic-a@{upstream}")))
+}
+
+func TestSubmit_SetsUpstreamTrackingWhenAlreadyPushed(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	fakeOrigin := filepath.Join(tempDir, "origin.git")
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	cli.SkipMockVerification()
+
+	mockGitHubPRForBranch(cli, "topic-a", yas.PullRequestMetadata{
+		ID:          "PR_kwDOTest123",
+		State:       "OPEN",
+		URL:         githubPRURL("42"),
+		BaseRefName: "main",
+	})
+
+	cli.Mock("gh", "pr", "view", "42", "--json", "body", "-q", ".body").WithStdout("")
+	cli.Mock("gh", "pr", "edit", "42", "--body", "")
+
+	testutil.ExecOrFail(t, tempDir, stringutil.MustInterpolate(`
+		# Create fake origin
+		git init --bare {{.fakeOrigin}}
+
+		git init --initial-branch=main
+		git remote add origin {{.fakeOrigin}}
+
+		# main
+		touch main
+		git add main
+		git commit -m "main-0"
+		git push -u origin main
+
+		# topic-a, pushed without setting upstream
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+		git push origin topic-a
+	`, map[string]string{"fakeOrigin": fakeOrigin}))
+
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
+
+	// Nothing to push, but the branch is missing its upstream
+	assert.NilError(t, cli.Run("submit").Err())
+
+	assert.Equal(t, "origin/topic-a",
+		strings.TrimSpace(mustExecOutput(tempDir, "git", "rev-parse", "--abbrev-ref", "topic-a@{upstream}")))
+}

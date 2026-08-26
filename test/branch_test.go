@@ -451,3 +451,111 @@ func TestBranchSwitch_RemoteBranchInitiatesRefresh(t *testing.T) {
 	// The gh pr list mock being called verifies that refresh was initiated
 	// (if it wasn't called, the mock would fail with "no mock configured")
 }
+
+func TestBranchSwitch_RemoteBranchSetsUpstreamTracking(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	fakeOrigin := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	mockGitHubPRForBranch(cli, "topic-a", yas.PullRequestMetadata{
+		URL:         githubPRURL("42"),
+		BaseRefName: "main",
+	})
+
+	testutil.ExecOrFail(t, tempDir, stringutil.MustInterpolate(`
+		# Set up "remote" repository
+		git init --bare {{.fakeOrigin}}
+
+		git init --initial-branch=main
+		git remote add origin {{.fakeOrigin}}
+
+		touch main
+		git add main
+		git commit -m "main-0"
+
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+		git push origin topic-a
+
+		# Delete local branch to simulate checking out the remote branch for the
+		# first time
+		git checkout main
+		git branch -D topic-a
+
+		# A second remote with the same branch: git's DWIM refuses to guess
+		# between them, so the branch has to be created explicitly
+		git remote add fork {{.fakeOrigin}}
+		git fetch fork
+	`, map[string]string{
+		"fakeOrigin": fakeOrigin,
+	}))
+
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+
+	assert.NilError(t, cli.Run("branch", "topic-a").Err())
+
+	currentBranch := strings.TrimSpace(mustExecOutput(tempDir, "git", "branch", "--show-current"))
+	assert.Equal(t, "topic-a", currentBranch)
+
+	// The local branch tracks the branch it was created from
+	assert.Equal(t, "origin/topic-a", upstreamOf(tempDir, "topic-a"))
+}
+
+func TestBranchSwitch_RemoteBranchOnNonOriginRemote(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	fakeRemote := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	mockGitHubPRForBranch(cli, "topic-a", yas.PullRequestMetadata{
+		URL:         githubPRURL("42"),
+		BaseRefName: "main",
+	})
+
+	testutil.ExecOrFail(t, tempDir, stringutil.MustInterpolate(`
+		# The only remote is not called "origin"
+		git init --bare {{.fakeRemote}}
+
+		git init --initial-branch=main
+		git remote add upstream {{.fakeRemote}}
+
+		touch main
+		git add main
+		git commit -m "main-0"
+
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+		git push upstream topic-a
+
+		git checkout main
+		git branch -D topic-a
+	`, map[string]string{
+		"fakeRemote": fakeRemote,
+	}))
+
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+
+	assert.NilError(t, cli.Run("branch", "topic-a").Err())
+
+	currentBranch := strings.TrimSpace(mustExecOutput(tempDir, "git", "branch", "--show-current"))
+	assert.Equal(t, "topic-a", currentBranch)
+
+	// The remote branch was checked out (rather than a new branch created from
+	// main) and tracks the remote it came from
+	assert.Equal(t, "upstream/topic-a", upstreamOf(tempDir, "topic-a"))
+	assert.Equal(t, mustExecOutput(tempDir, "git", "rev-parse", "upstream/topic-a"),
+		mustExecOutput(tempDir, "git", "rev-parse", "topic-a"))
+}

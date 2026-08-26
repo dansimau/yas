@@ -192,7 +192,7 @@ func TestGetRemoteForBranch(t *testing.T) {
 			expectError:    false,
 		},
 		{
-			name: "returns error when no branch has remote configured",
+			name: "falls back to the only remote when no branch has one configured",
 			setup: func(t *testing.T, repoPath string) {
 				testutil.ExecOrFail(t, repoPath, `
 					git init
@@ -200,13 +200,12 @@ func TestGetRemoteForBranch(t *testing.T) {
 					git config user.name "Test User"
 					git commit --allow-empty -m "initial commit"
 					git checkout -b feature
-					git remote add origin https://github.com/user/repo.git
+					git remote add upstream https://github.com/upstream/repo.git
 				`)
 			},
 			branchNames:    []string{"feature"},
-			expectedRemote: "",
-			expectError:    true,
-			errorContains:  "no remote configured for branch feature",
+			expectedRemote: "upstream",
+			expectError:    false,
 		},
 		{
 			name: "returns error when no branch names provided",
@@ -239,6 +238,96 @@ func TestGetRemoteForBranch(t *testing.T) {
 			branchNames:    []string{"feature"},
 			expectedRemote: "custom-remote",
 			expectError:    false,
+		},
+		{
+			name: "prefers branch.<name>.pushRemote over the branch's remote",
+			setup: func(t *testing.T, repoPath string) {
+				testutil.ExecOrFail(t, repoPath, `
+					git init
+					git config user.email "test@example.com"
+					git config user.name "Test User"
+					git commit --allow-empty -m "initial commit"
+					git checkout -b feature
+					git remote add origin https://github.com/user/repo.git
+					git remote add fork https://github.com/user/fork.git
+					git config branch.feature.remote origin
+					git config branch.feature.pushRemote fork
+				`)
+			},
+			branchNames:    []string{"feature"},
+			expectedRemote: "fork",
+			expectError:    false,
+		},
+		{
+			name: "prefers remote.pushDefault over the branch's remote",
+			setup: func(t *testing.T, repoPath string) {
+				testutil.ExecOrFail(t, repoPath, `
+					git init
+					git config user.email "test@example.com"
+					git config user.name "Test User"
+					git commit --allow-empty -m "initial commit"
+					git checkout -b feature
+					git remote add origin https://github.com/user/repo.git
+					git remote add fork https://github.com/user/fork.git
+					git config branch.feature.remote origin
+					git config remote.pushDefault fork
+				`)
+			},
+			branchNames:    []string{"feature"},
+			expectedRemote: "fork",
+			expectError:    false,
+		},
+		{
+			name: "falls back to origin when there are several remotes",
+			setup: func(t *testing.T, repoPath string) {
+				testutil.ExecOrFail(t, repoPath, `
+					git init
+					git config user.email "test@example.com"
+					git config user.name "Test User"
+					git commit --allow-empty -m "initial commit"
+					git checkout -b feature
+					git remote add fork https://github.com/user/fork.git
+					git remote add origin https://github.com/user/repo.git
+				`)
+			},
+			branchNames:    []string{"feature"},
+			expectedRemote: "origin",
+			expectError:    false,
+		},
+		{
+			name: "returns error when there are several remotes and none is origin",
+			setup: func(t *testing.T, repoPath string) {
+				testutil.ExecOrFail(t, repoPath, `
+					git init
+					git config user.email "test@example.com"
+					git config user.name "Test User"
+					git commit --allow-empty -m "initial commit"
+					git checkout -b feature
+					git remote add fork https://github.com/user/fork.git
+					git remote add upstream https://github.com/upstream/repo.git
+				`)
+			},
+			branchNames:    []string{"feature"},
+			expectedRemote: "",
+			expectError:    true,
+			errorContains:  "cannot determine which remote to use (fork, upstream): set remote.pushDefault",
+		},
+		{
+			name: "returns error when there are no remotes",
+			setup: func(t *testing.T, repoPath string) {
+				testutil.ExecOrFail(t, repoPath, `
+					git init
+					git config user.email "test@example.com"
+					git config user.name "Test User"
+					git commit --allow-empty -m "initial commit"
+					git checkout -b feature
+					git config core.bare false
+				`)
+			},
+			branchNames:    []string{"feature"},
+			expectedRemote: "",
+			expectError:    true,
+			errorContains:  "repository has no remotes",
 		},
 	}
 

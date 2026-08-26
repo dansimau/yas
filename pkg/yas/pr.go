@@ -9,6 +9,9 @@ import (
 	"github.com/sourcegraph/conc/pool"
 )
 
+// pullRequestStateOpen is the state GitHub reports for an open pull request.
+const pullRequestStateOpen = "OPEN"
+
 func (yas *YAS) fetchGitHubPullRequestStatus(branchName string) (*PullRequestMetadata, error) {
 	log.Info("Fetching PRs for branch", branchName)
 
@@ -80,6 +83,12 @@ func (yas *YAS) refreshRemoteStatus(name string) error {
 	if err := yas.data.Save(); err != nil {
 		return err
 	}
+
+	// Now that we know the branch exists on the remote, make sure it tracks it.
+	// An open PR means the remote branch is there even if we have never fetched
+	// it, so it's worth fetching to set tracking up.
+	hasOpenPR := branchMetadata.GitHubPullRequest.State == pullRequestStateOpen
+	yas.ensureUpstreamTracking(name, hasOpenPR)
 
 	return nil
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/dansimau/yas/pkg/gitexec"
+	"github.com/dansimau/yas/pkg/log"
 	"github.com/go-git/go-git/v5"
 	"github.com/hashicorp/go-version"
 )
@@ -203,7 +204,7 @@ func (yas *YAS) CreateBranch(branchName string, parentBranch string) (string, er
 
 // resolveBranchStartPoint resolves a parent branch name to a git ref usable as
 // the start point for a new branch. It prefers a local branch, then falls back
-// to the remote-tracking ref (origin/<branch>) for parents that only exist
+// to the remote-tracking ref (<remote>/<branch>) for parents that only exist
 // remotely. If neither exists it returns the name unchanged so git can surface
 // a clear error.
 func (yas *YAS) resolveBranchStartPoint(parentBranch string) (string, error) {
@@ -216,16 +217,31 @@ func (yas *YAS) resolveBranchStartPoint(parentBranch string) (string, error) {
 		return parentBranch, nil
 	}
 
-	remoteExists, err := yas.git.RemoteBranchExists(parentBranch)
+	remote, err := yas.remoteForBranch(parentBranch)
+	if err != nil {
+		// No remote to look at, so the name is all we have.
+		log.Info("Unable to determine remote for", parentBranch, err)
+
+		return parentBranch, nil
+	}
+
+	remoteExists, err := yas.git.RemoteBranchExists(remote, parentBranch)
 	if err != nil {
 		return "", fmt.Errorf("failed to check if parent branch exists remotely: %w", err)
 	}
 
 	if remoteExists {
-		return "origin/" + parentBranch, nil
+		return fmt.Sprintf("%s/%s", remote, parentBranch), nil
 	}
 
 	return parentBranch, nil
+}
+
+// remoteForBranch returns the remote the given branch pushes to, falling back
+// to the trunk branch's remote so branches that have never been pushed use the
+// same remote as the rest of the stack.
+func (yas *YAS) remoteForBranch(branchName string) (string, error) {
+	return yas.git.GetRemoteForBranch(branchName, yas.cfg.TrunkBranch)
 }
 
 func (yas *YAS) Reload() error {
