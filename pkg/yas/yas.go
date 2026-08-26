@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/dansimau/yas/pkg/gitexec"
+	"github.com/dansimau/yas/pkg/log"
 	"github.com/go-git/go-git/v5"
 	"github.com/hashicorp/go-version"
 )
@@ -203,7 +204,7 @@ func (yas *YAS) CreateBranch(branchName string, parentBranch string) (string, er
 
 // resolveBranchStartPoint resolves a parent branch name to a git ref usable as
 // the start point for a new branch. It prefers a local branch, then falls back
-// to the remote-tracking ref (origin/<branch>) for parents that only exist
+// to the remote-tracking ref (<remote>/<branch>) for parents that only exist
 // remotely. If neither exists it returns the name unchanged so git can surface
 // a clear error.
 func (yas *YAS) resolveBranchStartPoint(parentBranch string) (string, error) {
@@ -216,16 +217,68 @@ func (yas *YAS) resolveBranchStartPoint(parentBranch string) (string, error) {
 		return parentBranch, nil
 	}
 
-	remoteExists, err := yas.git.RemoteBranchExists(parentBranch)
+	remote := yas.fetchRemoteForBranchOrEmpty(parentBranch)
+	if remote == "" {
+		// No remote to look at, so the name is all we have.
+		return parentBranch, nil
+	}
+
+	remoteExists, err := yas.git.RemoteBranchExists(remote, parentBranch)
 	if err != nil {
 		return "", fmt.Errorf("failed to check if parent branch exists remotely: %w", err)
 	}
 
 	if remoteExists {
-		return "origin/" + parentBranch, nil
+		return fmt.Sprintf("%s/%s", remote, parentBranch), nil
 	}
 
 	return parentBranch, nil
+}
+
+// remoteFor walks the branch, then the trunk branch (a branch that has never
+// been pushed has nothing configured, and the rest of the stack uses the trunk's
+// remote), then falls back to the remote git itself would default to. pick
+// chooses between the fetch and push remote, which git configures separately.
+func (yas *YAS) remoteFor(branchName string, pick func(gitexec.RemoteConfig, string) string) (string, error) {
+	cfg, err := yas.git.RemoteConfig()
+	if err != nil {
+		return "", err
+	}
+
+	for _, name := range []string{branchName, yas.cfg.TrunkBranch} {
+		if remote := pick(cfg, name); remote != "" {
+			return remote, nil
+		}
+	}
+
+	return yas.git.DefaultRemote()
+}
+
+// fetchRemoteForBranch returns the remote the branch is fetched from. This is
+// the remote to look at when asking where a branch lives, since a push remote
+// (remote.pushDefault and friends) says nothing about what has been fetched.
+func (yas *YAS) fetchRemoteForBranch(branchName string) (string, error) {
+	return yas.remoteFor(branchName, gitexec.RemoteConfig.FetchRemoteFor)
+}
+
+// fetchRemoteForBranchOrEmpty resolves the fetch remote for a branch, returning
+// an empty string when there isn't one to be had (a repository with no remotes,
+// or several with no way to choose between them). For callers that can carry on
+// without one.
+func (yas *YAS) fetchRemoteForBranchOrEmpty(branchName string) string {
+	remote, err := yas.fetchRemoteForBranch(branchName)
+	if err != nil {
+		log.Info("Unable to determine remote for", branchName, err)
+
+		return ""
+	}
+
+	return remote
+}
+
+// pushRemoteForBranch returns the remote the branch pushes to.
+func (yas *YAS) pushRemoteForBranch(branchName string) (string, error) {
+	return yas.remoteFor(branchName, gitexec.RemoteConfig.PushRemoteFor)
 }
 
 func (yas *YAS) Reload() error {

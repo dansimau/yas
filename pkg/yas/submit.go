@@ -154,6 +154,11 @@ func (yas *YAS) submitBranch(branchName string, draft bool, status func(string))
 
 	metadata := yas.data.Branches.Get(branchName)
 
+	remote, err := yas.pushRemoteForBranch(branchName)
+	if err != nil {
+		return fmt.Errorf("failed to get remote for branch %s or trunk: %w", branchName, err)
+	}
+
 	// Get current local hash
 	currentLocalHash, err := yas.git.GetShortHash(branchName)
 	if err != nil {
@@ -168,12 +173,12 @@ func (yas *YAS) submitBranch(branchName string, draft bool, status func(string))
 
 	if metadata.GitHubPullRequest.ID != "" {
 		// Fetch the latest remote ref
-		if err := yas.git.FetchBranch(branchName); err != nil {
+		if err := yas.git.FetchBranch(remote, branchName); err != nil {
 			// Ignore error if remote branch doesn't exist yet
 			log.Info("Failed to fetch remote branch (may not exist yet)", err)
 		} else {
 			// Get the short hash of the remote branch before pushing
-			hash, err := yas.git.GetRemoteShortHash(branchName)
+			hash, err := yas.git.GetRemoteShortHash(remote, branchName)
 			if err == nil {
 				oldRemoteHash = hash
 				remoteExists = true
@@ -185,17 +190,20 @@ func (yas *YAS) submitBranch(branchName string, draft bool, status func(string))
 	needsPush := !remoteExists || oldRemoteHash != currentLocalHash
 
 	if needsPush {
-		// Get remote for this branch, or trunk if no remote is configured
-		remote, err := yas.git.GetRemoteForBranch(branchName, yas.cfg.TrunkBranch)
-		if err != nil {
-			return fmt.Errorf("failed to get remote for branch %s or trunk: %w", branchName, err)
-		}
-
 		status("Pushing branch...")
 		// Force push with lease (we expect the branch may have been rebased)
 		if err := yas.git.ForcePushBranch(remote, branchName); err != nil {
 			return fmt.Errorf("failed to push: %w", err)
 		}
+
+		// The branch is on the remote now, so it can track it. `git push -u`
+		// would do this for us, but it writes .git/config from every parallel
+		// push at once and git doesn't survive that.
+		yas.setUpstreamIfUnset(branchName, remote)
+	} else {
+		// Branch is already up to date on the remote, but it may predate us
+		// setting tracking up (or have been pushed outside of yas).
+		yas.ensureUpstreamTracking(branchName, false)
 	}
 
 	// Check if PR already exists
@@ -295,7 +303,13 @@ func (yas *YAS) needsSubmit(branchName string) (bool, error) {
 	}
 
 	// Try to get remote hash
-	remoteHash, err := yas.git.GetRemoteCommitHash(branchName)
+	remote, err := yas.pushRemoteForBranch(branchName)
+	if err != nil {
+		// Without a remote we can't compare, so assume it needs submit
+		return true, nil
+	}
+
+	remoteHash, err := yas.git.GetRemoteCommitHash(remote, branchName)
 	if err != nil {
 		// If we can't get remote hash, assume it needs submit
 		return true, nil

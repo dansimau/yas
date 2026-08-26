@@ -24,6 +24,15 @@ func mustExecOutput(workingDir string, args ...string) (output string) {
 	return string(b)
 }
 
+// upstreamOf returns the upstream ref of the given branch, or "" if it has none.
+func upstreamOf(workingDir string, branchName string) string {
+	if mustExecExitCode(workingDir, "git", "rev-parse", branchName+"@{upstream}") != 0 {
+		return ""
+	}
+
+	return strings.TrimSpace(mustExecOutput(workingDir, "git", "rev-parse", "--abbrev-ref", branchName+"@{upstream}"))
+}
+
 // mustExecExitCode executes the specified command/args and returns the exit code.
 func mustExecExitCode(workingDir string, args ...string) int {
 	err := xexec.Command(args...).WithEnvVars(gitexec.CleanedGitEnv()).WithWorkingDir(workingDir).Run()

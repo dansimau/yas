@@ -43,6 +43,17 @@ func mockGitHubPRForBranch(cli *gocmdtester.CmdTester, branchName string, prMeta
 	).WithStdout(mustMarshalJSON([]yas.PullRequestMetadata{prMetadata}))
 }
 
+// mockNoGitHubPRForBranch creates a mock for the "gh" command that reports no PR
+// for the given branch.
+func mockNoGitHubPRForBranch(cli *gocmdtester.CmdTester, branchName string) {
+	cli.Mock(
+		"gh", "pr", "list",
+		"--head", branchName,
+		"--state", "all",
+		"--json", "id,state,url,isDraft,baseRefName",
+	).WithStdout("[]")
+}
+
 func TestAnnotate_UpdatesPRWithStackInfo(t *testing.T) {
 	t.Parallel()
 

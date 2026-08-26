@@ -2,6 +2,7 @@ package test
 
 import (
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -468,8 +469,7 @@ func TestSubmit_OutdatedSkipsBranchesWithoutPRs(t *testing.T) {
 	cli.SkipMockVerification()
 
 	// Mock gh pr list to return no existing PR (empty array)
-	cli.Mock("gh", "pr", "list", "--head", "topic-a", "--state", "all", "--json", "id,state,url,isDraft,baseRefName").
-		WithStdout("[]")
+	mockNoGitHubPRForBranch(cli, "topic-a")
 
 	testutil.ExecOrFail(t, tempDir, stringutil.MustInterpolate(`
 		# Create fake origin
@@ -718,4 +718,324 @@ func TestSubmit_DraftPRShowsAsDraft(t *testing.T) {
 	// Call submit (PR already exists as draft)
 	result := cli.Run("submit")
 	assert.NilError(t, result.Err())
+}
+
+func TestSubmit_SetsUpstreamTrackingWhenPushing(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	fakeOrigin := filepath.Join(tempDir, "origin.git")
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	cli.SkipMockVerification()
+
+	mockGitHubPRForBranch(cli, "topic-a", yas.PullRequestMetadata{
+		ID:          "PR_kwDOTest123",
+		State:       "OPEN",
+		URL:         githubPRURL("42"),
+		BaseRefName: "main",
+	})
+
+	cli.Mock("gh", "pr", "view", "42", "--json", "body", "-q", ".body").WithStdout("")
+	cli.Mock("gh", "pr", "edit", "42", "--body", "")
+
+	testutil.ExecOrFail(t, tempDir, stringutil.MustInterpolate(`
+		# Create fake origin
+		git init --bare {{.fakeOrigin}}
+
+		git init --initial-branch=main
+		git remote add origin {{.fakeOrigin}}
+
+		# main
+		touch main
+		git add main
+		git commit -m "main-0"
+		git push -u origin main
+	`, map[string]string{"fakeOrigin": fakeOrigin}))
+
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+
+	// Create the branch with yas, so it starts out with no upstream
+	assert.NilError(t, cli.Run("branch", "topic-a").Err())
+
+	testutil.ExecOrFail(t, tempDir, `
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+	`)
+
+	assert.Equal(t, "", upstreamOf(tempDir, "topic-a"), "newly created branch should have no upstream")
+
+	assert.NilError(t, cli.Run("submit").Err())
+
+	// Pushing sets the upstream to the same-named branch on the remote
+	assert.Equal(t, "origin/topic-a", upstreamOf(tempDir, "topic-a"))
+}
+
+func TestSubmit_SetsUpstreamTrackingWhenAlreadyPushed(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	fakeOrigin := filepath.Join(tempDir, "origin.git")
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	cli.SkipMockVerification()
+
+	mockGitHubPRForBranch(cli, "topic-a", yas.PullRequestMetadata{
+		ID:          "PR_kwDOTest123",
+		State:       "OPEN",
+		URL:         githubPRURL("42"),
+		BaseRefName: "main",
+	})
+
+	cli.Mock("gh", "pr", "view", "42", "--json", "body", "-q", ".body").WithStdout("")
+	cli.Mock("gh", "pr", "edit", "42", "--body", "")
+
+	testutil.ExecOrFail(t, tempDir, stringutil.MustInterpolate(`
+		# Create fake origin
+		git init --bare {{.fakeOrigin}}
+
+		git init --initial-branch=main
+		git remote add origin {{.fakeOrigin}}
+
+		# main
+		touch main
+		git add main
+		git commit -m "main-0"
+		git push -u origin main
+
+		# topic-a, pushed without setting upstream
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+		git push origin topic-a
+	`, map[string]string{"fakeOrigin": fakeOrigin}))
+
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
+
+	// Nothing to push, but the branch is missing its upstream
+	assert.NilError(t, cli.Run("submit").Err())
+
+	assert.Equal(t, "origin/topic-a", upstreamOf(tempDir, "topic-a"))
+}
+
+// A triangular workflow fetches one remote and pushes another. The push has to
+// follow the push config, and must not rewrite the branch's fetch config.
+func TestSubmit_TriangularWorkflowPushesToPushRemoteAndKeepsUpstream(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	fakeUpstream := filepath.Join(t.TempDir(), "upstream.git")
+	fakeFork := filepath.Join(t.TempDir(), "fork.git")
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	cli.SkipMockVerification()
+
+	mockGitHubPRForBranch(cli, "topic-a", yas.PullRequestMetadata{
+		ID:          "PR_kwDOTest123",
+		URL:         githubPRURL("42"),
+		BaseRefName: "main",
+	})
+
+	cli.Mock("gh", "pr", "view", "42", "--json", "body", "-q", ".body").WithStdout("")
+	cli.Mock("gh", "pr", "edit", "42", "--body", "")
+
+	testutil.ExecOrFail(t, tempDir, stringutil.MustInterpolate(`
+		git init --bare {{.fakeUpstream}}
+		git init --bare {{.fakeFork}}
+
+		git init --initial-branch=main
+		git remote add upstream {{.fakeUpstream}}
+		git remote add fork {{.fakeFork}}
+
+		touch main
+		git add main
+		git commit -m "main-0"
+		git push -u upstream main
+
+		# Pull from upstream, push to fork
+		git config remote.pushDefault fork
+
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+		git push upstream topic-a
+		git branch --set-upstream-to=upstream/topic-a topic-a
+
+		# Give it something to push
+		touch a2
+		git add a2
+		git commit -m "topic-a-1"
+	`, map[string]string{"fakeUpstream": fakeUpstream, "fakeFork": fakeFork}))
+
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
+
+	assert.NilError(t, cli.Run("submit").Err())
+
+	// Pushed to the push remote
+	assert.Equal(t,
+		strings.TrimSpace(mustExecOutput(tempDir, "git", "rev-parse", "topic-a")),
+		strings.TrimSpace(mustExecOutput(tempDir, "git", "ls-remote", fakeFork, "refs/heads/topic-a"))[:40])
+
+	// ...without repointing the branch at it
+	assert.Equal(t, "upstream/topic-a", upstreamOf(tempDir, "topic-a"))
+}
+
+// The branch's own config decides where it pushes; the trunk branch is only a
+// fallback for branches with no config of their own.
+func TestSubmit_BranchRemoteWinsOverTrunkPushRemote(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	fakeOrigin := filepath.Join(t.TempDir(), "origin.git")
+	fakeFork := filepath.Join(t.TempDir(), "fork.git")
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	cli.SkipMockVerification()
+
+	mockGitHubPRForBranch(cli, "topic-a", yas.PullRequestMetadata{
+		ID:          "PR_kwDOTest123",
+		URL:         githubPRURL("42"),
+		BaseRefName: "main",
+	})
+
+	cli.Mock("gh", "pr", "view", "42", "--json", "body", "-q", ".body").WithStdout("")
+	cli.Mock("gh", "pr", "edit", "42", "--body", "")
+
+	testutil.ExecOrFail(t, tempDir, stringutil.MustInterpolate(`
+		git init --bare {{.fakeOrigin}}
+		git init --bare {{.fakeFork}}
+
+		git init --initial-branch=main
+		git remote add origin {{.fakeOrigin}}
+		git remote add fork {{.fakeFork}}
+
+		touch main
+		git add main
+		git commit -m "main-0"
+		git push -u origin main
+
+		# Trunk pushes to the fork, but topic-a is configured for origin
+		git config branch.main.pushRemote fork
+
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+		git config branch.topic-a.remote origin
+	`, map[string]string{"fakeOrigin": fakeOrigin, "fakeFork": fakeFork}))
+
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
+
+	assert.NilError(t, cli.Run("submit").Err())
+
+	assert.Assert(t, strings.Contains(mustExecOutput(tempDir, "git", "ls-remote", fakeOrigin), "refs/heads/topic-a"),
+		"should push to the branch's own remote")
+	assert.Assert(t, !strings.Contains(mustExecOutput(tempDir, "git", "ls-remote", fakeFork), "refs/heads/topic-a"),
+		"should not push to the trunk's push remote")
+}
+
+// stackAnnotation builds the PR body yas annotates onto the currentth PR of a
+// stack of prCount PRs.
+func stackAnnotation(prCount int, current int) string {
+	body := strings.Builder{}
+	body.WriteString("---\n\nStacked PRs:\n")
+
+	for i := range prCount {
+		body.WriteString("\n" + strings.Repeat("  ", i) + "* " + githubPRURL(strconv.Itoa(i+1)))
+
+		if i == current {
+			body.WriteString(" 👈 (this PR)")
+		}
+	}
+
+	return body.String()
+}
+
+// Submitting a stack pushes branches in parallel, and every branch has to end
+// up tracking its remote. Git writes .git/config without retrying the lock, so
+// tracking writes that aren't serialized silently go missing here.
+func TestSubmit_StackSetsUpstreamTrackingForEveryBranch(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	fakeOrigin := filepath.Join(t.TempDir(), "origin.git")
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	cli.SkipMockVerification()
+
+	branches := []string{"topic-a", "topic-b", "topic-c", "topic-d", "topic-e"}
+
+	setup := strings.Builder{}
+	setup.WriteString(stringutil.MustInterpolate(`
+		git init --bare {{.fakeOrigin}}
+
+		git init --initial-branch=main
+		git remote add origin {{.fakeOrigin}}
+
+		touch main
+		git add main
+		git commit -m "main-0"
+		git push -u origin main
+	`, map[string]string{"fakeOrigin": fakeOrigin}))
+
+	for i, branch := range branches {
+		base := "main"
+		if i > 0 {
+			base = branches[i-1]
+		}
+
+		mockGitHubPRForBranch(cli, branch, yas.PullRequestMetadata{
+			ID:          "PR_kwDOTest" + branch,
+			URL:         githubPRURL(strconv.Itoa(i + 1)),
+			BaseRefName: base,
+		})
+
+		cli.Mock("gh", "pr", "view", strconv.Itoa(i+1), "--json", "body", "-q", ".body").WithStdout("")
+		cli.Mock("gh", "pr", "edit", strconv.Itoa(i+1), "--body", stackAnnotation(len(branches), i))
+
+		setup.WriteString(stringutil.MustInterpolate(`
+			git checkout -b {{.branch}}
+			touch {{.branch}}
+			git add {{.branch}}
+			git commit -m "{{.branch}}-0"
+		`, map[string]string{"branch": branch}))
+	}
+
+	testutil.ExecOrFail(t, tempDir, setup.String())
+
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+
+	parent := "main"
+
+	for _, branch := range branches {
+		assert.NilError(t, cli.Run("add", branch, "--parent="+parent).Err())
+		parent = branch
+	}
+
+	assert.NilError(t, cli.Run("submit", "--stack").Err())
+
+	for _, branch := range branches {
+		assert.Equal(t, "origin/"+branch, upstreamOf(tempDir, branch), "branch %s should track its remote", branch)
+	}
 }

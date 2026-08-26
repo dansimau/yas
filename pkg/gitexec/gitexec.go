@@ -5,13 +5,32 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"slices"
 	"strings"
+	"sync"
 
 	"github.com/dansimau/yas/pkg/xexec"
 	"github.com/hashicorp/go-version"
 )
 
 var ErrDetachedHead = errors.New("currently in detached state")
+
+// configWriteMu serializes writes to .git/config. Git takes the config lock
+// without retrying, so concurrent writers just fail with "could not lock config
+// file" (measured at ~10% with ten writers, ~25% for `git push -u` with five).
+// yas pushes and refreshes branches in parallel, so tracking writes take turns.
+// This only covers writes from this process; a concurrent yas elsewhere can
+// still lose the race, exactly as two concurrent git commands would.
+var configWriteMu sync.Mutex
+
+const defaultRemoteName = "origin"
+
+// isExitCode reports whether err is a command that exited with the given code.
+func isExitCode(err error, code int) bool {
+	exitErr := &exec.ExitError{}
+
+	return errors.As(err, &exitErr) && exitErr.ExitCode() == code
+}
 
 type CloneOptions struct {
 	URL   string
@@ -79,19 +98,16 @@ func (r *Repo) BranchExists(ref string) (bool, error) {
 	return true, nil
 }
 
-func (r *Repo) RemoteBranchExists(ref string) (bool, error) {
-	if err := r.run("git", "show-ref", "refs/remotes/origin/"+ref); err != nil {
-		var exitErr *exec.ExitError
-		if !errors.As(err, &exitErr) {
-			return false, err
-		}
-
+// RemoteBranchExists reports whether the remote-tracking ref for the branch
+// exists locally, i.e. whether the branch was seen on the remote when it was
+// last fetched.
+func (r *Repo) RemoteBranchExists(remote string, ref string) (bool, error) {
+	if err := r.run("git", "show-ref", fmt.Sprintf("refs/remotes/%s/%s", remote, ref)); err != nil {
 		// Exit code 1 means the branch doesn't exist
-		if exitErr.ExitCode() == 1 {
+		if isExitCode(err, 1) {
 			return false, nil
 		}
 
-		// Unrecognized exit code
 		return false, err
 	}
 
@@ -104,6 +120,11 @@ func (r *Repo) RemoteBranchExists(ref string) (bool, error) {
 func (r *Repo) DetectMainBranch() (string, error) {
 	candidates := []string{"main", "master"}
 
+	// The trunk branch isn't known yet at this point, so there is no branch to
+	// take a remote from: fall back to the repository default. When that can't
+	// be determined we only look at local branches.
+	remote, remoteErr := r.DefaultRemote()
+
 	for _, candidate := range candidates {
 		// Check local branch first
 		exists, err := r.BranchExists(candidate)
@@ -115,8 +136,12 @@ func (r *Repo) DetectMainBranch() (string, error) {
 			return candidate, nil
 		}
 
+		if remoteErr != nil {
+			continue
+		}
+
 		// Check remote branch
-		exists, err = r.RemoteBranchExists(candidate)
+		exists, err = r.RemoteBranchExists(remote, candidate)
 		if err != nil {
 			return "", err
 		}
@@ -139,6 +164,15 @@ func (r *Repo) QuietCheckout(ref string) error {
 
 func (r *Repo) CreateBranch(branch string) error {
 	return r.run("git", "checkout", "-b", branch)
+}
+
+// CreateTrackingBranch creates a local branch from the same-named branch on the
+// given remote, set up to track it. The branch is not checked out. Doing this
+// explicitly (rather than relying on git's DWIM when checking out a branch that
+// only exists remotely) keeps working when the branch name exists on more than
+// one remote, which git refuses to guess between.
+func (r *Repo) CreateTrackingBranch(branch string, remote string) error {
+	return r.run("git", "branch", "--track", branch, fmt.Sprintf("%s/%s", remote, branch))
 }
 
 // CreateBranchFrom creates a new branch based on the given start point (e.g.
@@ -198,27 +232,115 @@ func (r *Repo) Push() error {
 		Run()
 }
 
-func (r *Repo) GetRemoteForBranch(branchNames ...string) (string, error) {
-	var lastErr error
-
-	for _, branchName := range branchNames {
-		remote, err := r.output("git", "config", fmt.Sprintf("branch.%s.remote", branchName))
-		if err == nil && remote != "" {
-			return remote, nil
-		}
-
-		lastErr = fmt.Errorf("no remote configured for branch %s", branchName)
-	}
-
-	if lastErr != nil {
-		return "", lastErr
-	}
-
-	return "", errors.New("no branch names provided")
+// RemoteConfig is the git config that decides which remote a branch fetches
+// from and pushes to. It is read in one go, so resolving remotes for a whole
+// stack of branches doesn't cost a git invocation per branch.
+type RemoteConfig struct {
+	entries map[string]string
 }
 
-func (r *Repo) ForcePushBranch(origin string, branchName string) error {
-	return xexec.Command("git", "push", "--force-with-lease", "-q", origin, branchName).
+// FetchRemoteFor returns the remote branchName is fetched from, which git takes
+// from branch.<name>.remote alone — remote.pushDefault and
+// branch.<name>.pushRemote only redirect pushes. It returns an empty string
+// when that isn't set, which is when git falls back to the repository default
+// (see DefaultRemote).
+func (c RemoteConfig) FetchRemoteFor(branchName string) string {
+	// git lower-cases variable names but leaves the branch name as-is.
+	return c.entries["branch."+branchName+".remote"]
+}
+
+// PushRemoteFor returns the remote git would push branchName to, following
+// git's precedence: branch.<name>.pushRemote, then remote.pushDefault, then the
+// remote it fetches from.
+func (c RemoteConfig) PushRemoteFor(branchName string) string {
+	for _, key := range []string{
+		"branch." + branchName + ".pushremote",
+		"remote.pushdefault",
+	} {
+		if remote := c.entries[key]; remote != "" {
+			return remote
+		}
+	}
+
+	return c.FetchRemoteFor(branchName)
+}
+
+// RemoteConfig reads the config that decides which remotes branches use.
+func (r *Repo) RemoteConfig() (RemoteConfig, error) {
+	out, err := r.output("git", "config", "--get-regexp", `^(remote\.pushdefault|branch\..*\.(pushremote|remote))$`)
+	if err != nil {
+		// Exit code 1 means nothing matched
+		if !isExitCode(err, 1) {
+			return RemoteConfig{}, err
+		}
+
+		out = ""
+	}
+
+	entries := map[string]string{}
+
+	for _, line := range strings.Split(out, "\n") {
+		if key, value, found := strings.Cut(line, " "); found {
+			entries[key] = value
+		}
+	}
+
+	return RemoteConfig{entries: entries}, nil
+}
+
+// DefaultRemote returns the remote git falls back to when nothing is configured
+// for the branch: the only remote if the repository has exactly one, otherwise
+// "origin" if it exists. This mirrors git's own fallback, so it fails for the
+// same ambiguous setups git refuses to guess at.
+func (r *Repo) DefaultRemote() (string, error) {
+	remotes, err := r.Remotes()
+	if err != nil {
+		return "", err
+	}
+
+	switch {
+	case len(remotes) == 0:
+		return "", errors.New("repository has no remotes")
+	case len(remotes) == 1:
+		return remotes[0], nil
+	case slices.Contains(remotes, defaultRemoteName):
+		return defaultRemoteName, nil
+	default:
+		return "", fmt.Errorf(
+			"cannot determine which remote to use (%s): set remote.pushDefault",
+			strings.Join(remotes, ", "),
+		)
+	}
+}
+
+// Remotes returns the names of the configured remotes.
+func (r *Repo) Remotes() ([]string, error) {
+	out, err := r.output("git", "remote")
+	if err != nil {
+		return nil, err
+	}
+
+	return strings.Fields(out), nil
+}
+
+// HasUpstream reports whether the branch has upstream tracking configured.
+func (r *Repo) HasUpstream(branchName string) bool {
+	merge, _ := r.GetConfig(fmt.Sprintf("branch.%s.merge", branchName))
+
+	return merge != ""
+}
+
+// SetUpstream configures the branch to track the same-named branch on the given
+// remote. The remote-tracking ref must exist locally, so fetch first if needed.
+func (r *Repo) SetUpstream(remote string, branchName string) error {
+	configWriteMu.Lock()
+	defer configWriteMu.Unlock()
+
+	return r.run("git", "branch", fmt.Sprintf("--set-upstream-to=%s/%s", remote, branchName), branchName)
+}
+
+func (r *Repo) ForcePushBranch(remote string, branchName string) error {
+	return xexec.Command("git", "push", "--force-with-lease", "-q", remote, branchName).
 		WithEnvVars(CleanedGitEnv()).
 		WithWorkingDir(r.path).
 		WithStdout(nil).
@@ -226,16 +348,16 @@ func (r *Repo) ForcePushBranch(origin string, branchName string) error {
 		Run()
 }
 
-func (r *Repo) FetchBranch(branchName string) error {
-	return r.run("git", "fetch", "origin", branchName, "-q")
+func (r *Repo) FetchBranch(remote string, branchName string) error {
+	return r.run("git", "fetch", remote, branchName, "-q")
 }
 
-func (r *Repo) GetRemoteCommitHash(branchName string) (string, error) {
-	return r.output("git", "rev-parse", "origin/"+branchName)
+func (r *Repo) GetRemoteCommitHash(remote string, branchName string) (string, error) {
+	return r.output("git", "rev-parse", fmt.Sprintf("%s/%s", remote, branchName))
 }
 
-func (r *Repo) GetRemoteShortHash(branchName string) (string, error) {
-	return r.output("git", "rev-parse", "--short", "origin/"+branchName)
+func (r *Repo) GetRemoteShortHash(remote string, branchName string) (string, error) {
+	return r.output("git", "rev-parse", "--short", fmt.Sprintf("%s/%s", remote, branchName))
 }
 
 func (r *Repo) Path() string {

@@ -81,6 +81,14 @@ func (yas *YAS) refreshRemoteStatus(name string) error {
 		return err
 	}
 
+	// Now that we know what's on the remote, make sure the branch tracks it. An
+	// open PR means the remote branch is there even if we have never fetched it,
+	// so it's worth fetching to set tracking up. Merged branches are on their
+	// way out, so leave them alone.
+	if branchMetadata.GitHubPullRequest.State != "MERGED" {
+		yas.ensureUpstreamTracking(name, branchMetadata.GitHubPullRequest.State == "OPEN")
+	}
+
 	return nil
 }
 
