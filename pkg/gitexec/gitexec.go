@@ -15,6 +15,14 @@ import (
 
 var ErrDetachedHead = errors.New("currently in detached state")
 
+// configWriteMu serializes writes to .git/config. Git takes the config lock
+// without retrying, so concurrent writers just fail with "could not lock config
+// file" (measured at ~10% with ten writers, ~25% for `git push -u` with five).
+// yas pushes and refreshes branches in parallel, so tracking writes take turns.
+// This only covers writes from this process; a concurrent yas elsewhere can
+// still lose the race, exactly as two concurrent git commands would.
+var configWriteMu sync.Mutex
+
 const defaultRemoteName = "origin"
 
 // isExitCode reports whether err is a command that exited with the given code.
@@ -321,14 +329,6 @@ func (r *Repo) HasUpstream(branchName string) bool {
 
 	return merge != ""
 }
-
-// configWriteMu serializes writes to .git/config. Git takes the config lock
-// without retrying, so concurrent writers just fail with "could not lock config
-// file" (measured at ~10% with ten writers, ~25% for `git push -u` with five).
-// yas pushes and refreshes branches in parallel, so tracking writes take turns.
-// This only covers writes from this process; a concurrent yas elsewhere can
-// still lose the race, exactly as two concurrent git commands would.
-var configWriteMu sync.Mutex
 
 // SetUpstream configures the branch to track the same-named branch on the given
 // remote. The remote-tracking ref must exist locally, so fetch first if needed.
