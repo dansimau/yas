@@ -217,11 +217,9 @@ func (yas *YAS) resolveBranchStartPoint(parentBranch string) (string, error) {
 		return parentBranch, nil
 	}
 
-	remote, err := yas.remoteForBranch(parentBranch)
-	if err != nil {
+	remote := yas.remoteForBranchOrEmpty(parentBranch)
+	if remote == "" {
 		// No remote to look at, so the name is all we have.
-		log.Info("Unable to determine remote for", parentBranch, err)
-
 		return parentBranch, nil
 	}
 
@@ -237,11 +235,38 @@ func (yas *YAS) resolveBranchStartPoint(parentBranch string) (string, error) {
 	return parentBranch, nil
 }
 
-// remoteForBranch returns the remote the given branch pushes to, falling back
-// to the trunk branch's remote so branches that have never been pushed use the
-// same remote as the rest of the stack.
+// remoteForBranch returns the remote the given branch pushes to. A branch that
+// has never been pushed has nothing configured, so it falls back to the trunk
+// branch's remote (the rest of the stack pushes there), and finally to the
+// remote git itself would default to.
 func (yas *YAS) remoteForBranch(branchName string) (string, error) {
-	return yas.git.GetRemoteForBranch(branchName, yas.cfg.TrunkBranch)
+	cfg, err := yas.git.PushRemoteConfig()
+	if err != nil {
+		return "", err
+	}
+
+	for _, name := range []string{branchName, yas.cfg.TrunkBranch} {
+		if remote := cfg.RemoteFor(name); remote != "" {
+			return remote, nil
+		}
+	}
+
+	return yas.git.DefaultRemote()
+}
+
+// remoteForBranchOrEmpty resolves the remote for a branch, returning an empty
+// string when there isn't one to be had (a repository with no remotes, or
+// several with no way to choose between them). For callers that can carry on
+// without one.
+func (yas *YAS) remoteForBranchOrEmpty(branchName string) string {
+	remote, err := yas.remoteForBranch(branchName)
+	if err != nil {
+		log.Info("Unable to determine remote for", branchName, err)
+
+		return ""
+	}
+
+	return remote
 }
 
 func (yas *YAS) Reload() error {

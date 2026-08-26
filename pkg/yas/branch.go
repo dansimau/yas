@@ -45,25 +45,32 @@ func (yas *YAS) BranchExistsLocally(branchName string) (bool, error) {
 // be pushed to. A repository with no usable remote simply has no remote
 // branches, rather than being an error.
 func (yas *YAS) BranchExistsRemotely(branchName string) (bool, error) {
-	remote, err := yas.remoteForBranch(branchName)
-	if err != nil {
-		log.Info("Unable to determine remote for", branchName, err)
-
+	remote := yas.remoteForBranchOrEmpty(branchName)
+	if remote == "" {
 		return false, nil
 	}
 
 	return yas.git.RemoteBranchExists(remote, branchName)
 }
 
-// CreateTrackingBranch creates a local branch from its remote counterpart, set
-// up to track it. The branch is not checked out.
-func (yas *YAS) CreateTrackingBranch(branchName string) error {
+// AdoptRemoteBranch creates a local branch from its remote counterpart, set up
+// to track it, and records it in the stack. The branch is not checked out.
+func (yas *YAS) AdoptRemoteBranch(branchName string) error {
 	remote, err := yas.remoteForBranch(branchName)
 	if err != nil {
 		return fmt.Errorf("failed to determine remote for branch %s: %w", branchName, err)
 	}
 
-	return yas.git.CreateTrackingBranch(branchName, remote)
+	if err := yas.git.CreateTrackingBranch(branchName, remote); err != nil {
+		return err
+	}
+
+	// The PR tells us what the branch is stacked on top of.
+	if err := yas.RefreshRemoteStatus(branchName); err != nil {
+		return fmt.Errorf("failed to refresh remote status for branch: %w", err)
+	}
+
+	return yas.SetParent(branchName, "", "")
 }
 
 // ensureUpstreamTracking configures the branch to track the same-named branch
@@ -75,26 +82,19 @@ func (yas *YAS) CreateTrackingBranch(branchName string) error {
 // Tracking is a convenience for git commands run outside of yas, so failures
 // are logged rather than returned.
 func (yas *YAS) ensureUpstreamTracking(branchName string, fetchMissingRef bool) {
+	// Cheapest check first: this is a no-op for every branch that already
+	// tracks its remote, which is the common case.
+	if yas.git.HasUpstream(branchName) {
+		return
+	}
+
 	localExists, err := yas.git.BranchExists(branchName)
 	if err != nil || !localExists {
 		return
 	}
 
-	hasUpstream, err := yas.git.HasUpstream(branchName)
-	if err != nil {
-		log.Info("Failed to check upstream for branch", branchName, err)
-
-		return
-	}
-
-	if hasUpstream {
-		return
-	}
-
-	remote, err := yas.remoteForBranch(branchName)
-	if err != nil {
-		log.Info("Unable to determine remote for", branchName, err)
-
+	remote := yas.remoteForBranchOrEmpty(branchName)
+	if remote == "" {
 		return
 	}
 
@@ -345,7 +345,7 @@ func (yas *YAS) detectBranchPoint(branchName, parentBranchName string) (string, 
 	branchesToTry := []string{parentBranchName}
 
 	// Handle case where we are checking out a remote-only branch and we don't have the parent locally
-	if remote, err := yas.remoteForBranch(parentBranchName); err == nil {
+	if remote := yas.remoteForBranchOrEmpty(parentBranchName); remote != "" {
 		branchesToTry = append(branchesToTry, fmt.Sprintf("%s/%s", remote, parentBranchName))
 	}
 

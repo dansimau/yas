@@ -154,7 +154,6 @@ func (yas *YAS) submitBranch(branchName string, draft bool, status func(string))
 
 	metadata := yas.data.Branches.Get(branchName)
 
-	// Get remote for this branch, or trunk if no remote is configured
 	remote, err := yas.remoteForBranch(branchName)
 	if err != nil {
 		return fmt.Errorf("failed to get remote for branch %s or trunk: %w", branchName, err)

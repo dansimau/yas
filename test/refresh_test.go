@@ -2,7 +2,6 @@ package test
 
 import (
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/dansimau/yas/pkg/gocmdtester"
@@ -11,15 +10,6 @@ import (
 	"github.com/dansimau/yas/pkg/yas"
 	"gotest.tools/v3/assert"
 )
-
-// upstreamOf returns the upstream ref of the given branch, or "" if it has none.
-func upstreamOf(workingDir string, branchName string) string {
-	if mustExecExitCode(workingDir, "git", "rev-parse", branchName+"@{upstream}") != 0 {
-		return ""
-	}
-
-	return strings.TrimSpace(mustExecOutput(workingDir, "git", "rev-parse", "--abbrev-ref", branchName+"@{upstream}"))
-}
 
 func TestRefresh_ConfiguresUpstreamTracking(t *testing.T) {
 	t.Parallel()
@@ -112,13 +102,7 @@ func TestRefresh_LeavesUpstreamUnsetWhenBranchIsNotOnRemote(t *testing.T) {
 		gocmdtester.WithWorkingDir(tempDir),
 	)
 
-	// No PR for this branch
-	cli.Mock(
-		"gh", "pr", "list",
-		"--head", "topic-a",
-		"--state", "all",
-		"--json", "id,state,url,isDraft,baseRefName",
-	).WithStdout("[]")
+	mockNoGitHubPRForBranch(cli, "topic-a")
 
 	testutil.ExecOrFail(t, tempDir, stringutil.MustInterpolate(`
 		git init --bare {{.fakeOrigin}}

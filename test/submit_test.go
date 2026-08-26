@@ -468,8 +468,7 @@ func TestSubmit_OutdatedSkipsBranchesWithoutPRs(t *testing.T) {
 	cli.SkipMockVerification()
 
 	// Mock gh pr list to return no existing PR (empty array)
-	cli.Mock("gh", "pr", "list", "--head", "topic-a", "--state", "all", "--json", "id,state,url,isDraft,baseRefName").
-		WithStdout("[]")
+	mockNoGitHubPRForBranch(cli, "topic-a")
 
 	testutil.ExecOrFail(t, tempDir, stringutil.MustInterpolate(`
 		# Create fake origin
@@ -767,15 +766,12 @@ func TestSubmit_SetsUpstreamTrackingWhenPushing(t *testing.T) {
 		git commit -m "topic-a-0"
 	`)
 
-	// The branch does not track anything yet
-	assert.Assert(t, mustExecExitCode(tempDir, "git", "rev-parse", "topic-a@{upstream}") != 0,
-		"newly created branch should have no upstream")
+	assert.Equal(t, "", upstreamOf(tempDir, "topic-a"), "newly created branch should have no upstream")
 
 	assert.NilError(t, cli.Run("submit").Err())
 
 	// Pushing sets the upstream to the same-named branch on the remote
-	assert.Equal(t, "origin/topic-a",
-		strings.TrimSpace(mustExecOutput(tempDir, "git", "rev-parse", "--abbrev-ref", "topic-a@{upstream}")))
+	assert.Equal(t, "origin/topic-a", upstreamOf(tempDir, "topic-a"))
 }
 
 func TestSubmit_SetsUpstreamTrackingWhenAlreadyPushed(t *testing.T) {
@@ -827,6 +823,5 @@ func TestSubmit_SetsUpstreamTrackingWhenAlreadyPushed(t *testing.T) {
 	// Nothing to push, but the branch is missing its upstream
 	assert.NilError(t, cli.Run("submit").Err())
 
-	assert.Equal(t, "origin/topic-a",
-		strings.TrimSpace(mustExecOutput(tempDir, "git", "rev-parse", "--abbrev-ref", "topic-a@{upstream}")))
+	assert.Equal(t, "origin/topic-a", upstreamOf(tempDir, "topic-a"))
 }

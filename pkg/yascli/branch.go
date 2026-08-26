@@ -1,8 +1,6 @@
 package yascli
 
 import (
-	"fmt"
-
 	"github.com/dansimau/yas/pkg/yas"
 )
 
@@ -50,11 +48,9 @@ func (c *branchCmd) Execute(args []string) error {
 		return NewError(err.Error())
 	}
 
-	branchExists := branchExistsLocally || branchExistsRemotely
-
 	switch {
 	// Create branch if it doesn't exist anywhere
-	case !branchExists:
+	case !branchExistsLocally && !branchExistsRemotely:
 		fullBranchName, err = yasInstance.CreateBranch(c.Arguments.BranchName, c.Parent)
 		if err != nil {
 			return NewError(err.Error())
@@ -64,7 +60,7 @@ func (c *branchCmd) Execute(args []string) error {
 	// rather than leaving it to git's DWIM (which gives up when the branch name
 	// exists on more than one remote).
 	case !branchExistsLocally:
-		if err := yasInstance.CreateTrackingBranch(fullBranchName); err != nil {
+		if err := yasInstance.AdoptRemoteBranch(fullBranchName); err != nil {
 			return NewError(err.Error())
 		}
 	}
@@ -82,17 +78,6 @@ func (c *branchCmd) Execute(args []string) error {
 	// Switch to the branch
 	if err := yasInstance.SwitchBranch(fullBranchName); err != nil {
 		return NewError(err.Error())
-	}
-
-	if branchExistsRemotely && !branchExistsLocally {
-		// Refresh remote status if the branch existed remotely but not locally
-		if err := yasInstance.RefreshRemoteStatus(fullBranchName); err != nil {
-			return NewError(fmt.Errorf("failed to refresh remote status for branch: %w", err).Error())
-		}
-
-		if err := yasInstance.SetParent(fullBranchName, "", ""); err != nil {
-			return NewError(err.Error())
-		}
 	}
 
 	return nil
