@@ -45,7 +45,7 @@ func (yas *YAS) BranchExistsLocally(branchName string) (bool, error) {
 // be pushed to. A repository with no usable remote simply has no remote
 // branches, rather than being an error.
 func (yas *YAS) BranchExistsRemotely(branchName string) (bool, error) {
-	remote := yas.remoteForBranchOrEmpty(branchName)
+	remote := yas.fetchRemoteForBranchOrEmpty(branchName)
 	if remote == "" {
 		return false, nil
 	}
@@ -56,7 +56,7 @@ func (yas *YAS) BranchExistsRemotely(branchName string) (bool, error) {
 // AdoptRemoteBranch creates a local branch from its remote counterpart, set up
 // to track it, and records it in the stack. The branch is not checked out.
 func (yas *YAS) AdoptRemoteBranch(branchName string) error {
-	remote, err := yas.remoteForBranch(branchName)
+	remote, err := yas.fetchRemoteForBranch(branchName)
 	if err != nil {
 		return fmt.Errorf("failed to determine remote for branch %s: %w", branchName, err)
 	}
@@ -73,14 +73,30 @@ func (yas *YAS) AdoptRemoteBranch(branchName string) error {
 	return yas.SetParent(branchName, "", "")
 }
 
-// ensureUpstreamTracking configures the branch to track the same-named branch
-// on its remote, if it doesn't already. Set fetchMissingRef to fetch the branch
-// when its remote-tracking ref is missing locally: tracking a ref that isn't
-// there leaves the branch in git's "upstream is gone" state, which is worse
-// than having no upstream at all, so it is skipped instead.
+// setUpstreamIfUnset points the branch at the same-named branch on remote,
+// unless it already tracks something — an upstream the user configured
+// deliberately (a triangular workflow fetches and pushes different remotes) is
+// left alone. The remote-tracking ref has to exist locally, so callers that
+// don't already know the branch is there should use ensureUpstreamTracking.
 //
 // Tracking is a convenience for git commands run outside of yas, so failures
 // are logged rather than returned.
+func (yas *YAS) setUpstreamIfUnset(branchName string, remote string) {
+	if yas.git.HasUpstream(branchName) {
+		return
+	}
+
+	if err := yas.git.SetUpstream(remote, branchName); err != nil {
+		log.Info("Failed to set upstream for branch", branchName, err)
+	}
+}
+
+// ensureUpstreamTracking finds where the branch lives on the remote it is
+// fetched from and points tracking at it, if it doesn't already track
+// something. Set fetchMissingRef to fetch the branch when its remote-tracking
+// ref is missing locally: tracking a ref that isn't there leaves the branch in
+// git's "upstream is gone" state, which is worse than having no upstream at
+// all, so it is skipped instead.
 func (yas *YAS) ensureUpstreamTracking(branchName string, fetchMissingRef bool) {
 	// Cheapest check first: this is a no-op for every branch that already
 	// tracks its remote, which is the common case.
@@ -93,7 +109,7 @@ func (yas *YAS) ensureUpstreamTracking(branchName string, fetchMissingRef bool) 
 		return
 	}
 
-	remote := yas.remoteForBranchOrEmpty(branchName)
+	remote := yas.fetchRemoteForBranchOrEmpty(branchName)
 	if remote == "" {
 		return
 	}
@@ -117,9 +133,7 @@ func (yas *YAS) ensureUpstreamTracking(branchName string, fetchMissingRef bool) 
 		}
 	}
 
-	if err := yas.git.SetUpstream(remote, branchName); err != nil {
-		log.Info("Failed to set upstream for branch", branchName, err)
-	}
+	yas.setUpstreamIfUnset(branchName, remote)
 }
 
 // DeleteBranch deletes a branch and its associated worktree if one exists.
@@ -345,7 +359,7 @@ func (yas *YAS) detectBranchPoint(branchName, parentBranchName string) (string, 
 	branchesToTry := []string{parentBranchName}
 
 	// Handle case where we are checking out a remote-only branch and we don't have the parent locally
-	if remote := yas.remoteForBranchOrEmpty(parentBranchName); remote != "" {
+	if remote := yas.fetchRemoteForBranchOrEmpty(parentBranchName); remote != "" {
 		branchesToTry = append(branchesToTry, fmt.Sprintf("%s/%s", remote, parentBranchName))
 	}
 

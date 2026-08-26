@@ -154,7 +154,7 @@ func (yas *YAS) submitBranch(branchName string, draft bool, status func(string))
 
 	metadata := yas.data.Branches.Get(branchName)
 
-	remote, err := yas.remoteForBranch(branchName)
+	remote, err := yas.pushRemoteForBranch(branchName)
 	if err != nil {
 		return fmt.Errorf("failed to get remote for branch %s or trunk: %w", branchName, err)
 	}
@@ -191,15 +191,18 @@ func (yas *YAS) submitBranch(branchName string, draft bool, status func(string))
 
 	if needsPush {
 		status("Pushing branch...")
-		// Force push with lease (we expect the branch may have been rebased).
-		// This also sets the upstream, so the branch tracks the remote from its
-		// first push onwards.
+		// Force push with lease (we expect the branch may have been rebased)
 		if err := yas.git.ForcePushBranch(remote, branchName); err != nil {
 			return fmt.Errorf("failed to push: %w", err)
 		}
+
+		// The branch is on the remote now, so it can track it. `git push -u`
+		// would do this for us, but it writes .git/config from every parallel
+		// push at once and git doesn't survive that.
+		yas.setUpstreamIfUnset(branchName, remote)
 	} else {
 		// Branch is already up to date on the remote, but it may predate us
-		// setting upstream on push (or have been pushed outside of yas).
+		// setting tracking up (or have been pushed outside of yas).
 		yas.ensureUpstreamTracking(branchName, false)
 	}
 
@@ -300,7 +303,7 @@ func (yas *YAS) needsSubmit(branchName string) (bool, error) {
 	}
 
 	// Try to get remote hash
-	remote, err := yas.remoteForBranch(branchName)
+	remote, err := yas.pushRemoteForBranch(branchName)
 	if err != nil {
 		// Without a remote we can't compare, so assume it needs submit
 		return true, nil

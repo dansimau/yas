@@ -136,7 +136,7 @@ func TestDetectMainBranch(t *testing.T) {
 	}
 }
 
-func TestPushRemoteConfigRemoteFor(t *testing.T) {
+func TestRemoteConfigPushRemoteFor(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -212,9 +212,58 @@ func TestPushRemoteConfigRemoteFor(t *testing.T) {
 			repoPath := t.TempDir()
 			setupRepo(t, repoPath, tt.gitCommands)
 
-			cfg, err := WithRepo(repoPath).PushRemoteConfig()
+			cfg, err := WithRepo(repoPath).RemoteConfig()
 			assert.NilError(t, err)
-			assert.Equal(t, tt.expectedRemote, cfg.RemoteFor(tt.branchName))
+			assert.Equal(t, tt.expectedRemote, cfg.PushRemoteFor(tt.branchName))
+		})
+	}
+}
+
+func TestRemoteConfigFetchRemoteFor(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		gitCommands    string
+		expectedRemote string
+	}{
+		{
+			name: "uses the branch's remote",
+			gitCommands: `
+				git config branch.feature.remote upstream
+			`,
+			expectedRemote: "upstream",
+		},
+		{
+			// remote.pushDefault and branch.<name>.pushRemote redirect pushes;
+			// they say nothing about where the branch was fetched from.
+			name: "ignores push-only config",
+			gitCommands: `
+				git config branch.feature.remote upstream
+				git config remote.pushDefault fork
+				git config branch.feature.pushRemote fork
+			`,
+			expectedRemote: "upstream",
+		},
+		{
+			name: "returns nothing when nothing is configured",
+			gitCommands: `
+				git config remote.pushDefault fork
+			`,
+			expectedRemote: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			repoPath := t.TempDir()
+			setupRepo(t, repoPath, tt.gitCommands)
+
+			cfg, err := WithRepo(repoPath).RemoteConfig()
+			assert.NilError(t, err)
+			assert.Equal(t, tt.expectedRemote, cfg.FetchRemoteFor("feature"))
 		})
 	}
 }

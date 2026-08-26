@@ -559,3 +559,61 @@ func TestBranchSwitch_RemoteBranchOnNonOriginRemote(t *testing.T) {
 	assert.Equal(t, mustExecOutput(tempDir, "git", "rev-parse", "upstream/topic-a"),
 		mustExecOutput(tempDir, "git", "rev-parse", "topic-a"))
 }
+
+// Discovering where a branch lives has to follow the fetch remote: a push
+// remote (remote.pushDefault here) says nothing about what has been fetched.
+func TestBranchSwitch_RemoteBranchWithPushRemoteConfigured(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	fakeOrigin := t.TempDir()
+	fakeFork := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	mockGitHubPRForBranch(cli, "topic-a", yas.PullRequestMetadata{
+		URL:         githubPRURL("42"),
+		BaseRefName: "main",
+	})
+
+	testutil.ExecOrFail(t, tempDir, stringutil.MustInterpolate(`
+		git init --bare {{.fakeOrigin}}
+		git init --bare {{.fakeFork}}
+
+		git init --initial-branch=main
+		git remote add origin {{.fakeOrigin}}
+		git remote add fork {{.fakeFork}}
+
+		touch main
+		git add main
+		git commit -m "main-0"
+		git push -u origin main
+
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+
+		# topic-a is only on origin, and never on the push remote
+		git push origin topic-a
+		git checkout main
+		git branch -D topic-a
+
+		git config remote.pushDefault fork
+	`, map[string]string{
+		"fakeOrigin": fakeOrigin,
+		"fakeFork":   fakeFork,
+	}))
+
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+
+	assert.NilError(t, cli.Run("branch", "topic-a").Err())
+
+	// The remote branch was checked out, not a new branch cut from main
+	assert.Equal(t, "topic-a", strings.TrimSpace(mustExecOutput(tempDir, "git", "branch", "--show-current")))
+	assert.Equal(t, "origin/topic-a", upstreamOf(tempDir, "topic-a"))
+	assert.Equal(t, mustExecOutput(tempDir, "git", "rev-parse", "origin/topic-a"),
+		mustExecOutput(tempDir, "git", "rev-parse", "topic-a"))
+}

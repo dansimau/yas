@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/dansimau/yas/pkg/xexec"
 	"github.com/hashicorp/go-version"
@@ -223,39 +224,46 @@ func (r *Repo) Push() error {
 		Run()
 }
 
-// PushRemoteConfig is the git config that decides where branches push. It is
-// read in one go, so resolving remotes for a whole stack of branches doesn't
-// cost a git invocation per branch.
-type PushRemoteConfig struct {
+// RemoteConfig is the git config that decides which remote a branch fetches
+// from and pushes to. It is read in one go, so resolving remotes for a whole
+// stack of branches doesn't cost a git invocation per branch.
+type RemoteConfig struct {
 	entries map[string]string
 }
 
-// RemoteFor returns the remote git would push branchName to, following git's
-// precedence: branch.<name>.pushRemote, then remote.pushDefault, then
-// branch.<name>.remote. It returns an empty string when none of them is set,
-// which is when git falls back to the repository default (see DefaultRemote).
-func (c PushRemoteConfig) RemoteFor(branchName string) string {
+// FetchRemoteFor returns the remote branchName is fetched from, which git takes
+// from branch.<name>.remote alone — remote.pushDefault and
+// branch.<name>.pushRemote only redirect pushes. It returns an empty string
+// when that isn't set, which is when git falls back to the repository default
+// (see DefaultRemote).
+func (c RemoteConfig) FetchRemoteFor(branchName string) string {
+	// git lower-cases variable names but leaves the branch name as-is.
+	return c.entries["branch."+branchName+".remote"]
+}
+
+// PushRemoteFor returns the remote git would push branchName to, following
+// git's precedence: branch.<name>.pushRemote, then remote.pushDefault, then the
+// remote it fetches from.
+func (c RemoteConfig) PushRemoteFor(branchName string) string {
 	for _, key := range []string{
-		// git lower-cases variable names but leaves the branch name as-is.
 		"branch." + branchName + ".pushremote",
 		"remote.pushdefault",
-		"branch." + branchName + ".remote",
 	} {
 		if remote := c.entries[key]; remote != "" {
 			return remote
 		}
 	}
 
-	return ""
+	return c.FetchRemoteFor(branchName)
 }
 
-// PushRemoteConfig reads the config that decides where branches push.
-func (r *Repo) PushRemoteConfig() (PushRemoteConfig, error) {
+// RemoteConfig reads the config that decides which remotes branches use.
+func (r *Repo) RemoteConfig() (RemoteConfig, error) {
 	out, err := r.output("git", "config", "--get-regexp", `^(remote\.pushdefault|branch\..*\.(pushremote|remote))$`)
 	if err != nil {
 		// Exit code 1 means nothing matched
 		if !isExitCode(err, 1) {
-			return PushRemoteConfig{}, err
+			return RemoteConfig{}, err
 		}
 
 		out = ""
@@ -269,7 +277,7 @@ func (r *Repo) PushRemoteConfig() (PushRemoteConfig, error) {
 		}
 	}
 
-	return PushRemoteConfig{entries: entries}, nil
+	return RemoteConfig{entries: entries}, nil
 }
 
 // DefaultRemote returns the remote git falls back to when nothing is configured
@@ -314,16 +322,25 @@ func (r *Repo) HasUpstream(branchName string) bool {
 	return merge != ""
 }
 
+// configWriteMu serializes writes to .git/config. Git takes the config lock
+// without retrying, so concurrent writers just fail with "could not lock config
+// file" (measured at ~10% with ten writers, ~25% for `git push -u` with five).
+// yas pushes and refreshes branches in parallel, so tracking writes take turns.
+// This only covers writes from this process; a concurrent yas elsewhere can
+// still lose the race, exactly as two concurrent git commands would.
+var configWriteMu sync.Mutex
+
 // SetUpstream configures the branch to track the same-named branch on the given
 // remote. The remote-tracking ref must exist locally, so fetch first if needed.
 func (r *Repo) SetUpstream(remote string, branchName string) error {
+	configWriteMu.Lock()
+	defer configWriteMu.Unlock()
+
 	return r.run("git", "branch", fmt.Sprintf("--set-upstream-to=%s/%s", remote, branchName), branchName)
 }
 
-// ForcePushBranch pushes the branch to the given remote, setting it as the
-// branch's upstream (as `git push -u` does).
-func (r *Repo) ForcePushBranch(origin string, branchName string) error {
-	return xexec.Command("git", "push", "--force-with-lease", "-q", "-u", origin, branchName).
+func (r *Repo) ForcePushBranch(remote string, branchName string) error {
+	return xexec.Command("git", "push", "--force-with-lease", "-q", remote, branchName).
 		WithEnvVars(CleanedGitEnv()).
 		WithWorkingDir(r.path).
 		WithStdout(nil).
