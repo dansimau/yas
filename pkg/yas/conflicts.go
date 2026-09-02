@@ -157,12 +157,18 @@ func (yas *YAS) handleRebaseConflict(branch *gitexec.BranchContext, res Conflict
 			req.CommitSubject = subject
 		}
 
+		// Snapshot the files as git left them so the resolver's work can be
+		// verified afterwards. Marker length can be customised per path via
+		// .gitattributes, so ask git rather than assuming the default.
+		before, err := conflictresolver.SnapshotFiles(branch.Path(), files, branch.ConflictMarkerSize)
+		if err != nil {
+			return err
+		}
+
 		if err := resolver.Resolve(req); err != nil {
 			return fmt.Errorf("conflict resolver %s failed while rebasing %s onto %s: %w\n\nFix conflicts and run 'yas continue' to resume", resolver.Name(), childBranch, parentBranch, err)
 		}
 
-		// Marker length can be customised per path via .gitattributes, so ask
-		// git rather than assuming the default.
 		remaining, err := conflictresolver.FilesWithConflictMarkers(branch.Path(), files, branch.ConflictMarkerSize)
 		if err != nil {
 			return err
@@ -175,6 +181,24 @@ func (yas *YAS) handleRebaseConflict(branch *gitexec.BranchContext, res Conflict
 			}
 
 			fmt.Printf("Warning: conflict markers remain in %s; continuing anyway (after-resolve=%s)\n", strings.Join(remaining, ", "), AfterResolveForce)
+		}
+
+		// Conflicts without textual markers (binary files, modify/delete,
+		// add/add) can't be verified by the marker check. If the resolver left
+		// such a file exactly as git did, staging it would silently pick one
+		// side, so stop for review unless the user asked to force.
+		unverifiable, err := conflictresolver.UnverifiableFiles(branch.Path(), files, before)
+		if err != nil {
+			return err
+		}
+
+		if len(unverifiable) > 0 {
+			if res.AfterResolve != AfterResolveForce {
+				return fmt.Errorf("conflict resolver %s did not change these files, whose conflicts have no textual markers (binary content or modify/delete) and so cannot be verified:\n  - %s\n\nResolve them manually (edit, 'git add' or 'git rm'), then run 'yas continue' to resume",
+					resolver.Name(), strings.Join(unverifiable, "\n  - "))
+			}
+
+			fmt.Printf("Warning: unable to verify resolution of %s; continuing anyway (after-resolve=%s)\n", strings.Join(unverifiable, ", "), AfterResolveForce)
 		}
 
 		if res.AfterResolve == AfterResolveStop {

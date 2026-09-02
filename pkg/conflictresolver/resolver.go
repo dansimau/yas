@@ -9,8 +9,10 @@ package conflictresolver
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -217,4 +219,104 @@ func FilesWithConflictMarkers(dir string, files []string, markerSize MarkerSizeF
 	}
 
 	return remaining, nil
+}
+
+// FileState captures a conflicted file as git left it, before a resolver runs.
+type FileState struct {
+	// Exists is false when git left no working-tree file (e.g. one side of a
+	// modify/delete conflict).
+	Exists bool
+	// Sum is the SHA-256 of the file contents (zero when Exists is false).
+	Sum [sha256.Size]byte
+	// HasMarkers is true when the file contained textual conflict markers, i.e.
+	// its resolution can later be verified by checking the markers are gone.
+	HasMarkers bool
+}
+
+// SnapshotFiles records the state of each file (relative to dir) so that a
+// resolver's work can be verified afterwards with UnverifiableFiles.
+// markerSize may be nil (see FilesWithConflictMarkers).
+func SnapshotFiles(dir string, files []string, markerSize MarkerSizeFunc) (map[string]FileState, error) {
+	states := make(map[string]FileState, len(files))
+
+	for _, file := range files {
+		size := DefaultMarkerSize
+
+		if markerSize != nil {
+			var err error
+
+			size, err = markerSize(file)
+			if err != nil {
+				return nil, fmt.Errorf("failed to determine conflict marker size for %s: %w", file, err)
+			}
+		}
+
+		path := filepath.Join(dir, file)
+
+		state, err := snapshotFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read %s: %w", file, err)
+		}
+
+		if state.Exists {
+			state.HasMarkers, err = HasConflictMarkers(path, size)
+			if err != nil {
+				return nil, fmt.Errorf("failed to check %s for conflict markers: %w", file, err)
+			}
+		}
+
+		states[file] = state
+	}
+
+	return states, nil
+}
+
+func snapshotFile(path string) (FileState, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return FileState{}, nil
+		}
+
+		return FileState{}, err
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return FileState{}, err
+	}
+
+	state := FileState{Exists: true}
+	copy(state.Sum[:], h.Sum(nil))
+
+	return state, nil
+}
+
+// UnverifiableFiles returns the files whose resolution cannot be confirmed:
+// git left them without textual conflict markers (binary content, or a
+// modify/delete or add/add conflict) and the resolver did not change or
+// delete them. Such files would otherwise be staged exactly as git left them,
+// silently taking one side of the conflict.
+func UnverifiableFiles(dir string, files []string, before map[string]FileState) ([]string, error) {
+	var unverifiable []string
+
+	for _, file := range files {
+		prev, ok := before[file]
+		if !ok || prev.HasMarkers {
+			// Marker-bearing files are verified by FilesWithConflictMarkers.
+			continue
+		}
+
+		now, err := snapshotFile(filepath.Join(dir, file))
+		if err != nil {
+			return nil, fmt.Errorf("failed to read %s: %w", file, err)
+		}
+
+		if now == prev {
+			unverifiable = append(unverifiable, file)
+		}
+	}
+
+	return unverifiable, nil
 }

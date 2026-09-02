@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/dansimau/yas/pkg/gitexec"
 	"github.com/dansimau/yas/pkg/xexec"
 )
 
@@ -57,8 +58,14 @@ func (c *Claude) Resolve(req Request) error {
 	// Stdin is explicitly detached: when it isn't a terminal, `claude -p`
 	// treats stdin as additional prompt input and would otherwise block or
 	// consume whatever yas itself was given.
+	//
+	// GIT_* variables (GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, ...) are
+	// stripped, as they are for yas's own git commands: if yas was launched
+	// from a hook or wrapper that set them, the git commands Claude is allowed
+	// to run would otherwise inspect a different repository than req.Dir.
 	if err := xexec.Command(args...).
 		WithWorkingDir(req.Dir).
+		WithEnvVars(gitexec.CleanedGitEnv()).
 		WithStdin(nil).
 		Run(); err != nil {
 		return fmt.Errorf("%s exited with an error: %w", c.Binary, err)
@@ -89,8 +96,9 @@ func Prompt(req Request) string {
 	}
 
 	b.WriteString("\nBecause this is a rebase, the sides of each conflict are:\n")
-	fmt.Fprintf(&b, "  - \"ours\" / HEAD (the top of the `<<<<<<<` block) is the branch being rebased onto: `%s`\n", req.Onto)
-	fmt.Fprintf(&b, "  - \"theirs\" (the bottom of the `>>>>>>>` block) is the commit from `%s` being replayed\n", req.Branch)
+	fmt.Fprintf(&b, "  - \"ours\" / HEAD (the top of the `<<<<<<<` block) is the rebased result so far: `%s` plus any commits from `%s` that have already been replayed onto it\n", req.Onto, req.Branch)
+	fmt.Fprintf(&b, "  - \"theirs\" (the bottom of the `>>>>>>>` block) is the commit from `%s` currently being replayed\n", req.Branch)
+	b.WriteString("Keep the changes from both sides unless they genuinely contradict each other; earlier replayed commits on the HEAD side must not be discarded.\n")
 
 	b.WriteString("\nThe following files contain unresolved conflicts:\n")
 

@@ -450,3 +450,56 @@ func TestConflictResolver_MissingTool(t *testing.T) {
 	assert.Assert(t, !assertRestackStateExists(t, tempDir))
 	equalLines(t, mustExecOutput(tempDir, "git", "log", "--pretty=%s", "topic-a"), "topic-a-0\nmain-0")
 }
+
+func TestConflictResolver_ModifyDeleteRequiresVerification(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	// "resolve" mode strips markers, but a modify/delete conflict has none, so
+	// the fake leaves the file byte-for-byte as git did.
+	opts, logPath := setupFakeClaude(t, tempDir, "resolve")
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go", opts...)
+
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+
+		echo "keep" > file.txt
+		echo "doomed" > doomed.txt
+		git add file.txt doomed.txt
+		git commit -m "main-0"
+
+		git checkout -b topic-a
+		echo "edited on topic-a" > doomed.txt
+		git add doomed.txt
+		git commit -m "topic-a-0"
+
+		git checkout main
+		git rm -q doomed.txt
+		git commit -m "main-1"
+
+		git checkout topic-a
+	`)
+
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
+
+	// No markers to check, and the resolver changed nothing: yas must not
+	// silently stage git's version and carry on.
+	result := cli.Run("restack", "--conflict-resolver=claude", "--after-resolve=continue")
+	assert.Equal(t, result.ExitCode(), 1)
+	assert.Assert(t, result.StderrContains("cannot be verified"), "stderr: %s", result.Stderr())
+	assert.Assert(t, result.StderrContains("- doomed.txt"), "stderr: %s", result.Stderr())
+	assert.Assert(t, assertRestackStateExists(t, tempDir))
+	assert.Equal(t, len(fakeClaudeCalls(t, logPath)), 1)
+	equalLines(t, mustExecOutput(tempDir, "git", "diff", "--name-only", "--diff-filter=U"), "doomed.txt")
+
+	// force accepts the file as-is (keeping topic-a's edit) and completes.
+	assert.NilError(t, cli.Run("abort").Err())
+
+	result = cli.Run("restack", "--conflict-resolver=claude", "--after-resolve=force")
+	assert.Equal(t, result.ExitCode(), 0, "forced restack should complete: %s", result.Stderr())
+	assert.Assert(t, result.StdoutContains("unable to verify resolution of doomed.txt; continuing anyway"), "stdout: %s", result.Stdout())
+	assert.Assert(t, !assertRestackStateExists(t, tempDir))
+	equalLines(t, fileOnBranch(t, tempDir, "topic-a", "doomed.txt"), "edited on topic-a")
+	equalLines(t, mustExecOutput(tempDir, "git", "log", "--pretty=%s", "topic-a"), "topic-a-0\nmain-1\nmain-0")
+}

@@ -184,13 +184,17 @@ func TestClaude_Args(t *testing.T) {
 	})
 
 	prompt := conflictresolver.Prompt(req)
-	for _, want := range []string{"`feature`", "`main`", `"Add thing"`, "- a.go", "- b.go", "Do NOT run git add"} {
+	for _, want := range []string{
+		"`feature`", "`main`", `"Add thing"`, "- a.go", "- b.go", "Do NOT run git add",
+		// HEAD is the partially rebased result, not just the target branch.
+		"rebased result so far: `main` plus any commits from `feature` that have already been replayed",
+	} {
 		assert.Assert(t, strings.Contains(prompt, want), "prompt should contain %q:\n%s", want, prompt)
 	}
 
 	// Without a commit subject the line is omitted entirely.
 	req.CommitSubject = ""
-	assert.Assert(t, !strings.Contains(conflictresolver.Prompt(req), "currently being replayed"))
+	assert.Assert(t, !strings.Contains(conflictresolver.Prompt(req), "The commit currently being replayed is:"))
 }
 
 func TestClaude_CheckAvailable(t *testing.T) {
@@ -247,6 +251,35 @@ echo resolved > conflicted.txt
 	assert.NilError(t, err)
 	assert.Equal(t, string(content), "resolved\n")
 
+	// GIT_* variables must not leak into the resolver, otherwise its git
+	// commands could inspect a different repository than req.Dir.
+	envScript := `#!/bin/sh
+printf '%s|%s|%s' "$GIT_DIR" "$GIT_WORK_TREE" "$KEEP_ME" > "$0.env"
+`
+	assert.NilError(t, os.WriteFile(filepath.Join(binDir, "env-claude"), []byte(envScript), 0o755))
+
+	// t.Setenv is incompatible with t.Parallel, so run in a subprocess-free
+	// way by temporarily setting the variables ourselves.
+	for _, kv := range [][2]string{{"GIT_DIR", "/elsewhere/.git"}, {"GIT_WORK_TREE", "/elsewhere"}, {"KEEP_ME", "kept"}} {
+		prev, had := os.LookupEnv(kv[0])
+		assert.NilError(t, os.Setenv(kv[0], kv[1]))
+
+		defer func() {
+			if had {
+				_ = os.Setenv(kv[0], prev)
+			} else {
+				_ = os.Unsetenv(kv[0])
+			}
+		}()
+	}
+
+	e := &conflictresolver.Claude{Binary: filepath.Join(binDir, "env-claude")}
+	assert.NilError(t, e.Resolve(conflictresolver.Request{Dir: workDir, Files: []string{"conflicted.txt"}}))
+
+	env, err := os.ReadFile(filepath.Join(binDir, "env-claude.env"))
+	assert.NilError(t, err)
+	assert.Equal(t, string(env), "||kept", "GIT_* stripped, other variables preserved")
+
 	// A failing tool surfaces as an error.
 	failing := `#!/bin/sh
 echo "boom" >&2
@@ -257,4 +290,51 @@ exit 3
 	f := &conflictresolver.Claude{Binary: filepath.Join(binDir, "failing-claude")}
 	err = f.Resolve(conflictresolver.Request{Dir: workDir, Files: []string{"conflicted.txt"}})
 	assert.ErrorContains(t, err, "exited with an error")
+}
+
+func TestSnapshotAndUnverifiableFiles(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	write := func(name, content string) {
+		assert.NilError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644))
+	}
+
+	write("textual.txt", "<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> c\n")
+	write("binary.bin", "\x00\x01\x02")
+	write("kept.txt", "content from the modifying side\n")
+	write("touched.txt", "as git left it\n")
+	write("removed.txt", "will be deleted by the resolver\n")
+	// "gone.txt" never existed in the working tree (deleted side of a
+	// modify/delete conflict that git resolved towards the deletion).
+
+	files := []string{"textual.txt", "binary.bin", "kept.txt", "touched.txt", "removed.txt", "gone.txt"}
+
+	before, err := conflictresolver.SnapshotFiles(dir, files, nil)
+	assert.NilError(t, err)
+	assert.Assert(t, before["textual.txt"].HasMarkers)
+	assert.Assert(t, !before["binary.bin"].HasMarkers)
+	assert.Assert(t, before["binary.bin"].Exists)
+	assert.Assert(t, !before["gone.txt"].Exists)
+
+	// Simulate a resolver: fixes the textual conflict, rewrites touched.txt,
+	// deletes removed.txt, leaves the rest alone.
+	write("textual.txt", "ours and theirs\n")
+	write("touched.txt", "resolved by the tool\n")
+	assert.NilError(t, os.Remove(filepath.Join(dir, "removed.txt")))
+
+	unverifiable, err := conflictresolver.UnverifiableFiles(dir, files, before)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, unverifiable, []string{"binary.bin", "kept.txt", "gone.txt"})
+
+	// Files the snapshot doesn't know about are ignored rather than flagged.
+	unverifiable, err = conflictresolver.UnverifiableFiles(dir, []string{"unknown.txt"}, before)
+	assert.NilError(t, err)
+	assert.Equal(t, len(unverifiable), 0)
+
+	// Marker size lookups are honoured and their errors surfaced.
+	_, err = conflictresolver.SnapshotFiles(dir, []string{"textual.txt"}, func(string) (int, error) {
+		return 0, errors.New("attr lookup failed")
+	})
+	assert.ErrorContains(t, err, "failed to determine conflict marker size for textual.txt")
 }
