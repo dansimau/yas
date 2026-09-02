@@ -16,5 +16,5 @@ func (c *refreshCmd) Execute(args []string) error {
 		return NewError(err.Error())
 	}
 
-	return yasInstance.RefreshRemoteStatus(c.Arguments.BranchNames...)
+	return yasInstance.RefreshRemoteStatus(yasInstance.ResolveTrunkAliases(c.Arguments.BranchNames)...)
 }

@@ -193,3 +193,148 @@ func TestConfigSet_RejectsPositionalArguments(t *testing.T) {
 	assert.Assert(t, result.StderrContains("unknown argument: worktree-branch"),
 		"Expected 'unknown argument' error, got: %s", result.Stderr())
 }
+
+func TestConfig_TrunkBranchAliases(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+		touch main
+		git add main
+		git commit -m "main-0"
+
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+	`)
+
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+
+	// Without aliases configured, "master" is not a known branch
+	result := cli.Run("add", "topic-a", "--parent=master")
+	assert.Equal(t, result.ExitCode(), 1, "expected failure without aliases, got stdout: %s stderr: %s", result.Stdout(), result.Stderr())
+
+	// Configure aliases
+	result = cli.Run("config", "set", "--trunk-branch-aliases=master,trunk")
+	assert.NilError(t, result.Err(), result.Stderr())
+	assert.Assert(t, strings.Contains(result.Stdout(), "Wrote config to:"))
+
+	configYAML := mustExecOutput(tempDir, "cat", ".yas/yas.yaml")
+	assert.Assert(t, strings.Contains(configYAML, "trunkBranchAliases:"), "expected aliases in config, got: %s", configYAML)
+	assert.Assert(t, strings.Contains(configYAML, "- master"), "expected master alias in config, got: %s", configYAML)
+	assert.Assert(t, strings.Contains(configYAML, "- trunk"), "expected trunk alias in config, got: %s", configYAML)
+
+	// The alias is now replaced with the real trunk branch name, and an
+	// informational (cyan) message is printed to stderr
+	result = cli.Run("add", "topic-a", "--parent=master")
+	assert.NilError(t, result.Err(), result.Stderr())
+
+	aliasNotice := "\x1b[36mReplaced branch name from 'master' to 'main' (trunk branch alias)\x1b[0m"
+	assert.Assert(t, strings.Contains(result.Stderr(), aliasNotice), "expected alias notice in stderr, got: %s", result.Stderr())
+
+	// topic-a's parent is main, not master
+	equalLines(t, cli.Run("list").Stdout(), `
+		main
+		└── topic-a (not submitted) *
+	`)
+
+	// Aliases work for positional branch arguments too, and the message is
+	// only printed once per invocation even when several arguments are replaced
+	result = cli.Run("state", "show", "master", "trunk")
+	assert.NilError(t, result.Err(), result.Stderr())
+	assert.Equal(t, strings.Count(result.Stderr(), "Replaced branch name from"), 1, "expected exactly one alias notice, got: %s", result.Stderr())
+	assert.Assert(t, strings.Contains(result.Stderr(), "from 'master' to 'main'"), "expected alias notice for master, got: %s", result.Stderr())
+
+	// The real trunk name is never reported as replaced
+	result = cli.Run("restack", "main", "--dry-run")
+	assert.NilError(t, result.Err(), result.Stderr())
+	assert.Assert(t, !strings.Contains(result.Stderr(), "Replaced branch name"), "unexpected alias notice, got: %s", result.Stderr())
+
+	// Switching to an alias switches to the trunk branch
+	result = cli.Run("branch", "master")
+	assert.NilError(t, result.Err(), result.Stderr())
+	assert.Assert(t, strings.Contains(result.Stderr(), aliasNotice), "expected alias notice in stderr, got: %s", result.Stderr())
+	assert.Equal(t, strings.TrimSpace(mustExecOutput(tempDir, "git", "rev-parse", "--abbrev-ref", "HEAD")), "main")
+
+	// Clearing the aliases disables the replacement
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch-aliases=").Err())
+
+	configYAML = mustExecOutput(tempDir, "cat", ".yas/yas.yaml")
+	assert.Assert(t, !strings.Contains(configYAML, "trunkBranchAliases"), "expected aliases removed from config, got: %s", configYAML)
+
+	result = cli.Run("add", "topic-a", "--parent=master")
+	assert.Equal(t, result.ExitCode(), 1, "expected failure after clearing aliases, got stdout: %s stderr: %s", result.Stdout(), result.Stderr())
+}
+
+func TestConfigSet_RequiresTrunkBranchBeforeOtherOptions(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+		touch main
+		git add main
+		git commit -m "main-0"
+	`)
+
+	// Setting aliases (or any other option) in an unconfigured repository must
+	// not write a config with an empty trunk branch
+	result := cli.Run("config", "set", "--trunk-branch-aliases=master")
+	assert.Equal(t, result.ExitCode(), 1, "expected failure, got stdout: %s stderr: %s", result.Stdout(), result.Stderr())
+	assert.Assert(t, result.StderrContains("trunk branch is not configured"), "expected trunk branch hint, got: %s", result.Stderr())
+	assert.Equal(t, mustExecExitCode(tempDir, "test", "-e", ".yas/yas.yaml"), 1, "config file should not have been written")
+
+	// Setting the trunk branch in the same invocation is fine
+	result = cli.Run("config", "set", "--trunk-branch=main", "--trunk-branch-aliases=master")
+	assert.NilError(t, result.Err(), result.Stderr())
+
+	configYAML := mustExecOutput(tempDir, "cat", ".yas/yas.yaml")
+	assert.Assert(t, strings.Contains(configYAML, "trunkBranch: main"), "expected trunk branch in config, got: %s", configYAML)
+	assert.Assert(t, strings.Contains(configYAML, "- master"), "expected alias in config, got: %s", configYAML)
+}
+
+func TestConfig_MissingTrunkBranchIsUnconfigured(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	// A config file that exists but lacks the required trunk branch
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+		touch main
+		git add main
+		git commit -m "main-0"
+
+		mkdir -p .yas
+		printf 'worktreeBranch: true\n' > .yas/yas.yaml
+	`)
+
+	result := cli.Run("list")
+	assert.Equal(t, result.ExitCode(), 1)
+	assert.Assert(t, result.StderrContains("repository not configured"), "expected 'repository not configured' in stderr, got: %s", result.Stderr())
+
+	// Completing the config keeps the values that were already there
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+
+	configYAML := mustExecOutput(tempDir, "cat", ".yas/yas.yaml")
+	assert.Assert(t, strings.Contains(configYAML, "trunkBranch: main"), "expected trunk branch in config, got: %s", configYAML)
+	assert.Assert(t, strings.Contains(configYAML, "worktreeBranch: true"), "expected existing worktreeBranch value preserved, got: %s", configYAML)
+
+	assert.NilError(t, cli.Run("list").Err())
+}

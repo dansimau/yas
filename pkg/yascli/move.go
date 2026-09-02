@@ -18,5 +18,8 @@ func (c *moveCmd) Execute(args []string) error {
 		return NewError(err.Error())
 	}
 
-	return yasInstance.MoveBranch(c.Arguments.TargetBranch, c.Onto)
+	targetBranch := yasInstance.ResolveTrunkAlias(c.Arguments.TargetBranch)
+	onto := yasInstance.ResolveTrunkAlias(c.Onto)
+
+	return yasInstance.MoveBranch(targetBranch, onto)
 }

@@ -12,25 +12,22 @@ import (
 type initCmd struct{}
 
 func (c *initCmd) Execute(args []string) error {
-	isConfigured, err := yas.IsConfigured(cmd.RepoDirectory)
+	isNewConfig, err := yas.ConfigFileExists(cmd.RepoDirectory)
 	if err != nil {
 		return NewError(err.Error())
 	}
 
-	isNewConfig := !isConfigured
+	isNewConfig = !isNewConfig
 
-	cfg := &yas.Config{
-		RepoDirectory:    cmd.RepoDirectory,
-		AutoPrefixBranch: true,
+	// Load the existing config even if it is incomplete (e.g. missing trunk
+	// branch), so that init completes it rather than discarding other values
+	cfg, err := yas.LoadConfig(cmd.RepoDirectory)
+	if err != nil {
+		return NewError(err.Error())
 	}
 
-	if !isNewConfig {
-		_cfg, err := yas.ReadConfig(cmd.RepoDirectory)
-		if err != nil {
-			return NewError(err.Error())
-		}
-
-		cfg = _cfg
+	if isNewConfig {
+		cfg.AutoPrefixBranch = true
 	}
 
 	// If no trunk branch is already configured, try to auto-detect it

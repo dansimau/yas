@@ -18,6 +18,8 @@ func (c *stateShowCmd) Execute(args []string) error {
 		return NewError(err.Error())
 	}
 
+	c.Args.Branches = yasInstance.ResolveTrunkAliases(c.Args.Branches)
+
 	if c.All {
 		branches := yasInstance.TrackedBranches()
 		for _, branch := range branches {

@@ -21,7 +21,7 @@ func (c *deleteCmd) Execute(args []string) error {
 		return NewError(err.Error())
 	}
 
-	branchName := c.Arguments.BranchName
+	branchName := yasInstance.ResolveTrunkAlias(c.Arguments.BranchName)
 
 	// Default to current branch if none specified
 	if branchName == "" {
