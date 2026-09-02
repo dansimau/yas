@@ -19,6 +19,11 @@ type YAS struct {
 	data *yasDatabase
 	git  *gitexec.Repo
 	repo *git.Repository
+
+	// trunkAliasNoticeShown records whether the informational message about a
+	// trunk branch alias replacement has already been printed, so it is only
+	// shown once per invocation.
+	trunkAliasNoticeShown bool
 }
 
 func New(cfg Config) (*YAS, error) {

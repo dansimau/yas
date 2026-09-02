@@ -19,5 +19,8 @@ func (c *addCmd) Execute(args []string) error {
 		return NewError(err.Error())
 	}
 
-	return yasInstance.SetParent(c.Args.Branch, c.Parent, c.BranchPoint)
+	branch := yasInstance.ResolveTrunkAlias(c.Args.Branch)
+	parent := yasInstance.ResolveTrunkAlias(c.Parent)
+
+	return yasInstance.SetParent(branch, parent, c.BranchPoint)
 }

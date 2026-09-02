@@ -19,7 +19,7 @@ func (c *restackCmd) Execute(args []string) error {
 		return NewError(err.Error())
 	}
 
-	branch := c.Args.Branch
+	branch := yasInstance.ResolveTrunkAlias(c.Args.Branch)
 
 	if c.All {
 		if branch != "" {

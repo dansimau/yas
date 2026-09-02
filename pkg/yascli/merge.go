@@ -18,5 +18,5 @@ func (c *mergeCmd) Execute(args []string) error {
 		return NewError(err.Error())
 	}
 
-	return yasInstance.Merge(c.Arguments.BranchName, c.Force)
+	return yasInstance.Merge(yasInstance.ResolveTrunkAlias(c.Arguments.BranchName), c.Force)
 }

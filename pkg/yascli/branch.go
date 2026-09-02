@@ -36,14 +36,15 @@ func (c *branchCmd) Execute(args []string) error {
 		return nil
 	}
 
-	fullBranchName := c.Arguments.BranchName
+	fullBranchName := yasInstance.ResolveTrunkAlias(c.Arguments.BranchName)
+	parent := yasInstance.ResolveTrunkAlias(c.Parent)
 
-	branchExistsLocally, err := yasInstance.BranchExistsLocally(c.Arguments.BranchName)
+	branchExistsLocally, err := yasInstance.BranchExistsLocally(fullBranchName)
 	if err != nil {
 		return NewError(err.Error())
 	}
 
-	branchExistsRemotely, err := yasInstance.BranchExistsRemotely(c.Arguments.BranchName)
+	branchExistsRemotely, err := yasInstance.BranchExistsRemotely(fullBranchName)
 	if err != nil {
 		return NewError(err.Error())
 	}
@@ -51,7 +52,7 @@ func (c *branchCmd) Execute(args []string) error {
 	switch {
 	// Create branch if it doesn't exist anywhere
 	case !branchExistsLocally && !branchExistsRemotely:
-		fullBranchName, err = yasInstance.CreateBranch(c.Arguments.BranchName, c.Parent)
+		fullBranchName, err = yasInstance.CreateBranch(fullBranchName, parent)
 		if err != nil {
 			return NewError(err.Error())
 		}

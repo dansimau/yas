@@ -131,3 +131,14 @@ Use `yas sync --restack` to do the sync and restack everything in one step.
 | `yas delete` | Delete a branch and its worktree |
 | `yas config` | Show or set repository configuration |
 | `yas hook <bash\|zsh>` | Print the shell integration hook |
+
+## Configuration
+
+Configuration lives in `.yas/yas.yaml` and is managed with `yas config set`:
+
+| Option | Description |
+| --- | --- |
+| `--trunk-branch=<name>` | The trunk branch, e.g. `main` |
+| `--trunk-branch-aliases=<a,b>` | Comma-separated branch names that are treated as the trunk branch when passed as arguments, e.g. `master,trunk`. Useful when switching between repos with different trunk names. When an alias is replaced, yas prints a note (once per invocation). Pass an empty value to clear. |
+| `--auto-prefix-branch` / `--no-auto-prefix-branch` | Prefix new branch names with your username |
+| `--worktree-branch` / `--no-worktree-branch` | Create new branches in worktrees by default |

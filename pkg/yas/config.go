@@ -30,6 +30,12 @@ type Config struct {
 	AutoPrefixBranch bool   `yaml:"autoPrefixBranch"`
 	WorktreeBranch   bool   `yaml:"worktreeBranch"`
 	WorktreesPath    string `yaml:"worktreesPath"`
+
+	// TrunkBranchAliases is a list of branch names that, when given as an
+	// argument, are treated as referring to TrunkBranch. This helps when
+	// switching between repos whose trunk branches have different names (e.g.
+	// aliasing "master" to "main").
+	TrunkBranchAliases []string `yaml:"trunkBranchAliases,omitempty"`
 }
 
 // getYASConfigBase returns the base path for the YAS config files. This is the
