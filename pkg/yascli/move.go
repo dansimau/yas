@@ -10,6 +10,8 @@ type moveCmd struct {
 	} `positional-args:"true"`
 
 	Onto string `description:"Target branch to rebase onto" long:"onto" required:"true"`
+
+	conflictResolutionFlags
 }
 
 func (c *moveCmd) Execute(args []string) error {
@@ -21,5 +23,5 @@ func (c *moveCmd) Execute(args []string) error {
 	targetBranch := yasInstance.ResolveTrunkAlias(c.Arguments.TargetBranch)
 	onto := yasInstance.ResolveTrunkAlias(c.Onto)
 
-	return yasInstance.MoveBranch(targetBranch, onto)
+	return yasInstance.MoveBranch(targetBranch, onto, c.conflictResolution())
 }

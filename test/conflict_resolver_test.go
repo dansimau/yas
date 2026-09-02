@@ -1,0 +1,452 @@
+package test
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/dansimau/yas/pkg/gocmdtester"
+	"github.com/dansimau/yas/pkg/testutil"
+	"github.com/dansimau/yas/pkg/yas"
+	"gotest.tools/v3/assert"
+)
+
+// fakeClaudeScript stands in for the `claude` CLI. It records every
+// invocation (arguments separated by a sentinel line) to $FAKE_CLAUDE_LOG and
+// then acts according to $FAKE_CLAUDE_MODE:
+//
+//   - resolve (default): strip the conflict markers from every unmerged file,
+//     keeping both sides' content in order (and dropping the base section
+//     that diff3/zdiff3 conflict styles add)
+//   - noop: exit successfully without touching anything
+//   - fail: exit non-zero
+const fakeClaudeScript = `#!/bin/sh
+{
+  for arg in "$@"; do
+    printf '%s\n' "$arg"
+    echo '---ARG---'
+  done
+  echo '---CALL---'
+} >> "$FAKE_CLAUDE_LOG"
+
+case "${FAKE_CLAUDE_MODE:-resolve}" in
+  resolve)
+    for f in $(git diff --name-only --diff-filter=U); do
+      awk '
+        /^<<<<<<< / { next }
+        /^\|\|\|\|\|\|\| / { base = 1; next }
+        /^=======$/ { base = 0; next }
+        /^>>>>>>> / { next }
+        !base
+      ' "$f" > "$f.resolved"
+      mv "$f.resolved" "$f"
+    done
+    echo "fake claude: resolved conflicts"
+    ;;
+  noop)
+    echo "fake claude: did nothing"
+    ;;
+  fail)
+    echo "fake claude: failing on purpose" >&2
+    exit 2
+    ;;
+esac
+`
+
+// setupFakeClaude installs the fake claude script in a directory and returns
+// the CLI options needed to make yas use it, plus the path of the invocation
+// log.
+func setupFakeClaude(t *testing.T, tempDir string, mode string) (opts []gocmdtester.Option, logPath string) {
+	t.Helper()
+
+	binDir := filepath.Join(tempDir, "fake-bin")
+	assert.NilError(t, os.MkdirAll(binDir, 0o755))
+	assert.NilError(t, os.WriteFile(filepath.Join(binDir, "claude"), []byte(fakeClaudeScript), 0o755))
+
+	logPath = filepath.Join(tempDir, "fake-claude.log")
+
+	return []gocmdtester.Option{
+		gocmdtester.WithWorkingDir(tempDir),
+		gocmdtester.WithEnv("PATH", binDir+":"+os.Getenv("PATH")),
+		gocmdtester.WithEnv("FAKE_CLAUDE_LOG", logPath),
+		gocmdtester.WithEnv("FAKE_CLAUDE_MODE", mode),
+	}, logPath
+}
+
+// fakeClaudeCalls returns the argument lists of every recorded invocation.
+func fakeClaudeCalls(t *testing.T, logPath string) [][]string {
+	t.Helper()
+
+	b, err := os.ReadFile(logPath)
+	if os.IsNotExist(err) {
+		return nil
+	}
+
+	assert.NilError(t, err)
+
+	var calls [][]string
+
+	for _, call := range strings.Split(string(b), "---CALL---\n") {
+		if strings.TrimSpace(call) == "" {
+			continue
+		}
+
+		var args []string
+
+		for _, arg := range strings.Split(call, "---ARG---\n") {
+			if arg == "" {
+				continue
+			}
+
+			args = append(args, strings.TrimSuffix(arg, "\n"))
+		}
+
+		calls = append(calls, args)
+	}
+
+	return calls
+}
+
+// setupSingleConflictRepo creates: main -> topic-a -> topic-b, where main has
+// moved on with a change to file.txt that conflicts with topic-a's change.
+// Rebasing topic-b afterwards is clean. The repo is left on topic-b.
+func setupSingleConflictRepo(t *testing.T, tempDir string) {
+	t.Helper()
+
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+
+		echo "line1" > file.txt
+		git add file.txt
+		git commit -m "main-0"
+
+		git checkout -b topic-a
+		echo "line2-from-a" >> file.txt
+		git add file.txt
+		git commit -m "topic-a-0"
+
+		git checkout -b topic-b
+		echo "line3-from-b" >> file.txt
+		git add file.txt
+		git commit -m "topic-b-0"
+
+		git checkout main
+		echo "line2-from-main" >> file.txt
+		git add file.txt
+		git commit -m "main-1"
+
+		git checkout topic-b
+	`)
+}
+
+func trackSingleConflictRepo(t *testing.T, cli *gocmdtester.CmdTester) {
+	t.Helper()
+
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-b", "--parent=topic-a").Err())
+}
+
+func fileOnBranch(t *testing.T, tempDir, branch, file string) string {
+	t.Helper()
+
+	return mustExecOutput(tempDir, "git", "show", branch+":"+file)
+}
+
+func TestConflictResolver_ClaudeContinue(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	opts, logPath := setupFakeClaude(t, tempDir, "resolve")
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go", opts...)
+
+	setupSingleConflictRepo(t, tempDir)
+	trackSingleConflictRepo(t, cli)
+
+	result := cli.Run("restack", "--all", "--conflict-resolver=claude", "--after-resolve=continue")
+	assert.Equal(t, result.ExitCode(), 0, "restack should complete: %s", result.Stderr())
+	assert.Assert(t, result.StdoutContains("resolving with claude"), "stdout: %s", result.Stdout())
+
+	// The whole restack finished: no state left behind, back on the starting branch.
+	assert.Assert(t, !assertRestackStateExists(t, tempDir))
+	equalLines(t, mustExecOutput(tempDir, "git", "branch", "--show-current"), "topic-b")
+
+	// The resolver's content was committed and the rest of the stack followed.
+	equalLines(t, fileOnBranch(t, tempDir, "topic-a", "file.txt"), "line1\nline2-from-main\nline2-from-a")
+	equalLines(t, fileOnBranch(t, tempDir, "topic-b", "file.txt"), "line1\nline2-from-main\nline2-from-a\nline3-from-b")
+	equalLines(t, mustExecOutput(tempDir, "git", "log", "--pretty=%s", "topic-b"), "topic-b-0\ntopic-a-0\nmain-1\nmain-0")
+
+	// Claude was invoked exactly once, non-interactively, with a prompt
+	// describing the conflict and without permission to touch git state.
+	calls := fakeClaudeCalls(t, logPath)
+	assert.Equal(t, len(calls), 1, "claude should be called once, got %v", calls)
+
+	args := calls[0]
+	assert.Equal(t, args[0], "-p")
+
+	prompt := args[1]
+	for _, want := range []string{"`topic-a`", "`main`", "- file.txt", `"topic-a-0"`} {
+		assert.Assert(t, strings.Contains(prompt, want), "prompt should mention %q:\n%s", want, prompt)
+	}
+
+	assert.DeepEqual(t, args[2:4], []string{"--permission-mode", "acceptEdits"})
+	assert.Equal(t, args[4], "--allowedTools")
+	assert.Assert(t, !strings.Contains(args[5], "git add"))
+}
+
+func TestConflictResolver_ClaudeStopIsDefault(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	opts, logPath := setupFakeClaude(t, tempDir, "resolve")
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go", opts...)
+
+	setupSingleConflictRepo(t, tempDir)
+	trackSingleConflictRepo(t, cli)
+
+	result := cli.Run("restack", "--all", "--conflict-resolver=claude")
+	assert.Equal(t, result.ExitCode(), 1, "restack should stop for review")
+	assert.Assert(t, result.StderrContains("resolved by claude"), "stderr: %s", result.Stderr())
+	assert.Assert(t, result.StderrContains("yas continue"), "stderr: %s", result.Stderr())
+	assert.Equal(t, len(fakeClaudeCalls(t, logPath)), 1)
+
+	// Paused mid-rebase with the resolution applied but left unstaged for review.
+	assert.Assert(t, assertRestackStateExists(t, tempDir))
+
+	state, err := yas.LoadRestackState(tempDir)
+	assert.NilError(t, err)
+	assert.Equal(t, state.CurrentBranch, "topic-a")
+	assert.Equal(t, state.ConflictResolver, "claude")
+	assert.Equal(t, state.AfterResolve, "stop")
+
+	equalLines(t, mustExecOutput(tempDir, "git", "diff", "--name-only", "--diff-filter=U"), "file.txt")
+
+	content, err := os.ReadFile(filepath.Join(tempDir, "file.txt"))
+	assert.NilError(t, err)
+	equalLines(t, string(content), "line1\nline2-from-main\nline2-from-a")
+
+	// The user reviews, stages and continues as with a manual resolution.
+	testutil.ExecOrFail(t, tempDir, "git add file.txt")
+	assert.NilError(t, cli.Run("continue").Err())
+
+	assert.Assert(t, !assertRestackStateExists(t, tempDir))
+	equalLines(t, fileOnBranch(t, tempDir, "topic-b", "file.txt"), "line1\nline2-from-main\nline2-from-a\nline3-from-b")
+	equalLines(t, mustExecOutput(tempDir, "git", "branch", "--show-current"), "topic-b")
+
+	// topic-b rebased cleanly, so claude was not needed again.
+	assert.Equal(t, len(fakeClaudeCalls(t, logPath)), 1)
+}
+
+func TestConflictResolver_MarkersRemainStopsUnlessForced(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	opts, logPath := setupFakeClaude(t, tempDir, "noop")
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go", opts...)
+
+	setupSingleConflictRepo(t, tempDir)
+	trackSingleConflictRepo(t, cli)
+
+	// The resolver runs but leaves the markers in place: yas must not continue.
+	result := cli.Run("restack", "--all", "--conflict-resolver=claude", "--after-resolve=continue")
+	assert.Equal(t, result.ExitCode(), 1)
+	assert.Assert(t, result.StderrContains("left conflict markers in:"), "stderr: %s", result.Stderr())
+	assert.Assert(t, result.StderrContains("file.txt"), "stderr: %s", result.Stderr())
+	assert.Assert(t, assertRestackStateExists(t, tempDir))
+	assert.Equal(t, len(fakeClaudeCalls(t, logPath)), 1)
+
+	// Nothing was staged or committed.
+	equalLines(t, mustExecOutput(tempDir, "git", "diff", "--name-only", "--diff-filter=U"), "file.txt")
+
+	// Back out and try again with force: markers get committed and the
+	// restack runs to completion.
+	assert.NilError(t, cli.Run("abort").Err())
+
+	result = cli.Run("restack", "--all", "--conflict-resolver=claude", "--after-resolve=force")
+	assert.Equal(t, result.ExitCode(), 0, "forced restack should complete: %s", result.Stderr())
+	assert.Assert(t, result.StdoutContains("conflict markers remain in file.txt; continuing anyway"), "stdout: %s", result.Stdout())
+	assert.Assert(t, !assertRestackStateExists(t, tempDir))
+
+	committed := fileOnBranch(t, tempDir, "topic-a", "file.txt")
+	assert.Assert(t, strings.Contains(committed, "<<<<<<<"), "markers should have been committed: %s", committed)
+	equalLines(t, mustExecOutput(tempDir, "git", "branch", "--show-current"), "topic-b")
+}
+
+func TestConflictResolver_ResolverFailure(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	opts, logPath := setupFakeClaude(t, tempDir, "fail")
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go", opts...)
+
+	setupSingleConflictRepo(t, tempDir)
+	trackSingleConflictRepo(t, cli)
+
+	result := cli.Run("restack", "--all", "--conflict-resolver=claude", "--after-resolve=continue")
+	assert.Equal(t, result.ExitCode(), 1)
+	assert.Assert(t, result.StderrContains("conflict resolver claude failed"), "stderr: %s", result.Stderr())
+	assert.Assert(t, result.StderrContains("yas continue"), "stderr: %s", result.Stderr())
+	assert.Equal(t, len(fakeClaudeCalls(t, logPath)), 1)
+
+	// The rebase is still paused so the user can take over.
+	assert.Assert(t, assertRestackStateExists(t, tempDir))
+	equalLines(t, mustExecOutput(tempDir, "git", "diff", "--name-only", "--diff-filter=U"), "file.txt")
+
+	assert.NilError(t, cli.Run("abort").Err())
+}
+
+func TestConflictResolver_ConfigAndFlagOverride(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	opts, logPath := setupFakeClaude(t, tempDir, "resolve")
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go", opts...)
+
+	setupSingleConflictRepo(t, tempDir)
+	trackSingleConflictRepo(t, cli)
+
+	// Invalid values are rejected and not written.
+	result := cli.Run("config", "set", "--conflict-resolver=bogus")
+	assert.Equal(t, result.ExitCode(), 1)
+	assert.Assert(t, result.StderrContains(`invalid conflict-resolver "bogus"`), "stderr: %s", result.Stderr())
+
+	result = cli.Run("config", "set", "--after-resolve=maybe")
+	assert.Equal(t, result.ExitCode(), 1)
+	assert.Assert(t, result.StderrContains(`invalid after-resolve "maybe"`), "stderr: %s", result.Stderr())
+
+	// Defaults are none/stop.
+	result = cli.Run("config", "show")
+	assert.NilError(t, result.Err())
+	assert.Assert(t, result.StdoutContains(`ConflictResolver: (string) (len=4) "none"`), "stdout: %s", result.Stdout())
+	assert.Assert(t, result.StdoutContains(`AfterResolve: (string) (len=4) "stop"`), "stdout: %s", result.Stdout())
+
+	assert.NilError(t, cli.Run("config", "set", "--conflict-resolver=claude", "--after-resolve=continue").Err())
+
+	result = cli.Run("config", "show")
+	assert.NilError(t, result.Err())
+	assert.Assert(t, result.StdoutContains(`ConflictResolver: (string) (len=6) "claude"`), "stdout: %s", result.Stdout())
+	assert.Assert(t, result.StdoutContains(`AfterResolve: (string) (len=8) "continue"`), "stdout: %s", result.Stdout())
+
+	// A flag overrides config: with none, the conflict stops the restack and
+	// claude is never invoked.
+	result = cli.Run("restack", "--all", "--conflict-resolver=none")
+	assert.Equal(t, result.ExitCode(), 1)
+	assert.Assert(t, result.StderrContains("Fix conflicts and run 'yas continue'"), "stderr: %s", result.Stderr())
+	assert.Equal(t, len(fakeClaudeCalls(t, logPath)), 0)
+	assert.NilError(t, cli.Run("abort").Err())
+
+	// Invalid flag values are rejected before anything is touched.
+	result = cli.Run("restack", "--all", "--conflict-resolver=bogus")
+	assert.Equal(t, result.ExitCode(), 1)
+	assert.Assert(t, result.StderrContains(`invalid conflict-resolver "bogus"`), "stderr: %s", result.Stderr())
+	assert.Assert(t, !assertRestackStateExists(t, tempDir))
+
+	// With no flags the config applies: resolved and continued automatically.
+	result = cli.Run("restack", "--all")
+	assert.Equal(t, result.ExitCode(), 0, "restack should complete from config: %s", result.Stderr())
+	assert.Equal(t, len(fakeClaudeCalls(t, logPath)), 1)
+	assert.Assert(t, !assertRestackStateExists(t, tempDir))
+	equalLines(t, fileOnBranch(t, tempDir, "topic-a", "file.txt"), "line1\nline2-from-main\nline2-from-a")
+}
+
+func TestConflictResolver_ContinueInheritsSettings(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	opts, logPath := setupFakeClaude(t, tempDir, "resolve")
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go", opts...)
+
+	// Two conflicts in the stack: topic-a conflicts with main on file.txt, and
+	// topic-b conflicts with main on other.txt (surfacing when topic-b is
+	// rebased onto the rebased topic-a).
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+
+		echo "line1" > file.txt
+		echo "o1" > other.txt
+		git add file.txt other.txt
+		git commit -m "main-0"
+
+		git checkout -b topic-a
+		echo "a" >> file.txt
+		git add file.txt
+		git commit -m "topic-a-0"
+
+		git checkout -b topic-b
+		echo "b" >> other.txt
+		git add other.txt
+		git commit -m "topic-b-0"
+
+		git checkout main
+		echo "main" >> file.txt
+		echo "main" >> other.txt
+		git add file.txt other.txt
+		git commit -m "main-1"
+
+		git checkout topic-b
+	`)
+	trackSingleConflictRepo(t, cli)
+
+	// Start with claude and the default (stop) behaviour.
+	result := cli.Run("restack", "--all", "--conflict-resolver=claude")
+	assert.Equal(t, result.ExitCode(), 1)
+	assert.Assert(t, result.StderrContains("conflicts in file.txt were resolved by claude"), "stderr: %s", result.Stderr())
+	assert.Equal(t, len(fakeClaudeCalls(t, logPath)), 1)
+
+	// Plain `yas continue` picks the resolver up from the saved state and
+	// handles the second conflict the same way.
+	testutil.ExecOrFail(t, tempDir, "git add file.txt")
+
+	result = cli.Run("continue")
+	assert.Equal(t, result.ExitCode(), 1)
+	assert.Assert(t, result.StderrContains("conflicts in other.txt were resolved by claude"), "stderr: %s", result.Stderr())
+	assert.Equal(t, len(fakeClaudeCalls(t, logPath)), 2)
+
+	state, err := yas.LoadRestackState(tempDir)
+	assert.NilError(t, err)
+	assert.Equal(t, state.CurrentBranch, "topic-b")
+	assert.Equal(t, state.ConflictResolver, "claude")
+
+	// Recreate the conflict so the resolver has to run again, this time from
+	// within `yas continue` and with a flag overriding the saved behaviour.
+	testutil.ExecOrFail(t, tempDir, "git checkout -m -- other.txt")
+
+	result = cli.Run("continue", "--after-resolve=continue")
+	assert.Equal(t, result.ExitCode(), 0, "continue should finish the restack: %s", result.Stderr())
+	assert.Equal(t, len(fakeClaudeCalls(t, logPath)), 3)
+	assert.Assert(t, !assertRestackStateExists(t, tempDir))
+
+	equalLines(t, fileOnBranch(t, tempDir, "topic-a", "file.txt"), "line1\nmain\na")
+	equalLines(t, fileOnBranch(t, tempDir, "topic-b", "other.txt"), "o1\nmain\nb")
+	equalLines(t, mustExecOutput(tempDir, "git", "branch", "--show-current"), "topic-b")
+}
+
+func TestConflictResolver_MissingTool(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	// Build a PATH that has git but definitely no `claude`.
+	binDir := filepath.Join(tempDir, "only-git")
+	assert.NilError(t, os.MkdirAll(binDir, 0o755))
+
+	gitPath := strings.TrimSpace(mustExecOutput(tempDir, "sh", "-c", "command -v git"))
+	assert.NilError(t, os.Symlink(gitPath, filepath.Join(binDir, "git")))
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+		gocmdtester.WithEnv("PATH", binDir),
+	)
+
+	setupSingleConflictRepo(t, tempDir)
+	trackSingleConflictRepo(t, cli)
+
+	result := cli.Run("restack", "--all", "--conflict-resolver=claude")
+	assert.Equal(t, result.ExitCode(), 1)
+	assert.Assert(t, result.StderrContains(`requires the "claude" command`), "stderr: %s", result.Stderr())
+
+	// Failed before any rebase started.
+	assert.Assert(t, !assertRestackStateExists(t, tempDir))
+	equalLines(t, mustExecOutput(tempDir, "git", "log", "--pretty=%s", "topic-a"), "topic-a-0\nmain-0")
+}

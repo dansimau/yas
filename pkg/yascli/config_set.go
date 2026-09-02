@@ -14,6 +14,8 @@ type configSetCmd struct {
 	DisableAutoPrefixBranch bool    `description:"Disable automatic branch name prefixing with username"                                                     long:"no-auto-prefix-branch" required:"false"`
 	EnableWorktreeBranch    bool    `description:"Enable worktrees by default for new branches"                                                              long:"worktree-branch"       required:"false"`
 	DisableWorktreeBranch   bool    `description:"Disable worktrees by default for new branches"                                                             long:"no-worktree-branch"    required:"false"`
+	ConflictResolver        *string `description:"Tool used to automatically resolve rebase conflicts (none, claude)"                                        long:"conflict-resolver"     required:"false"`
+	AfterResolve            *string `description:"What to do after the conflict resolver runs (stop, continue, force)"                                       long:"after-resolve"         required:"false"`
 }
 
 func (c *configSetCmd) Execute(args []string) error {
@@ -66,6 +68,23 @@ func (c *configSetCmd) Execute(args []string) error {
 	if c.DisableWorktreeBranch {
 		cfg.WorktreeBranch = false
 		changed = true
+	}
+
+	if c.ConflictResolver != nil {
+		cfg.ConflictResolver = *c.ConflictResolver
+		changed = true
+	}
+
+	if c.AfterResolve != nil {
+		cfg.AfterResolve = *c.AfterResolve
+		changed = true
+	}
+
+	if err := yas.ValidateConflictResolution(yas.ConflictResolution{
+		Resolver:     cfg.ConflictResolver,
+		AfterResolve: cfg.AfterResolve,
+	}); err != nil {
+		return NewError(err.Error())
 	}
 
 	if changed {

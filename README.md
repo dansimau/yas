@@ -10,14 +10,14 @@ reviewable PRs while yas keeps the branches, rebases and PR bases in sync.
 ## Features
 
 - ⽙ **Stacks as a tree** — `yas list` shows every branch, its parent, its PR link and whether it needs a restack or resubmit
-- 🔀 **Fast branch switching** — `yas branch` checks out by name or opens an interactive picker, and hops between worktrees for you
-- 🌱 **Branch off anything** — `yas branch <name>` creates a new branch on top of the current one (or `--parent`), optionally in its own worktree
+- 🗂️ **Worktree aware** — branches can live in separate worktrees, and the shell hook changes directory when you switch
+- ↩️ **Painless rebases** — `yas restack` automatically rebases all branches in the stack
+- ✨ **Auto-resolve conflicts** – use Claude to automatically resolve conflicts during rebase
 - 🚀 **One-command PR submit** — `yas submit` pushes and opens or updates the PR
 - 📝 **PR annotations** — every submitted PR gets a summary of the stack it belongs to, so reviewers can see where it fits
-- ♻️ **Painless restacks** — `yas restack` rebases all branches in the stack
 - 🧹 **Sync after merges** — `yas sync` pulls latest trunk, refreshes PR status and deletes local branches whose PRs merged
 - ✅ **Review and CI at a glance** — `yas list --status` shows review decision and CI state next to each PR
-- 🗂️ **Worktree aware** — branches can live in separate worktrees, and the shell hook changes directory when you switch
+- 🔀 **Fast branch switching** — `yas branch` checks out by name or opens an interactive picker, and hops between worktrees for you
 - 🧭 **Restructure freely** — `yas move` reparents a branch and its descendants; `yas add` adopts existing branches into a stack
 
 ## Installation
@@ -113,6 +113,23 @@ with `yas abort`.
 
 Use `yas sync --restack` to do the sync and restack everything in one step.
 
+## Advanced Features
+
+### Auto resolve conflicts during rebase
+
+yas can hand rebase conflicts to an external tool instead of stopping. Currently
+[Claude Code](https://docs.anthropic.com/en/docs/claude-code) is supported (it
+runs `claude -p ...` in the conflicted worktree, restricted to editing files):
+
+```sh
+yas config set --conflict-resolver=claude          # default: none
+yas config set --after-resolve=continue            # default: stop
+```
+
+By default, yas stops so you can verify the resolution. Use `--after-resolve=continue` to automatically continue 🤞
+
+If the tool fails or leaves markers behind, yas stops exactly as it would for a manual conflict, and `yas continue` / `yas abort` work as usual.
+
 ## Commands
 
 | Command | Description |
@@ -124,7 +141,7 @@ Use `yas sync --restack` to do the sync and restack everything in one step.
 | `yas add [branch]` | Track an existing branch and set its parent |
 | `yas move` | Move the current branch and its descendants to a new parent |
 | `yas submit` | Push and open/update PRs |
-| `yas restack [branch]` | Rebase all branches in the current stack or `--all` for all branches |
+| `yas restack [branch]` | Rebase all branches in the current stack or `--all` for all branches; `--conflict-resolver`, `--after-resolve` |
 | `yas continue` / `yas abort` | Resume or abort a restack after conflicts |
 | `yas sync` | Pull trunk, refresh PR status, delete merged branches |
 | `yas merge` | Merge the PR for the current branch |

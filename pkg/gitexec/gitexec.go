@@ -491,3 +491,39 @@ func (r *Repo) HardReset(commit string) error {
 		WithWorkingDir(r.path).
 		Run()
 }
+
+// UnmergedFiles returns the paths (relative to the repo root) of files that
+// currently have unresolved merge conflicts in the index.
+func (r *Repo) UnmergedFiles() ([]string, error) {
+	out, err := r.output("git", "diff", "--name-only", "--diff-filter=U")
+	if err != nil {
+		return nil, err
+	}
+
+	var files []string
+
+	for _, line := range strings.Split(out, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			files = append(files, line)
+		}
+	}
+
+	return files, nil
+}
+
+// Add stages the given paths. Paths that no longer exist in the working tree
+// are staged as deletions.
+func (r *Repo) Add(paths ...string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+
+	args := append([]string{"git", "add", "--"}, paths...)
+
+	return r.run(args...)
+}
+
+// GetCommitSubject returns the subject line of the commit at ref.
+func (r *Repo) GetCommitSubject(ref string) (string, error) {
+	return r.output("git", "log", "-1", "--format=%s", ref)
+}

@@ -10,6 +10,8 @@ type syncCmd struct {
 	Restack  bool `description:"Restack branches after sync"   long:"restack"`
 	SkipPull bool `description:"Skip pulling the trunk branch" long:"skip-pull"`
 
+	conflictResolutionFlags
+
 	yasInstance *yas.YAS
 }
 
@@ -98,7 +100,7 @@ func (c *syncCmd) Execute(args []string) error {
 	if c.Restack {
 		fmt.Println("🔄 Restacking branches...")
 
-		if err := yasInstance.Restack(yasInstance.Config().TrunkBranch, cmd.DryRun); err != nil {
+		if err := yasInstance.Restack(yasInstance.Config().TrunkBranch, cmd.DryRun, c.conflictResolution()); err != nil {
 			return NewError(err.Error())
 		}
 	}

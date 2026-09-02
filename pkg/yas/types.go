@@ -153,4 +153,9 @@ type RestackState struct {
 	RemainingWork [][2]string `json:"remaining_work"`
 	// RebasedBranches tracks which branches were rebased (for the PR reminder)
 	RebasedBranches []string `json:"rebased_branches"`
+	// ConflictResolver and AfterResolve record the conflict resolution
+	// settings the restack was started with, so `yas continue` uses the same
+	// behaviour unless overridden.
+	ConflictResolver string `json:"conflict_resolver,omitempty"`
+	AfterResolve     string `json:"after_resolve,omitempty"`
 }

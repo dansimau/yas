@@ -37,6 +37,14 @@ type Config struct {
 	// switching between repos whose trunk branches have different names (e.g.
 	// aliasing "master" to "main").
 	TrunkBranchAliases []string `yaml:"trunkBranchAliases,omitempty"`
+
+	// ConflictResolver names the tool used to automatically resolve rebase
+	// conflicts ("none" or a registered resolver such as "claude").
+	ConflictResolver string `yaml:"conflictResolver"`
+	// AfterResolve controls what happens after the conflict resolver has run:
+	// "stop" (pause for review), "continue" (resume the rebase if no conflict
+	// markers remain) or "force" (resume even if markers remain).
+	AfterResolve string `yaml:"afterResolve"`
 }
 
 // getYASConfigBase returns the base path for the YAS config files. This is the
@@ -137,9 +145,21 @@ func LoadConfig(repoDirectory string) (*Config, error) {
 	config := Config{
 		AutoPrefixBranch: true,
 		WorktreesPath:    defaultWorktreesPath,
+		ConflictResolver: DefaultConflictResolver,
+		AfterResolve:     DefaultAfterResolve,
 	}
 	if err := yaml.Unmarshal(yamlBytes, &config); err != nil {
 		return nil, err
+	}
+
+	// Older config files predate these settings; treat an empty value as the
+	// default rather than an invalid one.
+	if config.ConflictResolver == "" {
+		config.ConflictResolver = DefaultConflictResolver
+	}
+
+	if config.AfterResolve == "" {
+		config.AfterResolve = DefaultAfterResolve
 	}
 
 	config.RepoDirectory = repoDirectory

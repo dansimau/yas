@@ -8,6 +8,8 @@ type restackCmd struct {
 	All    bool `description:"Restack all branches"                               long:"all"`
 	DryRun bool `description:"Don't make any changes, just show what will happen" long:"dry-run"`
 
+	conflictResolutionFlags
+
 	Args struct {
 		Branch string `description:"The name of the branch to restack (default: current)" positional-arg-name:"branch"`
 	} `positional-args:"true"`
@@ -37,5 +39,5 @@ func (c *restackCmd) Execute(args []string) error {
 		branch = currentBranch
 	}
 
-	return yasInstance.Restack(branch, c.DryRun)
+	return yasInstance.Restack(branch, c.DryRun, c.conflictResolution())
 }
