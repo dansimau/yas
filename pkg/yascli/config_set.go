@@ -21,22 +21,11 @@ func (c *configSetCmd) Execute(args []string) error {
 		return NewError("unknown argument: " + args[0])
 	}
 
-	cfg := &yas.Config{
-		RepoDirectory: cmd.RepoDirectory,
-	}
-
-	isConfigured, err := yas.IsConfigured(cmd.RepoDirectory)
+	// Load the existing config (or defaults) even if it is incomplete, so that
+	// partial configs are preserved and completed rather than overwritten.
+	cfg, err := yas.LoadConfig(cmd.RepoDirectory)
 	if err != nil {
 		return NewError(err.Error())
-	}
-
-	if isConfigured {
-		_cfg, err := yas.ReadConfig(cmd.RepoDirectory)
-		if err != nil {
-			return NewError(err.Error())
-		}
-
-		cfg = _cfg
 	}
 
 	changed := false
@@ -80,6 +69,12 @@ func (c *configSetCmd) Execute(args []string) error {
 	}
 
 	if changed {
+		// Refuse to save a config that would leave the repository unusable (e.g.
+		// setting aliases before a trunk branch has been configured).
+		if cfg.TrunkBranch == "" {
+			return NewError("trunk branch is not configured (hint: run `yas init` or pass --trunk-branch)")
+		}
+
 		if cmd.DryRun {
 			fmt.Println("[DRY-RUN] Not writing config")
 		} else {

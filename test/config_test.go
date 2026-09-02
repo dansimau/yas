@@ -272,3 +272,69 @@ func TestConfig_TrunkBranchAliases(t *testing.T) {
 	result = cli.Run("add", "topic-a", "--parent=master")
 	assert.Equal(t, result.ExitCode(), 1, "expected failure after clearing aliases, got stdout: %s stderr: %s", result.Stdout(), result.Stderr())
 }
+
+func TestConfigSet_RequiresTrunkBranchBeforeOtherOptions(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+		touch main
+		git add main
+		git commit -m "main-0"
+	`)
+
+	// Setting aliases (or any other option) in an unconfigured repository must
+	// not write a config with an empty trunk branch
+	result := cli.Run("config", "set", "--trunk-branch-aliases=master")
+	assert.Equal(t, result.ExitCode(), 1, "expected failure, got stdout: %s stderr: %s", result.Stdout(), result.Stderr())
+	assert.Assert(t, result.StderrContains("trunk branch is not configured"), "expected trunk branch hint, got: %s", result.Stderr())
+	assert.Equal(t, mustExecExitCode(tempDir, "test", "-e", ".yas/yas.yaml"), 1, "config file should not have been written")
+
+	// Setting the trunk branch in the same invocation is fine
+	result = cli.Run("config", "set", "--trunk-branch=main", "--trunk-branch-aliases=master")
+	assert.NilError(t, result.Err(), result.Stderr())
+
+	configYAML := mustExecOutput(tempDir, "cat", ".yas/yas.yaml")
+	assert.Assert(t, strings.Contains(configYAML, "trunkBranch: main"), "expected trunk branch in config, got: %s", configYAML)
+	assert.Assert(t, strings.Contains(configYAML, "- master"), "expected alias in config, got: %s", configYAML)
+}
+
+func TestConfig_MissingTrunkBranchIsUnconfigured(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	// A config file that exists but lacks the required trunk branch
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+		touch main
+		git add main
+		git commit -m "main-0"
+
+		mkdir -p .yas
+		printf 'worktreeBranch: true\n' > .yas/yas.yaml
+	`)
+
+	result := cli.Run("list")
+	assert.Equal(t, result.ExitCode(), 1)
+	assert.Assert(t, result.StderrContains("repository not configured"), "expected 'repository not configured' in stderr, got: %s", result.Stderr())
+
+	// Completing the config keeps the values that were already there
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+
+	configYAML := mustExecOutput(tempDir, "cat", ".yas/yas.yaml")
+	assert.Assert(t, strings.Contains(configYAML, "trunkBranch: main"), "expected trunk branch in config, got: %s", configYAML)
+	assert.Assert(t, strings.Contains(configYAML, "worktreeBranch: true"), "expected existing worktreeBranch value preserved, got: %s", configYAML)
+
+	assert.NilError(t, cli.Run("list").Err())
+}
