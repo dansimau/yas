@@ -226,7 +226,11 @@ type FileState struct {
 	// Exists is false when git left no working-tree file (e.g. one side of a
 	// modify/delete conflict).
 	Exists bool
-	// Sum is the SHA-256 of the file contents (zero when Exists is false).
+	// IsSymlink is true when the path is a symbolic link. Git stages the link
+	// target, not the file it points to, so Sum covers the target string.
+	IsSymlink bool
+	// Sum is the SHA-256 of the file contents, or of the link target for a
+	// symlink (zero when Exists is false).
 	Sum [sha256.Size]byte
 	// HasMarkers is true when the file contained textual conflict markers, i.e.
 	// its resolution can later be verified by checking the markers are gone.
@@ -258,7 +262,9 @@ func SnapshotFiles(dir string, files []string, markerSize MarkerSizeFunc) (map[s
 			return nil, fmt.Errorf("failed to read %s: %w", file, err)
 		}
 
-		if state.Exists {
+		// Only regular files can carry markers; a symlink's resolution is
+		// verified by its link target changing.
+		if state.Exists && !state.IsSymlink {
 			state.HasMarkers, err = HasConflictMarkers(path, size)
 			if err != nil {
 				return nil, fmt.Errorf("failed to check %s for conflict markers: %w", file, err)
@@ -272,12 +278,33 @@ func SnapshotFiles(dir string, files []string, markerSize MarkerSizeFunc) (map[s
 }
 
 func snapshotFile(path string) (FileState, error) {
-	f, err := os.Open(path)
+	// Lstat so a symlink is described by its own link value rather than by
+	// whatever it currently points at.
+	info, err := os.Lstat(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return FileState{}, nil
 		}
 
+		return FileState{}, err
+	}
+
+	state := FileState{Exists: true}
+
+	if info.Mode()&os.ModeSymlink != 0 {
+		target, err := os.Readlink(path)
+		if err != nil {
+			return FileState{}, err
+		}
+
+		state.IsSymlink = true
+		state.Sum = sha256.Sum256([]byte(target))
+
+		return state, nil
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
 		return FileState{}, err
 	}
 	defer f.Close()
@@ -287,7 +314,6 @@ func snapshotFile(path string) (FileState, error) {
 		return FileState{}, err
 	}
 
-	state := FileState{Exists: true}
 	copy(state.Sum[:], h.Sum(nil))
 
 	return state, nil

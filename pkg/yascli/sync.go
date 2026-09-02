@@ -81,6 +81,19 @@ func (c *syncCmd) Execute(args []string) error {
 		return NewError("a restack operation is already in progress\n\nRun 'yas continue' to resume or 'yas abort' to cancel")
 	}
 
+	// Validate conflict handling before pulling or deleting anything, so a
+	// typo or missing tool doesn't surface only after the repo has changed.
+	resolution := c.conflictResolution()
+
+	if c.Restack {
+		resolved, err := yasInstance.ResolveConflictResolution(resolution)
+		if err != nil {
+			return NewError(err.Error())
+		}
+
+		resolution = resolved
+	}
+
 	if err := c.trackUntrackedBranches(); err != nil {
 		return NewError(err.Error())
 	}
@@ -100,7 +113,7 @@ func (c *syncCmd) Execute(args []string) error {
 	if c.Restack {
 		fmt.Println("🔄 Restacking branches...")
 
-		if err := yasInstance.Restack(yasInstance.Config().TrunkBranch, cmd.DryRun, c.conflictResolution()); err != nil {
+		if err := yasInstance.Restack(yasInstance.Config().TrunkBranch, cmd.DryRun, resolution); err != nil {
 			return NewError(err.Error())
 		}
 	}

@@ -338,3 +338,43 @@ func TestSnapshotAndUnverifiableFiles(t *testing.T) {
 	})
 	assert.ErrorContains(t, err, "failed to determine conflict marker size for textual.txt")
 }
+
+func TestSnapshotFiles_Symlinks(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	assert.NilError(t, os.WriteFile(filepath.Join(dir, "target.txt"), []byte("original\n"), 0o644))
+	assert.NilError(t, os.Symlink("target.txt", filepath.Join(dir, "link")))
+
+	files := []string{"link"}
+
+	before, err := conflictresolver.SnapshotFiles(dir, files, nil)
+	assert.NilError(t, err)
+	assert.Assert(t, before["link"].Exists)
+	assert.Assert(t, before["link"].IsSymlink)
+	assert.Assert(t, !before["link"].HasMarkers)
+
+	// Editing the file the link points at is not a resolution of the link
+	// conflict: git stages the link value, which is unchanged.
+	assert.NilError(t, os.WriteFile(filepath.Join(dir, "target.txt"), []byte("edited\n"), 0o644))
+
+	unverifiable, err := conflictresolver.UnverifiableFiles(dir, files, before)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, unverifiable, []string{"link"})
+
+	// Re-pointing the link is a change.
+	assert.NilError(t, os.Remove(filepath.Join(dir, "link")))
+	assert.NilError(t, os.Symlink("other.txt", filepath.Join(dir, "link")))
+
+	unverifiable, err = conflictresolver.UnverifiableFiles(dir, files, before)
+	assert.NilError(t, err)
+	assert.Equal(t, len(unverifiable), 0)
+
+	// Replacing the link with a regular file of identical bytes is a change too.
+	assert.NilError(t, os.Remove(filepath.Join(dir, "link")))
+	assert.NilError(t, os.WriteFile(filepath.Join(dir, "link"), []byte("target.txt"), 0o644))
+
+	unverifiable, err = conflictresolver.UnverifiableFiles(dir, files, before)
+	assert.NilError(t, err)
+	assert.Equal(t, len(unverifiable), 0)
+}

@@ -86,3 +86,33 @@ func TestConflictMarkerSize(t *testing.T) {
 		assert.Equal(t, size, tc.want, tc.path)
 	}
 }
+
+func TestStatusEntries(t *testing.T) {
+	t.Parallel()
+
+	repoPath := t.TempDir()
+	setupRepo(t, repoPath, `
+		git config commit.gpgsign false
+		printf 'a\n' > tracked.txt
+		printf 'b\n' > renamed-from.txt
+		mkdir dir
+		printf 'c\n' > dir/nested.txt
+		git add -A
+		git commit -m files
+
+		printf 'changed\n' > tracked.txt
+		git mv renamed-from.txt renamed-to.txt
+		printf 'new\n' > 'untracked file.txt'
+		printf 'new\n' > dir/also-new.txt
+	`)
+
+	entries, err := WithRepo(repoPath).StatusEntries()
+	assert.NilError(t, err)
+
+	assert.DeepEqual(t, entries, map[string]string{
+		"tracked.txt":        " M",
+		"renamed-to.txt":     "R ",
+		"untracked file.txt": "??",
+		"dir/also-new.txt":   "??",
+	})
+}

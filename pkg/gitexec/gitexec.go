@@ -577,3 +577,34 @@ func (r *Repo) Add(paths ...string) error {
 func (r *Repo) GetCommitSubject(ref string) (string, error) {
 	return r.output("git", "log", "-1", "--format=%s", ref)
 }
+
+// StatusEntries returns the working tree status as a map of path to the
+// two-character XY status code from `git status --porcelain`, including every
+// untracked file individually. For renames and copies the new path is used.
+func (r *Repo) StatusEntries() (map[string]string, error) {
+	out, err := r.rawOutput("git", "status", "--porcelain=v1", "-z", "--untracked-files=all")
+	if err != nil {
+		return nil, err
+	}
+
+	entries := map[string]string{}
+
+	records := strings.Split(out, "\x00")
+	for i := 0; i < len(records); i++ {
+		record := records[i]
+		if len(record) < 4 {
+			continue
+		}
+
+		// Format: "XY <path>", and for renames/copies the original path
+		// follows as a separate NUL-terminated record.
+		status, path := record[:2], record[3:]
+		entries[path] = status
+
+		if status[0] == 'R' || status[0] == 'C' {
+			i++
+		}
+	}
+
+	return entries, nil
+}

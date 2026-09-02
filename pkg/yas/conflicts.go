@@ -3,6 +3,7 @@ package yas
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/dansimau/yas/pkg/conflictresolver"
@@ -62,10 +63,51 @@ func isValidAfterResolve(value string) bool {
 	return false
 }
 
-// effectiveConflictResolution fills in unspecified fields from the fallbacks
-// (in order) and finally the repository config, validates the result and
-// checks the chosen resolver is usable.
+// ResolveConflictResolution returns the settings that would be used for a
+// restack started with override, after applying the repository config and
+// defaults, validating them and checking the chosen resolver is installed.
+// Commands that do other work before restacking (e.g. sync) call this first
+// so a bad setting fails before anything is touched.
+func (yas *YAS) ResolveConflictResolution(override ConflictResolution) (ConflictResolution, error) {
+	return yas.effectiveConflictResolution(override)
+}
+
+// effectiveConflictResolution is resolveConflictResolution plus a check that
+// the chosen resolver can actually run (its binary is installed).
 func (yas *YAS) effectiveConflictResolution(override ConflictResolution, fallbacks ...ConflictResolution) (ConflictResolution, error) {
+	result, err := yas.resolveConflictResolution(override, fallbacks...)
+	if err != nil {
+		return ConflictResolution{}, err
+	}
+
+	if err := checkResolverAvailable(result); err != nil {
+		return ConflictResolution{}, err
+	}
+
+	return result, nil
+}
+
+// checkResolverAvailable returns an error if res names a resolver that can't
+// run in this environment. "none" is always available.
+func checkResolverAvailable(res ConflictResolution) error {
+	if res.Resolver == conflictresolver.None {
+		return nil
+	}
+
+	resolver, err := conflictresolver.New(res.Resolver)
+	if err != nil {
+		return err
+	}
+
+	return resolver.CheckAvailable()
+}
+
+// resolveConflictResolution fills in unspecified fields from the fallbacks
+// (in order), then the repository config, then the defaults, and validates the
+// result. It does not check whether the resolver is installed: `yas continue`
+// may never need to invoke it (the user may have resolved things by hand), so
+// that check is deferred until a conflict actually requires the tool.
+func (yas *YAS) resolveConflictResolution(override ConflictResolution, fallbacks ...ConflictResolution) (ConflictResolution, error) {
 	result := override
 
 	candidates := make([]ConflictResolution, 0, len(fallbacks)+2)
@@ -87,17 +129,6 @@ func (yas *YAS) effectiveConflictResolution(override ConflictResolution, fallbac
 
 	if err := ValidateConflictResolution(result); err != nil {
 		return ConflictResolution{}, err
-	}
-
-	if result.Resolver != conflictresolver.None {
-		resolver, err := conflictresolver.New(result.Resolver)
-		if err != nil {
-			return ConflictResolution{}, err
-		}
-
-		if err := resolver.CheckAvailable(); err != nil {
-			return ConflictResolution{}, err
-		}
 	}
 
 	return result, nil
@@ -124,6 +155,12 @@ func (yas *YAS) handleRebaseConflict(branch *gitexec.BranchContext, res Conflict
 	resolver, err := conflictresolver.New(res.Resolver)
 	if err != nil {
 		return err
+	}
+
+	// The tool is only required now that there is a conflict for it to
+	// resolve (see resolveConflictResolution).
+	if err := resolver.CheckAvailable(); err != nil {
+		return fmt.Errorf("%w\n\nFix conflicts and run 'yas continue' to resume", err)
 	}
 
 	for {
@@ -165,6 +202,13 @@ func (yas *YAS) handleRebaseConflict(branch *gitexec.BranchContext, res Conflict
 			return err
 		}
 
+		// Also record the rest of the working tree so anything the resolver
+		// touches outside the conflicted paths can be reported.
+		statusBefore, err := branch.StatusEntries()
+		if err != nil {
+			return fmt.Errorf("failed to read working tree status: %w", err)
+		}
+
 		if err := resolver.Resolve(req); err != nil {
 			return fmt.Errorf("conflict resolver %s failed while rebasing %s onto %s: %w\n\nFix conflicts and run 'yas continue' to resume", resolver.Name(), childBranch, parentBranch, err)
 		}
@@ -199,6 +243,24 @@ func (yas *YAS) handleRebaseConflict(branch *gitexec.BranchContext, res Conflict
 			}
 
 			fmt.Printf("Warning: unable to verify resolution of %s; continuing anyway (after-resolve=%s)\n", strings.Join(unverifiable, ", "), AfterResolveForce)
+		}
+
+		// Only the conflicted paths are staged below, so a file the resolver
+		// created or edited elsewhere would be left out of the rebased commit
+		// (or trip up the next rebase step). Stop so the user can decide what
+		// belongs, unless forced.
+		statusAfter, err := branch.StatusEntries()
+		if err != nil {
+			return fmt.Errorf("failed to read working tree status: %w", err)
+		}
+
+		if unexpected := unexpectedChanges(statusBefore, statusAfter, files); len(unexpected) > 0 {
+			if res.AfterResolve != AfterResolveForce {
+				return fmt.Errorf("conflict resolver %s changed files outside the conflicted paths:\n  - %s\n\nReview them and 'git add' any that belong to the resolution, then run 'yas continue' to resume",
+					resolver.Name(), strings.Join(unexpected, "\n  - "))
+			}
+
+			fmt.Printf("Warning: %s changed files outside the conflicted paths (%s); they are left unstaged (after-resolve=%s)\n", resolver.Name(), strings.Join(unexpected, ", "), AfterResolveForce)
 		}
 
 		if res.AfterResolve == AfterResolveStop {
@@ -236,4 +298,35 @@ func (yas *YAS) handleRebaseConflict(branch *gitexec.BranchContext, res Conflict
 		// Another commit in the same rebase hit conflicts; go round again.
 		cause = continueErr
 	}
+}
+
+// unexpectedChanges returns the paths whose status changed between two
+// `git status` snapshots, excluding the conflicted files themselves, sorted.
+func unexpectedChanges(before, after map[string]string, conflicted []string) []string {
+	skip := make(map[string]bool, len(conflicted))
+	for _, file := range conflicted {
+		skip[file] = true
+	}
+
+	var changed []string
+
+	for path, status := range after {
+		if skip[path] {
+			continue
+		}
+
+		if prev, ok := before[path]; !ok || prev != status {
+			changed = append(changed, path)
+		}
+	}
+
+	for path := range before {
+		if _, ok := after[path]; !ok && !skip[path] {
+			changed = append(changed, path)
+		}
+	}
+
+	sort.Strings(changed)
+
+	return changed
 }

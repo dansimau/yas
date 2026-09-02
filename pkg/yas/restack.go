@@ -409,7 +409,10 @@ func (yas *YAS) Continue(resolution ConflictResolution) error {
 		return fmt.Errorf("failed to load restack state: %w", err)
 	}
 
-	res, err := yas.effectiveConflictResolution(resolution, ConflictResolution{
+	// Validate the settings but don't insist on the tool being installed yet:
+	// the user may have resolved the conflict by hand and no further conflict
+	// may occur, in which case a missing binary shouldn't block recovery.
+	res, err := yas.resolveConflictResolution(resolution, ConflictResolution{
 		Resolver:     state.ConflictResolver,
 		AfterResolve: state.AfterResolve,
 	})
