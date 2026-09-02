@@ -1,6 +1,7 @@
 package conflictresolver_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -87,7 +88,7 @@ func TestHasConflictMarkers(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := conflictresolver.HasConflictMarkers(write(tc.name, tc.content))
+			got, err := conflictresolver.HasConflictMarkers(write(tc.name, tc.content), conflictresolver.DefaultMarkerSize)
 			assert.NilError(t, err)
 			assert.Equal(t, got, tc.want)
 		})
@@ -96,9 +97,36 @@ func TestHasConflictMarkers(t *testing.T) {
 	t.Run("missing-file", func(t *testing.T) {
 		t.Parallel()
 
-		got, err := conflictresolver.HasConflictMarkers(filepath.Join(dir, "does-not-exist"))
+		got, err := conflictresolver.HasConflictMarkers(filepath.Join(dir, "does-not-exist"), conflictresolver.DefaultMarkerSize)
 		assert.NilError(t, err)
 		assert.Assert(t, !got)
+	})
+
+	t.Run("custom-marker-size", func(t *testing.T) {
+		t.Parallel()
+
+		// With conflict-marker-size=12 git writes 12-character markers; the
+		// default 7-character run must not be treated as a marker and vice versa.
+		twelve := write("twelve", "a\n<<<<<<<<<<<< HEAD\nb\n============\nc\n>>>>>>>>>>>> theirs\n")
+
+		got, err := conflictresolver.HasConflictMarkers(twelve, 12)
+		assert.NilError(t, err)
+		assert.Assert(t, got, "12-char markers should be detected with size 12")
+
+		got, err = conflictresolver.HasConflictMarkers(twelve, conflictresolver.DefaultMarkerSize)
+		assert.NilError(t, err)
+		assert.Assert(t, !got, "12-char markers are not 7-char markers")
+
+		seven := write("seven", "<<<<<<< HEAD\n")
+
+		got, err = conflictresolver.HasConflictMarkers(seven, 12)
+		assert.NilError(t, err)
+		assert.Assert(t, !got, "7-char markers are not 12-char markers")
+
+		// A non-positive size falls back to the default.
+		got, err = conflictresolver.HasConflictMarkers(seven, 0)
+		assert.NilError(t, err)
+		assert.Assert(t, got)
 	})
 }
 
@@ -109,9 +137,28 @@ func TestFilesWithConflictMarkers(t *testing.T) {
 	assert.NilError(t, os.WriteFile(filepath.Join(dir, "clean.txt"), []byte("ok\n"), 0o644))
 	assert.NilError(t, os.WriteFile(filepath.Join(dir, "bad.txt"), []byte("<<<<<<< HEAD\nx\n=======\ny\n>>>>>>> z\n"), 0o644))
 
-	remaining, err := conflictresolver.FilesWithConflictMarkers(dir, []string{"clean.txt", "bad.txt", "deleted.txt"})
+	remaining, err := conflictresolver.FilesWithConflictMarkers(dir, []string{"clean.txt", "bad.txt", "deleted.txt"}, nil)
 	assert.NilError(t, err)
 	assert.DeepEqual(t, remaining, []string{"bad.txt"})
+
+	// A per-file marker size is honoured: with size 12 for bad.txt its
+	// 7-character markers no longer count.
+	sizeFor := func(file string) (int, error) {
+		if file == "bad.txt" {
+			return 12, nil
+		}
+
+		return conflictresolver.DefaultMarkerSize, nil
+	}
+
+	remaining, err = conflictresolver.FilesWithConflictMarkers(dir, []string{"clean.txt", "bad.txt"}, sizeFor)
+	assert.NilError(t, err)
+	assert.Equal(t, len(remaining), 0)
+
+	_, err = conflictresolver.FilesWithConflictMarkers(dir, []string{"bad.txt"}, func(string) (int, error) {
+		return 0, errors.New("attr lookup failed")
+	})
+	assert.ErrorContains(t, err, "failed to determine conflict marker size for bad.txt")
 }
 
 func TestClaude_Args(t *testing.T) {

@@ -161,7 +161,9 @@ func (yas *YAS) handleRebaseConflict(branch *gitexec.BranchContext, res Conflict
 			return fmt.Errorf("conflict resolver %s failed while rebasing %s onto %s: %w\n\nFix conflicts and run 'yas continue' to resume", resolver.Name(), childBranch, parentBranch, err)
 		}
 
-		remaining, err := conflictresolver.FilesWithConflictMarkers(branch.Path(), files)
+		// Marker length can be customised per path via .gitattributes, so ask
+		// git rather than assuming the default.
+		remaining, err := conflictresolver.FilesWithConflictMarkers(branch.Path(), files, branch.ConflictMarkerSize)
 		if err != nil {
 			return err
 		}

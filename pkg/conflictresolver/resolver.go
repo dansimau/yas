@@ -120,16 +120,25 @@ func Names() []string {
 	return names
 }
 
-// conflictMarkerPrefixes are the line prefixes git writes for the start of
-// each side of a conflict. "=======" is deliberately excluded because it also
-// appears in ordinary content (e.g. setext headings in Markdown) and is never
-// present without one of these.
-var conflictMarkerPrefixes = []string{"<<<<<<<", ">>>>>>>", "|||||||"}
+// DefaultMarkerSize is the length of git's conflict markers unless a path
+// sets the conflict-marker-size attribute.
+const DefaultMarkerSize = 7
+
+// conflictMarkerChars are the characters git repeats to open each side of a
+// conflict. "=" is deliberately excluded because a run of "=" also appears in
+// ordinary content (e.g. setext headings in Markdown) and is never present in
+// a conflict without one of these.
+var conflictMarkerChars = []byte{'<', '>', '|'}
 
 // HasConflictMarkers reports whether the file at path still contains git
-// conflict markers. A file that no longer exists (deleted as part of the
-// resolution) has no markers.
-func HasConflictMarkers(path string) (bool, error) {
+// conflict markers of the given length (see DefaultMarkerSize and git's
+// conflict-marker-size attribute). A file that no longer exists (deleted as
+// part of the resolution) has no markers.
+func HasConflictMarkers(path string, markerSize int) (bool, error) {
+	if markerSize <= 0 {
+		markerSize = DefaultMarkerSize
+	}
+
 	f, err := os.Open(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -144,7 +153,7 @@ func HasConflictMarkers(path string) (bool, error) {
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 
 	for scanner.Scan() {
-		if isConflictMarker(scanner.Bytes()) {
+		if isConflictMarker(scanner.Bytes(), markerSize) {
 			return true, nil
 		}
 	}
@@ -156,11 +165,13 @@ func HasConflictMarkers(path string) (bool, error) {
 	return false, nil
 }
 
-// isConflictMarker reports whether line is a git conflict marker: one of the
-// known 7-character prefixes followed by end of line or a space.
-func isConflictMarker(line []byte) bool {
-	for _, prefix := range conflictMarkerPrefixes {
-		if !bytes.HasPrefix(line, []byte(prefix)) {
+// isConflictMarker reports whether line is a git conflict marker: exactly
+// markerSize repetitions of a marker character followed by end of line or a
+// space.
+func isConflictMarker(line []byte, markerSize int) bool {
+	for _, ch := range conflictMarkerChars {
+		prefix := bytes.Repeat([]byte{ch}, markerSize)
+		if !bytes.HasPrefix(line, prefix) {
 			continue
 		}
 
@@ -173,13 +184,29 @@ func isConflictMarker(line []byte) bool {
 	return false
 }
 
+// MarkerSizeFunc returns the conflict marker length in effect for a file
+// (relative to the rebase directory).
+type MarkerSizeFunc func(file string) (int, error)
+
 // FilesWithConflictMarkers returns the subset of files (relative to dir) that
-// still contain conflict markers.
-func FilesWithConflictMarkers(dir string, files []string) ([]string, error) {
+// still contain conflict markers. markerSize may be nil, in which case
+// DefaultMarkerSize is used for every file.
+func FilesWithConflictMarkers(dir string, files []string, markerSize MarkerSizeFunc) ([]string, error) {
 	var remaining []string
 
 	for _, file := range files {
-		hasMarkers, err := HasConflictMarkers(filepath.Join(dir, file))
+		size := DefaultMarkerSize
+
+		if markerSize != nil {
+			var err error
+
+			size, err = markerSize(file)
+			if err != nil {
+				return nil, fmt.Errorf("failed to determine conflict marker size for %s: %w", file, err)
+			}
+		}
+
+		hasMarkers, err := HasConflictMarkers(filepath.Join(dir, file), size)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check %s for conflict markers: %w", file, err)
 		}

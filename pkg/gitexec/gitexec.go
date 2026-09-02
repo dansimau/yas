@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -492,23 +493,72 @@ func (r *Repo) HardReset(commit string) error {
 		Run()
 }
 
+// rawOutput is like output but returns stdout byte-for-byte, for commands
+// whose output is NUL-delimited and must not be trimmed.
+func (r *Repo) rawOutput(args ...string) (string, error) {
+	b, err := xexec.Command(args...).
+		WithEnvVars(CleanedGitEnv()).
+		WithWorkingDir(r.path).
+		WithStdout(nil).
+		Output()
+	if err != nil {
+		return "", err
+	}
+
+	return string(b), nil
+}
+
+// splitNUL splits NUL-delimited output into its (non-empty) records.
+func splitNUL(out string) []string {
+	var records []string
+
+	for _, record := range strings.Split(out, "\x00") {
+		if record != "" {
+			records = append(records, record)
+		}
+	}
+
+	return records
+}
+
 // UnmergedFiles returns the paths (relative to the repo root) of files that
-// currently have unresolved merge conflicts in the index.
+// currently have unresolved merge conflicts in the index. Output is read
+// NUL-delimited so paths git would otherwise quote (non-ASCII, whitespace)
+// come back verbatim.
 func (r *Repo) UnmergedFiles() ([]string, error) {
-	out, err := r.output("git", "diff", "--name-only", "--diff-filter=U")
+	out, err := r.rawOutput("git", "diff", "--name-only", "--diff-filter=U", "-z")
 	if err != nil {
 		return nil, err
 	}
 
-	var files []string
+	return splitNUL(out), nil
+}
 
-	for _, line := range strings.Split(out, "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			files = append(files, line)
-		}
+// DefaultConflictMarkerSize is git's marker length when the
+// conflict-marker-size attribute is not set for a path.
+const DefaultConflictMarkerSize = 7
+
+// ConflictMarkerSize returns the length of the conflict markers git writes for
+// path, honouring the conflict-marker-size attribute from .gitattributes.
+func (r *Repo) ConflictMarkerSize(path string) (int, error) {
+	// -z output is: <path> NUL <attribute> NUL <value> NUL
+	out, err := r.rawOutput("git", "check-attr", "-z", "conflict-marker-size", "--", path)
+	if err != nil {
+		return 0, err
 	}
 
-	return files, nil
+	records := splitNUL(out)
+	if len(records) != 3 {
+		return 0, fmt.Errorf("unexpected check-attr output for %s: %q", path, out)
+	}
+
+	size, err := strconv.Atoi(records[2])
+	if err != nil || size <= 0 {
+		// "unspecified", "unset", "set" or garbage: git falls back to the default.
+		return DefaultConflictMarkerSize, nil
+	}
+
+	return size, nil
 }
 
 // Add stages the given paths. Paths that no longer exist in the working tree
