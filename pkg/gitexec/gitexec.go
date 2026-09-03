@@ -491,3 +491,99 @@ func (r *Repo) HardReset(commit string) error {
 		WithWorkingDir(r.path).
 		Run()
 }
+
+// rawOutput is like output but returns stdout byte-for-byte, for commands
+// whose output is NUL-delimited and must not be trimmed.
+func (r *Repo) rawOutput(args ...string) (string, error) {
+	b, err := xexec.Command(args...).
+		WithEnvVars(CleanedGitEnv()).
+		WithWorkingDir(r.path).
+		WithStdout(nil).
+		Output()
+	if err != nil {
+		return "", err
+	}
+
+	return string(b), nil
+}
+
+// splitNUL splits NUL-delimited output into its (non-empty) records.
+func splitNUL(out string) []string {
+	var records []string
+
+	for _, record := range strings.Split(out, "\x00") {
+		if record != "" {
+			records = append(records, record)
+		}
+	}
+
+	return records
+}
+
+// UnmergedFiles returns the paths (relative to the repo root) of files that
+// currently have unresolved merge conflicts in the index. Output is read
+// NUL-delimited so paths git would otherwise quote (non-ASCII, whitespace)
+// come back verbatim.
+func (r *Repo) UnmergedFiles() ([]string, error) {
+	out, err := r.rawOutput("git", "diff", "--name-only", "--diff-filter=U", "-z")
+	if err != nil {
+		return nil, err
+	}
+
+	return splitNUL(out), nil
+}
+
+// Add stages the given paths. Paths that no longer exist in the working tree
+// are staged as deletions.
+//
+// Each path is passed as a literal pathspec: "--" only ends option parsing, so
+// a name such as ":(glob)*.txt" would otherwise be interpreted as pathspec
+// magic and could stage unrelated files.
+func (r *Repo) Add(paths ...string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+
+	args := []string{"git", "add", "--"}
+	for _, path := range paths {
+		args = append(args, ":(literal)"+path)
+	}
+
+	return r.run(args...)
+}
+
+// GetCommitSubject returns the subject line of the commit at ref.
+func (r *Repo) GetCommitSubject(ref string) (string, error) {
+	return r.output("git", "log", "-1", "--format=%s", ref)
+}
+
+// StatusEntries returns the working tree status as a map of path to the
+// two-character XY status code from `git status --porcelain`, including every
+// untracked file individually. For renames and copies the new path is used.
+func (r *Repo) StatusEntries() (map[string]string, error) {
+	out, err := r.rawOutput("git", "status", "--porcelain=v1", "-z", "--untracked-files=all")
+	if err != nil {
+		return nil, err
+	}
+
+	entries := map[string]string{}
+
+	records := strings.Split(out, "\x00")
+	for i := 0; i < len(records); i++ {
+		record := records[i]
+		if len(record) < 4 {
+			continue
+		}
+
+		// Format: "XY <path>", and for renames/copies the original path
+		// follows as a separate NUL-terminated record.
+		status, path := record[:2], record[3:]
+		entries[path] = status
+
+		if status[0] == 'R' || status[0] == 'C' {
+			i++
+		}
+	}
+
+	return entries, nil
+}

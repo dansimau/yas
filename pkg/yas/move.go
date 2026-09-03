@@ -7,13 +7,20 @@ import (
 
 // Move rebases the current branch and all its descendants onto a new parent branch.
 func (yas *YAS) Move(targetBranch string) error {
-	return yas.MoveBranch("", targetBranch)
+	return yas.MoveBranch("", targetBranch, ConflictResolution{})
 }
 
-// MoveBranch rebases the specified branch and all its descendants onto a new parent branch.
-func (yas *YAS) MoveBranch(branchName, targetBranch string) error {
+// MoveBranch rebases the specified branch and all its descendants onto a new
+// parent branch. Unspecified fields in resolution fall back to the repository
+// config.
+func (yas *YAS) MoveBranch(branchName, targetBranch string, resolution ConflictResolution) error {
 	// Check if a restack is already in progress
 	if err := yas.errIfRestackInProgress(); err != nil {
+		return err
+	}
+
+	// Validate conflict handling before changing any metadata.
+	if _, err := yas.effectiveConflictResolution(resolution); err != nil {
 		return err
 	}
 
@@ -56,5 +63,5 @@ func (yas *YAS) MoveBranch(branchName, targetBranch string) error {
 	}
 
 	// Now rebase this branch and all children
-	return yas.Restack(branchName, false)
+	return yas.Restack(branchName, false, resolution)
 }

@@ -31,10 +31,19 @@ func (yas *YAS) RestackInProgress() (bool, error) {
 }
 
 // Restack rebases all branches starting from trunk, including all descendants
-// and forks.
-func (yas *YAS) Restack(branch string, dryRun bool) error {
+// and forks. Unspecified fields in resolution fall back to the repository
+// config.
+func (yas *YAS) Restack(branch string, dryRun bool, resolution ConflictResolution) error {
 	// Check if a restack is already in progress
 	if err := yas.errIfRestackInProgress(); err != nil {
+		return err
+	}
+
+	// Resolve and validate conflict handling up front so a bad setting or a
+	// missing tool fails before any branch is touched. A dry run never
+	// launches the resolver, so only the settings themselves are checked.
+	res, err := yas.ResolveConflictResolution(resolution, dryRun)
+	if err != nil {
 		return err
 	}
 
@@ -96,18 +105,20 @@ func (yas *YAS) Restack(branch string, dryRun bool) error {
 
 		// Write initial restack state
 		if err := yas.saveRestackState(&RestackState{
-			StartingBranch:  startingBranch,
-			TargetBranch:    branch,
-			CurrentBranch:   workQueue[0][0],
-			CurrentParent:   workQueue[0][1],
-			RemainingWork:   workQueue,
-			RebasedBranches: rebasedBranches,
+			StartingBranch:   startingBranch,
+			TargetBranch:     branch,
+			CurrentBranch:    workQueue[0][0],
+			CurrentParent:    workQueue[0][1],
+			RemainingWork:    workQueue,
+			RebasedBranches:  rebasedBranches,
+			ConflictResolver: res.Resolver,
+			AfterResolve:     res.AfterResolve,
 		}); err != nil {
 			return fmt.Errorf("rebase failed and unable to save restack state: %w", err)
 		}
 
 		// Process the work queue
-		if err := yas.processRestackWorkQueue(startingBranch, branch, workQueue, &rebasedBranches); err != nil {
+		if err := yas.processRestackWorkQueue(startingBranch, branch, workQueue, &rebasedBranches, res); err != nil {
 			return err
 		}
 	}
@@ -268,7 +279,7 @@ func (yas *YAS) buildRestackWorkQueue(graph *dag.DAG, branchName string, workQue
 }
 
 // processRestackWorkQueue processes a queue of rebase operations, saving state on error.
-func (yas *YAS) processRestackWorkQueue(startingBranch, targetBranch string, workQueue [][2]string, rebasedBranches *[]string) error {
+func (yas *YAS) processRestackWorkQueue(startingBranch, targetBranch string, workQueue [][2]string, rebasedBranches *[]string, res ConflictResolution) error {
 	for i, work := range workQueue {
 		childBranch := work[0]
 		parentBranch := work[1]
@@ -338,17 +349,24 @@ func (yas *YAS) processRestackWorkQueue(startingBranch, targetBranch string, wor
 
 			// Rebase is in progress (e.g., conflicts), save state for resuming later
 			if err := yas.saveRestackState(&RestackState{
-				StartingBranch:  startingBranch,
-				TargetBranch:    targetBranch,
-				CurrentBranch:   childBranch,
-				CurrentParent:   parentBranch,
-				RemainingWork:   workQueue[i+1:],
-				RebasedBranches: *rebasedBranches,
+				StartingBranch:   startingBranch,
+				TargetBranch:     targetBranch,
+				CurrentBranch:    childBranch,
+				CurrentParent:    parentBranch,
+				RemainingWork:    workQueue[i+1:],
+				RebasedBranches:  *rebasedBranches,
+				ConflictResolver: res.Resolver,
+				AfterResolve:     res.AfterResolve,
 			}); err != nil {
 				return fmt.Errorf("rebase failed and unable to save restack state: %w", err)
 			}
 
-			return fmt.Errorf("rebase failed for %s onto %s: %w\n\nFix conflicts and run 'yas continue' to resume", childBranch, parentBranch, rebaseErr)
+			// Hand the conflicts to the configured resolver (if any). A nil
+			// result means the rebase was driven to completion and we can
+			// carry on as if it had succeeded first time.
+			if err := yas.handleRebaseConflict(branch, res, childBranch, parentBranch, rebaseErr); err != nil {
+				return err
+			}
 		}
 
 		// Update the branch point to the new parent commit
@@ -373,7 +391,9 @@ func (yas *YAS) processRestackWorkQueue(startingBranch, targetBranch string, wor
 }
 
 // Continue resumes a restack operation that was interrupted by conflicts.
-func (yas *YAS) Continue() error {
+// Unspecified fields in resolution fall back to the settings the restack was
+// started with, then to the repository config.
+func (yas *YAS) Continue(resolution ConflictResolution) error {
 	// Check if there's a saved restack state
 	exists, err := yas.restackStateExists()
 	if err != nil {
@@ -388,6 +408,28 @@ func (yas *YAS) Continue() error {
 	state, err := yas.loadRestackState()
 	if err != nil {
 		return fmt.Errorf("failed to load restack state: %w", err)
+	}
+
+	// Validate the settings but don't insist on the tool being installed yet:
+	// the user may have resolved the conflict by hand and no further conflict
+	// may occur, in which case a missing binary shouldn't block recovery.
+	res, err := yas.resolveConflictResolution(resolution, ConflictResolution{
+		Resolver:     state.ConflictResolver,
+		AfterResolve: state.AfterResolve,
+	})
+	if err != nil {
+		return err
+	}
+
+	// Record the settings in effect so a later plain `yas continue` keeps
+	// using them.
+	if state.ConflictResolver != res.Resolver || state.AfterResolve != res.AfterResolve {
+		state.ConflictResolver = res.Resolver
+		state.AfterResolve = res.AfterResolve
+
+		if err := yas.saveRestackState(state); err != nil {
+			return fmt.Errorf("failed to save restack state: %w", err)
+		}
 	}
 
 	// Get the branch context for the current branch being rebased
@@ -410,14 +452,26 @@ func (yas *YAS) Continue() error {
 		fmt.Printf("Continuing rebase for %s...\n", state.CurrentBranch)
 
 		for {
-			if err := branch.RebaseContinue(); err != nil {
-				return fmt.Errorf("rebase continue failed: %w\n\nFix conflicts and run 'yas continue' again", err)
-			}
+			continueErr := branch.RebaseContinue()
 
 			// Check if rebase is still in progress
 			stillInProgress, err := branch.IsRebaseInProgress()
 			if err != nil {
 				return fmt.Errorf("failed to check if rebase is in progress: %w", err)
+			}
+
+			if continueErr != nil {
+				if !stillInProgress {
+					return fmt.Errorf("rebase continue failed: %w", continueErr)
+				}
+
+				// A later commit in the same rebase has conflicts; let the
+				// resolver (if configured) have a go, otherwise stop here.
+				if err := yas.handleRebaseConflict(branch, res, state.CurrentBranch, state.CurrentParent, continueErr); err != nil {
+					return err
+				}
+
+				break
 			}
 
 			if !stillInProgress {
@@ -513,7 +567,7 @@ func (yas *YAS) Continue() error {
 
 		fmt.Printf("\nContinuing restack with %d remaining branch(es)...\n", len(newWorkQueue))
 
-		if err := yas.processRestackWorkQueue(state.StartingBranch, targetBranch, newWorkQueue, &rebasedBranches); err != nil {
+		if err := yas.processRestackWorkQueue(state.StartingBranch, targetBranch, newWorkQueue, &rebasedBranches, res); err != nil {
 			return err
 		}
 	}

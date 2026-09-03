@@ -33,6 +33,7 @@ make lint
 - **cmd/yas/main.go**: Entry point that delegates to `pkg/yascli`
 - **pkg/yascli**: CLI command handlers and argument parsing using go-flags
 - **pkg/yas**: Core business logic for stacked diff management
+- **pkg/conflictresolver**: Pluggable tools for automatically resolving rebase conflicts (registry + `claude` implementation)
 - **pkg/gitexec**: Git operations wrapper using go-git and command execution
 - **pkg/xexec**: Command execution utilities with environment control
 - **pkg/gocmdtester**: Test utility for running CLI with coverage collection
@@ -42,7 +43,7 @@ make lint
 
 yas maintains two key files in the `.yas` directory:
 
-- **.yas/yas.yaml**: Configuration (trunk branch name)
+- **.yas/yas.yaml**: Configuration (trunk branch name, conflict resolver settings, etc.)
 - **.yas/yas.state.json**: JSON database tracking branch metadata and parent relationships
 
 The state is managed through `yasDatabase` (pkg/yas/store.go) which uses a thread-safe `branchMap` to store `BranchMetadata` for each tracked branch.
@@ -76,6 +77,8 @@ yas uses a Directed Acyclic Graph (DAG) from `github.com/heimdalr/dag` to model 
 - Gets descendants of current branch
 - Rebases each descendant from leaf nodes using `git rebase --update-refs`
 - Skips git hooks during rebase with `core.hooksPath=/dev/null`
+- On conflict, saves `.yas/yas.restack.json` and (if `conflict-resolver` is not `none`) hands the conflicted files to the resolver (`pkg/yas/conflicts.go`); `after-resolve` decides whether to stop for review, continue when no markers remain, or force
+- Settings come from flags (`--conflict-resolver`, `--after-resolve` on restack/sync/move/continue), then the saved restack state (for `continue`), then config; defaults are `none`/`stop`
 
 **Sync** (`yas sync`):
 
