@@ -3,6 +3,7 @@ package gitexec
 import (
 	"testing"
 
+	"github.com/dansimau/yas/pkg/testutil"
 	"gotest.tools/v3/assert"
 )
 
@@ -95,6 +96,8 @@ func TestStatusEntries(t *testing.T) {
 		git config commit.gpgsign false
 		printf 'a\n' > tracked.txt
 		printf 'b\n' > renamed-from.txt
+		printf 'secret.env\n' > .gitignore
+		printf 'd\n' > removed.txt
 		mkdir dir
 		printf 'c\n' > dir/nested.txt
 		git add -A
@@ -102,17 +105,85 @@ func TestStatusEntries(t *testing.T) {
 
 		printf 'changed\n' > tracked.txt
 		git mv renamed-from.txt renamed-to.txt
+		git rm -q removed.txt
 		printf 'new\n' > 'untracked file.txt'
 		printf 'new\n' > dir/also-new.txt
+		printf 'shh\n' > secret.env
+		ln -s tracked.txt link
 	`)
 
-	entries, err := WithRepo(repoPath).StatusEntries()
+	repo := WithRepo(repoPath)
+
+	entries, err := repo.StatusEntries()
 	assert.NilError(t, err)
 
-	assert.DeepEqual(t, entries, map[string]string{
+	statuses := map[string]string{}
+	for path, entry := range entries {
+		statuses[path] = entry.Status
+	}
+
+	assert.DeepEqual(t, statuses, map[string]string{
 		"tracked.txt":        " M",
 		"renamed-to.txt":     "R ",
+		"removed.txt":        "D ",
 		"untracked file.txt": "??",
 		"dir/also-new.txt":   "??",
+		"secret.env":         "!!",
+		"link":               "??",
 	})
+
+	// Fingerprints describe the working-tree file...
+	assert.Equal(t, entries["tracked.txt"].Size, int64(len("changed\n")))
+	assert.Assert(t, entries["tracked.txt"].ModTime != 0)
+	assert.Assert(t, entries["tracked.txt"].Mode.IsRegular())
+	assert.Equal(t, entries["link"].LinkTarget, "tracked.txt")
+	// ...and are zero for a path with no working-tree file.
+	assert.Equal(t, entries["removed.txt"], StatusEntry{Status: "D "})
+
+	// Overwriting an untracked or ignored file leaves its status code alone
+	// but changes its fingerprint.
+	testutil.ExecOrFail(t, repoPath, `
+		printf 'overwritten\n' > 'untracked file.txt'
+		printf 'overwritten\n' > secret.env
+	`)
+
+	after, err := repo.StatusEntries()
+	assert.NilError(t, err)
+	assert.Equal(t, after["untracked file.txt"].Status, "??")
+	assert.Assert(t, after["untracked file.txt"] != entries["untracked file.txt"])
+	assert.Equal(t, after["secret.env"].Status, "!!")
+	assert.Assert(t, after["secret.env"] != entries["secret.env"])
+	assert.Equal(t, after["tracked.txt"], entries["tracked.txt"])
+}
+
+func TestAdd_LiteralPathspec(t *testing.T) {
+	t.Parallel()
+
+	repoPath := t.TempDir()
+	setupRepo(t, repoPath, `
+		printf 'x\n' > ':(glob)*.txt'
+		printf 'y\n' > other.txt
+	`)
+
+	repo := WithRepo(repoPath)
+
+	// Without literal pathspecs, git would expand the glob and stage
+	// other.txt as well.
+	assert.NilError(t, repo.Add(":(glob)*.txt"))
+
+	out, err := repo.rawOutput("git", "diff", "--cached", "--name-only", "-z")
+	assert.NilError(t, err)
+	assert.DeepEqual(t, splitNUL(out), []string{":(glob)*.txt"})
+
+	// A path that no longer exists is staged as a deletion.
+	testutil.ExecOrFail(t, repoPath, `
+		git add other.txt
+		git commit -qm other
+		rm other.txt
+	`)
+	assert.NilError(t, repo.Add("other.txt"))
+
+	out, err = repo.rawOutput("git", "diff", "--cached", "--name-status", "-z")
+	assert.NilError(t, err)
+	assert.DeepEqual(t, splitNUL(out), []string{"D", "other.txt"})
 }

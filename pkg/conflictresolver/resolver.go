@@ -191,21 +191,21 @@ func isConflictMarker(line []byte, markerSize int) bool {
 type MarkerSizeFunc func(file string) (int, error)
 
 // FilesWithConflictMarkers returns the subset of files (relative to dir) that
-// still contain conflict markers. markerSize may be nil, in which case
-// DefaultMarkerSize is used for every file.
-func FilesWithConflictMarkers(dir string, files []string, markerSize MarkerSizeFunc) ([]string, error) {
+// still contain conflict markers, using the marker size recorded for each file
+// in before (see SnapshotFiles). Files missing from before are checked with
+// DefaultMarkerSize.
+//
+// The size is deliberately not looked up again: if .gitattributes was itself
+// conflicted and the resolver changed conflict-marker-size, a fresh lookup
+// would describe markers git never wrote, and the ones it did write could go
+// unnoticed.
+func FilesWithConflictMarkers(dir string, files []string, before map[string]FileState) ([]string, error) {
 	var remaining []string
 
 	for _, file := range files {
 		size := DefaultMarkerSize
-
-		if markerSize != nil {
-			var err error
-
-			size, err = markerSize(file)
-			if err != nil {
-				return nil, fmt.Errorf("failed to determine conflict marker size for %s: %w", file, err)
-			}
+		if prev, ok := before[file]; ok && prev.MarkerSize > 0 {
+			size = prev.MarkerSize
 		}
 
 		hasMarkers, err := HasConflictMarkers(filepath.Join(dir, file), size)
@@ -235,11 +235,15 @@ type FileState struct {
 	// HasMarkers is true when the file contained textual conflict markers, i.e.
 	// its resolution can later be verified by checking the markers are gone.
 	HasMarkers bool
+	// MarkerSize is the conflict marker length git used for this file, as
+	// determined before the resolver ran.
+	MarkerSize int
 }
 
 // SnapshotFiles records the state of each file (relative to dir) so that a
-// resolver's work can be verified afterwards with UnverifiableFiles.
-// markerSize may be nil (see FilesWithConflictMarkers).
+// resolver's work can be verified afterwards with FilesWithConflictMarkers and
+// UnverifiableFiles. markerSize gives the conflict marker length per file and
+// may be nil, in which case DefaultMarkerSize is used for every file.
 func SnapshotFiles(dir string, files []string, markerSize MarkerSizeFunc) (map[string]FileState, error) {
 	states := make(map[string]FileState, len(files))
 
@@ -253,6 +257,10 @@ func SnapshotFiles(dir string, files []string, markerSize MarkerSizeFunc) (map[s
 			if err != nil {
 				return nil, fmt.Errorf("failed to determine conflict marker size for %s: %w", file, err)
 			}
+
+			if size <= 0 {
+				size = DefaultMarkerSize
+			}
 		}
 
 		path := filepath.Join(dir, file)
@@ -261,6 +269,8 @@ func SnapshotFiles(dir string, files []string, markerSize MarkerSizeFunc) (map[s
 		if err != nil {
 			return nil, fmt.Errorf("failed to read %s: %w", file, err)
 		}
+
+		state.MarkerSize = size
 
 		// Only regular files can carry markers; a symlink's resolution is
 		// verified by its link target changing.
@@ -275,6 +285,12 @@ func SnapshotFiles(dir string, files []string, markerSize MarkerSizeFunc) (map[s
 	}
 
 	return states, nil
+}
+
+// sameContent reports whether two snapshots describe the same working-tree
+// entry (existence, type and bytes), ignoring the marker bookkeeping.
+func (s FileState) sameContent(other FileState) bool {
+	return s.Exists == other.Exists && s.IsSymlink == other.IsSymlink && s.Sum == other.Sum
 }
 
 func snapshotFile(path string) (FileState, error) {
@@ -339,7 +355,7 @@ func UnverifiableFiles(dir string, files []string, before map[string]FileState) 
 			return nil, fmt.Errorf("failed to read %s: %w", file, err)
 		}
 
-		if now == prev {
+		if now.sameContent(prev) {
 			unverifiable = append(unverifiable, file)
 		}
 	}

@@ -136,26 +136,34 @@ func TestFilesWithConflictMarkers(t *testing.T) {
 	dir := t.TempDir()
 	assert.NilError(t, os.WriteFile(filepath.Join(dir, "clean.txt"), []byte("ok\n"), 0o644))
 	assert.NilError(t, os.WriteFile(filepath.Join(dir, "bad.txt"), []byte("<<<<<<< HEAD\nx\n=======\ny\n>>>>>>> z\n"), 0o644))
+	assert.NilError(t, os.WriteFile(filepath.Join(dir, "big.txt"), []byte("<<<<<<<<<<<< HEAD\nx\n============\ny\n>>>>>>>>>>>> z\n"), 0o644))
 
-	remaining, err := conflictresolver.FilesWithConflictMarkers(dir, []string{"clean.txt", "bad.txt", "deleted.txt"}, nil)
+	// Without a snapshot every file is checked with the default size.
+	remaining, err := conflictresolver.FilesWithConflictMarkers(dir, []string{"clean.txt", "bad.txt", "big.txt", "deleted.txt"}, nil)
 	assert.NilError(t, err)
 	assert.DeepEqual(t, remaining, []string{"bad.txt"})
 
-	// A per-file marker size is honoured: with size 12 for bad.txt its
-	// 7-character markers no longer count.
+	// The per-file marker size recorded in the snapshot is honoured: with
+	// size 12 for bad.txt its 7-character markers no longer count, and
+	// big.txt's 12-character markers do.
 	sizeFor := func(file string) (int, error) {
-		if file == "bad.txt" {
+		if file == "bad.txt" || file == "big.txt" {
 			return 12, nil
 		}
 
 		return conflictresolver.DefaultMarkerSize, nil
 	}
 
-	remaining, err = conflictresolver.FilesWithConflictMarkers(dir, []string{"clean.txt", "bad.txt"}, sizeFor)
+	before, err := conflictresolver.SnapshotFiles(dir, []string{"clean.txt", "bad.txt", "big.txt"}, sizeFor)
 	assert.NilError(t, err)
-	assert.Equal(t, len(remaining), 0)
+	assert.Equal(t, before["big.txt"].MarkerSize, 12)
+	assert.Equal(t, before["clean.txt"].MarkerSize, conflictresolver.DefaultMarkerSize)
 
-	_, err = conflictresolver.FilesWithConflictMarkers(dir, []string{"bad.txt"}, func(string) (int, error) {
+	remaining, err = conflictresolver.FilesWithConflictMarkers(dir, []string{"clean.txt", "bad.txt", "big.txt"}, before)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, remaining, []string{"big.txt"})
+
+	_, err = conflictresolver.SnapshotFiles(dir, []string{"bad.txt"}, func(string) (int, error) {
 		return 0, errors.New("attr lookup failed")
 	})
 	assert.ErrorContains(t, err, "failed to determine conflict marker size for bad.txt")
