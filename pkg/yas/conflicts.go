@@ -207,9 +207,8 @@ func (yas *YAS) handleRebaseConflict(branch *gitexec.BranchContext, res Conflict
 			return err
 		}
 
-		// Also record the rest of the working tree (including files that are
-		// already dirty or ignored) so anything the resolver touches outside
-		// the conflicted paths can be reported.
+		// Also record the rest of the working tree so anything the resolver
+		// touches outside the conflicted paths can be reported.
 		statusBefore, err := branch.StatusEntries()
 		if err != nil {
 			return fmt.Errorf("failed to read working tree status: %w", err)
@@ -319,7 +318,7 @@ func (yas *YAS) handleRebaseConflict(branch *gitexec.BranchContext, res Conflict
 // the conflicted files. It is best effort: the resolver's own error is what
 // the user needs to see, so a failure to read the status is reported on
 // stderr rather than replacing it.
-func (yas *YAS) strayChangesAfterFailure(branch *gitexec.BranchContext, statusBefore map[string]gitexec.StatusEntry, files []string) []string {
+func (yas *YAS) strayChangesAfterFailure(branch *gitexec.BranchContext, statusBefore map[string]string, files []string) []string {
 	statusAfter, err := branch.StatusEntries()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: unable to check for files changed by the resolver: %v\n", err)
@@ -330,12 +329,9 @@ func (yas *YAS) strayChangesAfterFailure(branch *gitexec.BranchContext, statusBe
 	return unexpectedChanges(statusBefore, statusAfter, files)
 }
 
-// unexpectedChanges returns the paths whose status or working-tree fingerprint
-// changed between two `git status` snapshots, excluding the conflicted files
-// themselves, sorted. Comparing fingerprints (not just status codes) catches
-// the resolver overwriting a file that was already untracked, modified or
-// ignored before it ran.
-func unexpectedChanges(before, after map[string]gitexec.StatusEntry, conflicted []string) []string {
+// unexpectedChanges returns the paths whose status changed between two
+// `git status` snapshots, excluding the conflicted files themselves, sorted.
+func unexpectedChanges(before, after map[string]string, conflicted []string) []string {
 	skip := make(map[string]bool, len(conflicted))
 	for _, file := range conflicted {
 		skip[file] = true
@@ -343,12 +339,12 @@ func unexpectedChanges(before, after map[string]gitexec.StatusEntry, conflicted 
 
 	var changed []string
 
-	for path, entry := range after {
+	for path, status := range after {
 		if skip[path] {
 			continue
 		}
 
-		if prev, ok := before[path]; !ok || prev != entry {
+		if prev, ok := before[path]; !ok || prev != status {
 			changed = append(changed, path)
 		}
 	}

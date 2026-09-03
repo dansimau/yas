@@ -68,7 +68,6 @@ func TestStatusEntries(t *testing.T) {
 		git config commit.gpgsign false
 		printf 'a\n' > tracked.txt
 		printf 'b\n' > renamed-from.txt
-		printf 'secret.env\n' > .gitignore
 		printf 'd\n' > removed.txt
 		mkdir dir
 		printf 'c\n' > dir/nested.txt
@@ -80,52 +79,18 @@ func TestStatusEntries(t *testing.T) {
 		git rm -q removed.txt
 		printf 'new\n' > 'untracked file.txt'
 		printf 'new\n' > dir/also-new.txt
-		printf 'shh\n' > secret.env
-		ln -s tracked.txt link
 	`)
 
-	repo := WithRepo(repoPath)
-
-	entries, err := repo.StatusEntries()
+	entries, err := WithRepo(repoPath).StatusEntries()
 	assert.NilError(t, err)
 
-	statuses := map[string]string{}
-	for path, entry := range entries {
-		statuses[path] = entry.Status
-	}
-
-	assert.DeepEqual(t, statuses, map[string]string{
+	assert.DeepEqual(t, entries, map[string]string{
 		"tracked.txt":        " M",
 		"renamed-to.txt":     "R ",
 		"removed.txt":        "D ",
 		"untracked file.txt": "??",
 		"dir/also-new.txt":   "??",
-		"secret.env":         "!!",
-		"link":               "??",
 	})
-
-	// Fingerprints describe the working-tree file...
-	assert.Equal(t, entries["tracked.txt"].Size, int64(len("changed\n")))
-	assert.Assert(t, entries["tracked.txt"].ModTime != 0)
-	assert.Assert(t, entries["tracked.txt"].Mode.IsRegular())
-	assert.Equal(t, entries["link"].LinkTarget, "tracked.txt")
-	// ...and are zero for a path with no working-tree file.
-	assert.Equal(t, entries["removed.txt"], StatusEntry{Status: "D "})
-
-	// Overwriting an untracked or ignored file leaves its status code alone
-	// but changes its fingerprint.
-	testutil.ExecOrFail(t, repoPath, `
-		printf 'overwritten\n' > 'untracked file.txt'
-		printf 'overwritten\n' > secret.env
-	`)
-
-	after, err := repo.StatusEntries()
-	assert.NilError(t, err)
-	assert.Equal(t, after["untracked file.txt"].Status, "??")
-	assert.Assert(t, after["untracked file.txt"] != entries["untracked file.txt"])
-	assert.Equal(t, after["secret.env"].Status, "!!")
-	assert.Assert(t, after["secret.env"] != entries["secret.env"])
-	assert.Equal(t, after["tracked.txt"], entries["tracked.txt"])
 }
 
 func TestAdd_LiteralPathspec(t *testing.T) {

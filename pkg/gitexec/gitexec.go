@@ -4,9 +4,7 @@ package gitexec
 import (
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -559,32 +557,16 @@ func (r *Repo) GetCommitSubject(ref string) (string, error) {
 	return r.output("git", "log", "-1", "--format=%s", ref)
 }
 
-// StatusEntry describes one path reported by `git status --porcelain`.
-type StatusEntry struct {
-	// Status is the two-character XY code ("??" untracked, "!!" ignored,
-	// " M" modified, "UU" unmerged, ...).
-	Status string
-	// Mode, Size and ModTime (Unix nanoseconds) fingerprint the working-tree
-	// file, so that an edit to a file that is already dirty (whose status code
-	// does not change) can still be noticed. They are zero when the path has
-	// no working-tree file (e.g. a staged deletion).
-	Mode    os.FileMode
-	Size    int64
-	ModTime int64
-	// LinkTarget is the link value when the path is a symlink.
-	LinkTarget string
-}
-
-// StatusEntries returns the working tree status as a map of path to
-// StatusEntry, listing every untracked and ignored file individually. For
-// renames and copies the new path is used.
-func (r *Repo) StatusEntries() (map[string]StatusEntry, error) {
-	out, err := r.rawOutput("git", "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored")
+// StatusEntries returns the working tree status as a map of path to the
+// two-character XY status code from `git status --porcelain`, including every
+// untracked file individually. For renames and copies the new path is used.
+func (r *Repo) StatusEntries() (map[string]string, error) {
+	out, err := r.rawOutput("git", "status", "--porcelain=v1", "-z", "--untracked-files=all")
 	if err != nil {
 		return nil, err
 	}
 
-	entries := map[string]StatusEntry{}
+	entries := map[string]string{}
 
 	records := strings.Split(out, "\x00")
 	for i := 0; i < len(records); i++ {
@@ -596,14 +578,7 @@ func (r *Repo) StatusEntries() (map[string]StatusEntry, error) {
 		// Format: "XY <path>", and for renames/copies the original path
 		// follows as a separate NUL-terminated record.
 		status, path := record[:2], record[3:]
-
-		entry, err := fingerprint(filepath.Join(r.path, path))
-		if err != nil {
-			return nil, fmt.Errorf("failed to stat %s: %w", path, err)
-		}
-
-		entry.Status = status
-		entries[path] = entry
+		entries[path] = status
 
 		if status[0] == 'R' || status[0] == 'C' {
 			i++
@@ -611,32 +586,4 @@ func (r *Repo) StatusEntries() (map[string]StatusEntry, error) {
 	}
 
 	return entries, nil
-}
-
-// fingerprint fills in the file metadata of a StatusEntry for path, without
-// following symlinks. A missing file yields a zero entry.
-func fingerprint(path string) (StatusEntry, error) {
-	info, err := os.Lstat(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return StatusEntry{}, nil
-		}
-
-		return StatusEntry{}, err
-	}
-
-	entry := StatusEntry{
-		Mode:    info.Mode(),
-		Size:    info.Size(),
-		ModTime: info.ModTime().UnixNano(),
-	}
-
-	if info.Mode()&os.ModeSymlink != 0 {
-		entry.LinkTarget, err = os.Readlink(path)
-		if err != nil {
-			return StatusEntry{}, err
-		}
-	}
-
-	return entry, nil
 }

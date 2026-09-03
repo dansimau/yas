@@ -20,8 +20,6 @@ import (
 //     unmerged file, keeping both sides' content in order (and dropping the
 //     base section that diff3/zdiff3 conflict styles add)
 //   - extra: like resolve, but also create an unrelated helper.txt
-//   - clobber: like resolve, but also append to notes.txt and secret.env,
-//     which the test has left untracked and ignored respectively
 //   - checkout-sub: check out origin/side in the submodule at ./sub, the way
 //     a tool would resolve a gitlink conflict
 //   - noop: exit successfully without touching anything
@@ -37,7 +35,7 @@ const fakeClaudeScript = `#!/bin/sh
 } >> "$FAKE_CLAUDE_LOG"
 
 case "${FAKE_CLAUDE_MODE:-resolve}" in
-  resolve|extra|clobber)
+  resolve|extra)
     for f in $(git diff --name-only --diff-filter=U); do
       awk '
         /^<<<<<<< / { next }
@@ -50,10 +48,6 @@ case "${FAKE_CLAUDE_MODE:-resolve}" in
     done
     if [ "$FAKE_CLAUDE_MODE" = "extra" ]; then
       echo "helper" > helper.txt
-    fi
-    if [ "$FAKE_CLAUDE_MODE" = "clobber" ]; then
-      echo "clobbered" >> notes.txt
-      echo "clobbered" >> secret.env
     fi
     echo "fake claude: resolved conflicts"
     ;;
@@ -660,36 +654,6 @@ func TestConflictResolver_ChangesOutsideConflictedPaths(t *testing.T) {
 	assert.Assert(t, !assertRestackStateExists(t, tempDir))
 	equalLines(t, fileOnBranch(t, tempDir, "topic-a", "file.txt"), "line1\nline2-from-main\nline2-from-a")
 	assert.Assert(t, strings.Contains(mustExecOutput(tempDir, "git", "status", "--porcelain"), "?? helper.txt"), "helper.txt should be left untracked")
-}
-
-func TestConflictResolver_OverwritingDirtyFilesStops(t *testing.T) {
-	t.Parallel()
-
-	tempDir := t.TempDir()
-	opts, _ := setupFakeClaude(t, tempDir, "clobber")
-	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go", opts...)
-
-	setupSingleConflictRepo(t, tempDir)
-	trackSingleConflictRepo(t, cli)
-
-	// An untracked file and an ignored file exist before the resolver runs.
-	// Their status codes ("??" and "!!") don't change when they're overwritten,
-	// so yas must compare their contents, not just their status.
-	testutil.ExecOrFail(t, tempDir, `
-		echo "my notes" > notes.txt
-		echo "secret.env" >> .git/info/exclude
-		echo "shh" > secret.env
-	`)
-
-	result := cli.Run("restack", "--all", "--conflict-resolver=claude", "--after-resolve=continue")
-	assert.Equal(t, result.ExitCode(), 1)
-	assert.Assert(t, result.StderrContains("changed files outside the conflicted paths"), "stderr: %s", result.Stderr())
-	assert.Assert(t, result.StderrContains("- notes.txt"), "stderr: %s", result.Stderr())
-	assert.Assert(t, result.StderrContains("- secret.env"), "stderr: %s", result.Stderr())
-	assert.Assert(t, assertRestackStateExists(t, tempDir))
-
-	// Nothing staged; the user decides what belongs.
-	equalLines(t, mustExecOutput(tempDir, "git", "diff", "--name-only", "--diff-filter=U"), "file.txt")
 }
 
 func TestConflictResolver_CustomMarkerSize(t *testing.T) {
