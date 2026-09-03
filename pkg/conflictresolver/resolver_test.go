@@ -278,35 +278,6 @@ echo resolved > conflicted.txt
 	assert.NilError(t, err)
 	assert.Equal(t, string(content), "resolved\n")
 
-	// GIT_* variables must not leak into the resolver, otherwise its git
-	// commands could inspect a different repository than req.Dir.
-	envScript := `#!/bin/sh
-printf '%s|%s|%s' "$GIT_DIR" "$GIT_WORK_TREE" "$KEEP_ME" > "$0.env"
-`
-	assert.NilError(t, os.WriteFile(filepath.Join(binDir, "env-claude"), []byte(envScript), 0o755))
-
-	// t.Setenv is incompatible with t.Parallel, so run in a subprocess-free
-	// way by temporarily setting the variables ourselves.
-	for _, kv := range [][2]string{{"GIT_DIR", "/elsewhere/.git"}, {"GIT_WORK_TREE", "/elsewhere"}, {"KEEP_ME", "kept"}} {
-		prev, had := os.LookupEnv(kv[0])
-		assert.NilError(t, os.Setenv(kv[0], kv[1]))
-
-		defer func() {
-			if had {
-				_ = os.Setenv(kv[0], prev)
-			} else {
-				_ = os.Unsetenv(kv[0])
-			}
-		}()
-	}
-
-	e := &conflictresolver.Claude{Binary: filepath.Join(binDir, "env-claude")}
-	assert.NilError(t, e.Resolve(conflictresolver.Request{Dir: workDir, Files: []string{"conflicted.txt"}}))
-
-	env, err := os.ReadFile(filepath.Join(binDir, "env-claude.env"))
-	assert.NilError(t, err)
-	assert.Equal(t, string(env), "||kept", "GIT_* stripped, other variables preserved")
-
 	// A failing tool surfaces as an error.
 	failing := `#!/bin/sh
 echo "boom" >&2
@@ -317,6 +288,35 @@ exit 3
 	f := &conflictresolver.Claude{Binary: filepath.Join(binDir, "failing-claude")}
 	err = f.Resolve(conflictresolver.Request{Dir: workDir, Files: []string{"conflicted.txt"}})
 	assert.ErrorContains(t, err, "exited with an error")
+}
+
+// Not parallel: t.Setenv mutates the process environment, which would race
+// with other tests that launch git.
+func TestClaude_Resolve_StripsGitEnv(t *testing.T) {
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	assert.NilError(t, os.MkdirAll(binDir, 0o755))
+
+	workDir := filepath.Join(dir, "work")
+	assert.NilError(t, os.MkdirAll(workDir, 0o755))
+
+	// GIT_* variables must not leak into the resolver, otherwise its git
+	// commands could inspect a different repository than req.Dir.
+	envScript := `#!/bin/sh
+printf '%s|%s|%s' "$GIT_DIR" "$GIT_WORK_TREE" "$KEEP_ME" > "$0.env"
+`
+	assert.NilError(t, os.WriteFile(filepath.Join(binDir, "env-claude"), []byte(envScript), 0o755))
+
+	t.Setenv("GIT_DIR", "/elsewhere/.git")
+	t.Setenv("GIT_WORK_TREE", "/elsewhere")
+	t.Setenv("KEEP_ME", "kept")
+
+	e := &conflictresolver.Claude{Binary: filepath.Join(binDir, "env-claude")}
+	assert.NilError(t, e.Resolve(conflictresolver.Request{Dir: workDir, Files: []string{"conflicted.txt"}}))
+
+	env, err := os.ReadFile(filepath.Join(binDir, "env-claude.env"))
+	assert.NilError(t, err)
+	assert.Equal(t, string(env), "||kept", "GIT_* stripped, other variables preserved")
 }
 
 func TestSnapshotAndUnverifiableFiles(t *testing.T) {
