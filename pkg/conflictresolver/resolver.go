@@ -9,7 +9,6 @@ package conflictresolver
 import (
 	"bufio"
 	"bytes"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -257,8 +256,10 @@ type FileState struct {
 	// modify/delete conflict).
 	Exists bool
 	// IsSymlink is true when the path is a symbolic link. Git stages the link
-	// target, not the file it points to, so Sum covers the target string.
+	// value, not the file it points to, so LinkTarget is what is compared.
 	IsSymlink bool
+	// LinkTarget is the link value when IsSymlink is true.
+	LinkTarget string
 	// IsDir is true when the path is a directory, which is how a conflicted
 	// submodule (gitlink) appears in the working tree. Its contents are not
 	// hashed: git stages the commit checked out inside it, held in Gitlink.
@@ -267,14 +268,16 @@ type FileState struct {
 	// `git add` would stage), or empty when the directory is not an
 	// initialised submodule.
 	Gitlink string
-	// Executable is true when a regular file has any execute bit set. Git
-	// tracks only that bit, and a conflict can be about the mode alone (both
-	// sides identical except one is executable), so a mode change counts as
-	// a resolution.
+	// Executable is true when a regular file has the owner execute bit set,
+	// which is the only mode bit git records (100755 vs 100644). A conflict
+	// can be about the mode alone (both sides identical except one is
+	// executable), so a change here counts as a resolution.
 	Executable bool
-	// Sum is the SHA-256 of the file contents, or of the link target for a
-	// symlink (zero when Exists is false or IsDir is true).
-	Sum [sha256.Size]byte
+	// Blob is the id of the blob git would stage for a regular file, i.e.
+	// its contents after clean filters and line-ending conversion. Comparing
+	// this rather than raw bytes means a change git would normalise away
+	// (say LF to CRLF under core.autocrlf) is not mistaken for a resolution.
+	Blob string
 	// HasMarkers is true when the file contained textual conflict markers, i.e.
 	// its resolution can later be verified by checking the markers are gone.
 	HasMarkers bool
@@ -289,7 +292,7 @@ func SnapshotFiles(dir string, files []string) (map[string]FileState, error) {
 	for _, file := range files {
 		path := filepath.Join(dir, file)
 
-		state, err := snapshotFile(path)
+		state, err := snapshotFile(dir, file)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read %s: %w", file, err)
 		}
@@ -307,15 +310,20 @@ func SnapshotFiles(dir string, files []string) (map[string]FileState, error) {
 	return states, nil
 }
 
-// sameContent reports whether two snapshots describe the same working-tree
-// entry as git would stage it (existence, type, executable bit and bytes),
-// ignoring the marker bookkeeping.
+// sameContent reports whether two snapshots describe the same entry as git
+// would stage it (existence, type, executable bit and blob), ignoring the
+// marker bookkeeping.
 func (s FileState) sameContent(other FileState) bool {
 	return s.Exists == other.Exists && s.IsSymlink == other.IsSymlink && s.IsDir == other.IsDir &&
-		s.Gitlink == other.Gitlink && s.Executable == other.Executable && s.Sum == other.Sum
+		s.LinkTarget == other.LinkTarget && s.Gitlink == other.Gitlink &&
+		s.Executable == other.Executable && s.Blob == other.Blob
 }
 
-func snapshotFile(path string) (FileState, error) {
+// snapshotFile describes file (relative to dir) the way `git add` would see
+// it.
+func snapshotFile(dir, file string) (FileState, error) {
+	path := filepath.Join(dir, file)
+
 	// Lstat so a symlink is described by its own link value rather than by
 	// whatever it currently points at.
 	info, err := os.Lstat(path)
@@ -336,7 +344,7 @@ func snapshotFile(path string) (FileState, error) {
 		}
 
 		state.IsSymlink = true
-		state.Sum = sha256.Sum256([]byte(target))
+		state.LinkTarget = target
 
 		return state, nil
 	}
@@ -356,22 +364,31 @@ func snapshotFile(path string) (FileState, error) {
 		return state, nil
 	}
 
-	state.Executable = info.Mode()&0o111 != 0
+	state.Executable = info.Mode()&0o100 != 0
 
-	f, err := os.Open(path)
+	state.Blob, err = blobID(dir, file)
 	if err != nil {
 		return FileState{}, err
 	}
-	defer f.Close()
-
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return FileState{}, err
-	}
-
-	copy(state.Sum[:], h.Sum(nil))
 
 	return state, nil
+}
+
+// blobID returns the id of the blob `git add` would create for file (relative
+// to dir): its contents after the clean filters and end-of-line conversion
+// configured for that path. Outside a repository no filters apply and the raw
+// bytes are hashed.
+func blobID(dir, file string) (string, error) {
+	out, err := xexec.Command("git", "hash-object", "--", file).
+		WithWorkingDir(dir).
+		WithEnvVars(gitexec.CleanedGitEnv()).
+		WithStdout(nil).
+		Output()
+	if err != nil {
+		return "", fmt.Errorf("git hash-object failed: %w", err)
+	}
+
+	return strings.TrimSpace(string(out)), nil
 }
 
 // gitlinkCommit returns the commit checked out in the submodule at dir, i.e.
@@ -417,7 +434,7 @@ func UnverifiableFiles(dir string, files []string, before map[string]FileState) 
 			continue
 		}
 
-		now, err := snapshotFile(filepath.Join(dir, file))
+		now, err := snapshotFile(dir, file)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read %s: %w", file, err)
 		}

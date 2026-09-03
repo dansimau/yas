@@ -360,13 +360,22 @@ func TestSnapshotAndUnverifiableFiles(t *testing.T) {
 	write("textual.txt", "ours and theirs\n")
 	write("touched.txt", "resolved by the tool\n")
 	assert.NilError(t, os.Remove(filepath.Join(dir, "removed.txt")))
+
+	// Only the owner execute bit matters to git: g+x alone changes nothing
+	// it would stage.
+	assert.NilError(t, os.Chmod(filepath.Join(dir, "chmodded.txt"), 0o654))
+
+	unverifiable, err := conflictresolver.UnverifiableFiles(dir, []string{"chmodded.txt"}, before)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, unverifiable, []string{"chmodded.txt"})
+
 	assert.NilError(t, os.Chmod(filepath.Join(dir, "chmodded.txt"), 0o755))
 
 	// Editing inside the submodule's checkout is not a resolution of the
 	// gitlink conflict, so the directory still counts as untouched.
 	write("submodule/inner.txt", "edited by the tool\n")
 
-	unverifiable, err := conflictresolver.UnverifiableFiles(dir, files, before)
+	unverifiable, err = conflictresolver.UnverifiableFiles(dir, files, before)
 	assert.NilError(t, err)
 	assert.DeepEqual(t, unverifiable, []string{"binary.bin", "kept.txt", "gone.txt", "submodule"})
 
@@ -378,6 +387,38 @@ func TestSnapshotAndUnverifiableFiles(t *testing.T) {
 
 	// Files the snapshot doesn't know about are ignored rather than flagged.
 	unverifiable, err = conflictresolver.UnverifiableFiles(dir, []string{"unknown.txt"}, before)
+	assert.NilError(t, err)
+	assert.Equal(t, len(unverifiable), 0)
+}
+
+func TestSnapshotFiles_UsesGitNormalisedContent(t *testing.T) {
+	t.Parallel()
+
+	// In a repository with core.autocrlf=input, git stages LF regardless of
+	// the line endings in the working tree. A resolver that merely rewrites
+	// a markerless file with CRLF has not changed what git would stage, so
+	// the conflict is still unresolved.
+	dir := t.TempDir()
+	testutil.ExecOrFail(t, dir, `
+		git init -q .
+		git config core.autocrlf input
+		printf 'kept\nas is\n' > kept.txt
+	`)
+
+	before, err := conflictresolver.SnapshotFiles(dir, []string{"kept.txt"})
+	assert.NilError(t, err)
+	assert.Assert(t, before["kept.txt"].Blob != "")
+
+	assert.NilError(t, os.WriteFile(filepath.Join(dir, "kept.txt"), []byte("kept\r\nas is\r\n"), 0o644))
+
+	unverifiable, err := conflictresolver.UnverifiableFiles(dir, []string{"kept.txt"}, before)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, unverifiable, []string{"kept.txt"})
+
+	// A real content change is still seen through the normalisation.
+	assert.NilError(t, os.WriteFile(filepath.Join(dir, "kept.txt"), []byte("kept\r\nchanged\r\n"), 0o644))
+
+	unverifiable, err = conflictresolver.UnverifiableFiles(dir, []string{"kept.txt"}, before)
 	assert.NilError(t, err)
 	assert.Equal(t, len(unverifiable), 0)
 }
