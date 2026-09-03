@@ -331,6 +331,7 @@ func TestSnapshotAndUnverifiableFiles(t *testing.T) {
 	write("binary.bin", "\x00\x01\x02")
 	write("kept.txt", "content from the modifying side\n")
 	write("touched.txt", "as git left it\n")
+	write("chmodded.txt", "same bytes on both sides\n")
 	write("removed.txt", "will be deleted by the resolver\n")
 	// "gone.txt" never existed in the working tree (deleted side of a
 	// modify/delete conflict that git resolved towards the deletion).
@@ -338,7 +339,7 @@ func TestSnapshotAndUnverifiableFiles(t *testing.T) {
 	assert.NilError(t, os.Mkdir(filepath.Join(dir, "submodule"), 0o755))
 	write("submodule/inner.txt", "checked-out submodule content\n")
 
-	files := []string{"textual.txt", "binary.bin", "kept.txt", "touched.txt", "removed.txt", "gone.txt", "submodule"}
+	files := []string{"textual.txt", "binary.bin", "kept.txt", "touched.txt", "chmodded.txt", "removed.txt", "gone.txt", "submodule"}
 
 	before, err := conflictresolver.SnapshotFiles(dir, files)
 	assert.NilError(t, err)
@@ -346,16 +347,20 @@ func TestSnapshotAndUnverifiableFiles(t *testing.T) {
 	assert.Assert(t, !before["binary.bin"].HasMarkers)
 	assert.Assert(t, before["binary.bin"].Exists)
 	assert.Assert(t, !before["gone.txt"].Exists)
+	assert.Assert(t, !before["chmodded.txt"].Executable)
 	assert.Assert(t, before["submodule"].Exists)
 	assert.Assert(t, before["submodule"].IsDir)
 	assert.Assert(t, !before["submodule"].HasMarkers)
 	assert.Equal(t, before["submodule"].Gitlink, "", "a plain directory has no gitlink commit")
 
 	// Simulate a resolver: fixes the textual conflict, rewrites touched.txt,
-	// deletes removed.txt, leaves the rest alone.
+	// deletes removed.txt, makes chmodded.txt executable (a mode-only
+	// add/add conflict resolved by picking the executable side) and leaves
+	// the rest alone.
 	write("textual.txt", "ours and theirs\n")
 	write("touched.txt", "resolved by the tool\n")
 	assert.NilError(t, os.Remove(filepath.Join(dir, "removed.txt")))
+	assert.NilError(t, os.Chmod(filepath.Join(dir, "chmodded.txt"), 0o755))
 
 	// Editing inside the submodule's checkout is not a resolution of the
 	// gitlink conflict, so the directory still counts as untouched.

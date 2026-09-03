@@ -267,6 +267,11 @@ type FileState struct {
 	// `git add` would stage), or empty when the directory is not an
 	// initialised submodule.
 	Gitlink string
+	// Executable is true when a regular file has any execute bit set. Git
+	// tracks only that bit, and a conflict can be about the mode alone (both
+	// sides identical except one is executable), so a mode change counts as
+	// a resolution.
+	Executable bool
 	// Sum is the SHA-256 of the file contents, or of the link target for a
 	// symlink (zero when Exists is false or IsDir is true).
 	Sum [sha256.Size]byte
@@ -303,10 +308,11 @@ func SnapshotFiles(dir string, files []string) (map[string]FileState, error) {
 }
 
 // sameContent reports whether two snapshots describe the same working-tree
-// entry (existence, type and bytes), ignoring the marker bookkeeping.
+// entry as git would stage it (existence, type, executable bit and bytes),
+// ignoring the marker bookkeeping.
 func (s FileState) sameContent(other FileState) bool {
 	return s.Exists == other.Exists && s.IsSymlink == other.IsSymlink && s.IsDir == other.IsDir &&
-		s.Gitlink == other.Gitlink && s.Sum == other.Sum
+		s.Gitlink == other.Gitlink && s.Executable == other.Executable && s.Sum == other.Sum
 }
 
 func snapshotFile(path string) (FileState, error) {
@@ -349,6 +355,8 @@ func snapshotFile(path string) (FileState, error) {
 
 		return state, nil
 	}
+
+	state.Executable = info.Mode()&0o111 != 0
 
 	f, err := os.Open(path)
 	if err != nil {
