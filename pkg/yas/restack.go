@@ -40,8 +40,9 @@ func (yas *YAS) Restack(branch string, dryRun bool, resolution ConflictResolutio
 	}
 
 	// Resolve and validate conflict handling up front so a bad setting or a
-	// missing tool fails before any branch is touched.
-	res, err := yas.effectiveConflictResolution(resolution)
+	// missing tool fails before any branch is touched. A dry run never
+	// launches the resolver, so only the settings themselves are checked.
+	res, err := yas.ResolveConflictResolution(resolution, dryRun)
 	if err != nil {
 		return err
 	}

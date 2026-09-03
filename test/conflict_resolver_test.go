@@ -25,6 +25,8 @@ import (
 //   - drop-attrs: like resolve, but afterwards remove any conflict-marker-size
 //     line from .gitattributes (the awk only strips 7-character markers, so a
 //     file using a longer size keeps its conflict)
+//   - keep-markers: like resolve for every file except file.txt, to which a
+//     line is appended while its conflict markers are left in place
 //   - noop: exit successfully without touching anything
 //   - fail: exit non-zero
 const fakeClaudeScript = `#!/bin/sh
@@ -37,8 +39,12 @@ const fakeClaudeScript = `#!/bin/sh
 } >> "$FAKE_CLAUDE_LOG"
 
 case "${FAKE_CLAUDE_MODE:-resolve}" in
-  resolve|extra|clobber|drop-attrs)
+  resolve|extra|clobber|drop-attrs|keep-markers)
     for f in $(git diff --name-only --diff-filter=U); do
+      if [ "$FAKE_CLAUDE_MODE" = "keep-markers" ] && [ "$f" = "file.txt" ]; then
+        echo "tweaked but not resolved" >> "$f"
+        continue
+      fi
       awk '
         /^<<<<<<< / { next }
         /^\|\|\|\|\|\|\| / { base = 1; next }
@@ -720,6 +726,159 @@ func TestConflictResolver_MarkerSizeFromBeforeResolution(t *testing.T) {
 	// Nothing was staged or committed with markers in it.
 	equalLines(t, mustExecOutput(tempDir, "git", "diff", "--name-only", "--diff-filter=U"), ".gitattributes\nfile.txt")
 	equalLines(t, fileOnBranch(t, tempDir, "topic-a", "file.txt"), "line1\nline2-from-a")
+}
+
+// setupDisagreeingAttributesRepo makes .gitattributes conflict such that the
+// two sides set different conflict-marker-size values for file.txt. Git writes
+// file.txt's markers using HEAD's value (7), but `git check-attr` on the
+// conflicted working-tree .gitattributes sees the other side's line last and
+// reports 12.
+func setupDisagreeingAttributesRepo(t *testing.T, tempDir string) {
+	t.Helper()
+
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+
+		echo "*.md text" > .gitattributes
+		echo "line1" > file.txt
+		git add -A
+		git commit -m "main-0"
+
+		git checkout -b topic-a
+		echo "line2-from-a" >> file.txt
+		echo "file.txt conflict-marker-size=12" >> .gitattributes
+		git add -A
+		git commit -m "topic-a-0"
+
+		git checkout main
+		echo "line2-from-main" >> file.txt
+		echo "file.txt conflict-marker-size=7" >> .gitattributes
+		git add -A
+		git commit -m "main-1"
+
+		git checkout topic-a
+	`)
+}
+
+func TestConflictResolver_MarkerSizeReadFromFile(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	opts, logPath := setupFakeClaude(t, tempDir, "keep-markers")
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go", opts...)
+
+	setupDisagreeingAttributesRepo(t, tempDir)
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
+
+	// The resolver resolves .gitattributes (keeping both lines, so the
+	// attribute still reads 12 afterwards) and edits file.txt without
+	// removing its 7-character markers. Trusting the attribute would treat
+	// file.txt as markerless and, since its bytes changed, accept it.
+	result := cli.Run("restack", "--all", "--conflict-resolver=claude", "--after-resolve=continue")
+	assert.Equal(t, result.ExitCode(), 1)
+	assert.Assert(t, result.StderrContains("left conflict markers in:"), "stderr: %s", result.Stderr())
+	assert.Assert(t, result.StderrContains("- file.txt"), "stderr: %s", result.Stderr())
+	assert.Assert(t, assertRestackStateExists(t, tempDir))
+	assert.Equal(t, len(fakeClaudeCalls(t, logPath)), 1)
+
+	// Confirm the premise: the file has 7-character markers while the
+	// attribute lookup claims 12.
+	content, err := os.ReadFile(filepath.Join(tempDir, "file.txt"))
+	assert.NilError(t, err)
+	assert.Assert(t, strings.Contains(string(content), "\n<<<<<<< "), "file.txt should hold 7-character markers: %s", content)
+	assert.Assert(t, strings.Contains(mustExecOutput(tempDir, "git", "check-attr", "conflict-marker-size", "file.txt"), ": 12"))
+
+	equalLines(t, fileOnBranch(t, tempDir, "topic-a", "file.txt"), "line1\nline2-from-a")
+}
+
+func TestConflictResolver_SubmoduleConflict(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	opts, logPath := setupFakeClaude(t, tempDir, "noop")
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go", opts...)
+
+	// A submodule whose two branches diverge.
+	subDir := t.TempDir()
+	testutil.ExecOrFail(t, subDir, `
+		git init --initial-branch=main
+		echo "s0" > s.txt
+		git add s.txt
+		git commit -m "s0"
+		git checkout -b side
+		echo "s2" > s.txt
+		git commit -am "s2"
+		git checkout main
+		echo "s1" > s.txt
+		git commit -am "s1"
+	`)
+
+	// main and topic-a each point the submodule at a different commit.
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+		echo "line1" > file.txt
+		git add file.txt
+		git commit -m "main-0"
+		git -c protocol.file.allow=always submodule add -q "`+subDir+`" sub
+		git commit -qm "add submodule"
+
+		git checkout -b topic-a
+		git -C sub checkout -q origin/side
+		git add sub
+		git commit -m "topic-a-0"
+
+		git checkout main
+		git -C sub checkout -q origin/main~1
+		git add sub
+		git commit -m "main-1"
+
+		git checkout topic-a
+	`)
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
+
+	// The conflicted path is a directory. The resolver is still invoked, and
+	// since a gitlink has no markers and the tool left it alone, yas stops
+	// for manual resolution rather than staging one side.
+	result := cli.Run("restack", "--all", "--conflict-resolver=claude", "--after-resolve=continue")
+	assert.Equal(t, result.ExitCode(), 1)
+	assert.Assert(t, result.StderrContains("cannot be verified"), "stderr: %s", result.Stderr())
+	assert.Assert(t, result.StderrContains("- sub"), "stderr: %s", result.Stderr())
+	assert.Assert(t, assertRestackStateExists(t, tempDir))
+	assert.Equal(t, len(fakeClaudeCalls(t, logPath)), 1)
+	equalLines(t, mustExecOutput(tempDir, "git", "diff", "--name-only", "--diff-filter=U"), "sub")
+}
+
+func TestConflictResolver_DryRunDoesNotNeedTool(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	setupSingleConflictRepo(t, tempDir)
+
+	noTool := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+		gocmdtester.WithEnv("PATH", gitOnlyPath(t, tempDir)),
+	)
+	trackSingleConflictRepo(t, noTool)
+
+	// A dry run never launches the resolver, so its absence must not stop
+	// the plan from being shown...
+	result := noTool.Run("restack", "--all", "--dry-run", "--conflict-resolver=claude")
+	assert.Equal(t, result.ExitCode(), 0, "stderr: %s", result.Stderr())
+	assert.Assert(t, result.StdoutContains("Would restack"), "stdout: %s", result.Stdout())
+	assert.Assert(t, !assertRestackStateExists(t, tempDir))
+
+	// ...but the settings themselves are still validated.
+	result = noTool.Run("restack", "--all", "--dry-run", "--conflict-resolver=bogus")
+	assert.Equal(t, result.ExitCode(), 1)
+	assert.Assert(t, result.StderrContains(`invalid conflict-resolver "bogus"`), "stderr: %s", result.Stderr())
+
+	// A real run still reports the missing tool before touching anything.
+	result = noTool.Run("restack", "--all", "--conflict-resolver=claude")
+	assert.Equal(t, result.ExitCode(), 1)
+	assert.Assert(t, result.StderrContains(`requires the "claude" command`), "stderr: %s", result.Stderr())
+	assert.Assert(t, !assertRestackStateExists(t, tempDir))
 }
 
 func TestConflictResolver_SyncValidatesBeforeDoingAnything(t *testing.T) {

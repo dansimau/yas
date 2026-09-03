@@ -86,7 +86,7 @@ func (c *syncCmd) Execute(args []string) error {
 	resolution := c.conflictResolution()
 
 	if c.Restack {
-		resolved, err := yasInstance.ResolveConflictResolution(resolution)
+		resolved, err := yasInstance.ResolveConflictResolution(resolution, cmd.DryRun)
 		if err != nil {
 			return NewError(err.Error())
 		}

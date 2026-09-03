@@ -141,12 +141,8 @@ func HasConflictMarkers(path string, markerSize int) (bool, error) {
 		markerSize = DefaultMarkerSize
 	}
 
-	f, err := os.Open(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return false, nil
-		}
-
+	f, err := openRegularFile(path)
+	if err != nil || f == nil {
 		return false, err
 	}
 	defer f.Close()
@@ -184,6 +180,102 @@ func isConflictMarker(line []byte, markerSize int) bool {
 	}
 
 	return false
+}
+
+// markerRun returns the length of the run of ch that line starts with, if the
+// run is followed by end of line or a space (the shape of every git conflict
+// marker), and 0 otherwise.
+func markerRun(line []byte, ch byte) int {
+	n := 0
+	for n < len(line) && line[n] == ch {
+		n++
+	}
+
+	if n == 0 || (n < len(line) && line[n] != ' ') {
+		return 0
+	}
+
+	return n
+}
+
+// DetectMarkerSize scans the file at path for git conflict markers and returns
+// the marker length actually present: a run of "<" opening a hunk with a run of
+// ">" of the same length closing one. It returns 0 when the file holds no
+// recognisable markers (including when it is missing or not a regular file).
+//
+// If several lengths qualify, preferred wins when it is one of them and the
+// longest otherwise, since a long run is the least likely to be ordinary
+// content.
+//
+// Reading the size off the file is more reliable than asking git for the
+// conflict-marker-size attribute: when .gitattributes is itself conflicted,
+// `git check-attr` parses the marker-riddled working-tree copy and can report
+// a size other than the one git used when it wrote the file.
+func DetectMarkerSize(path string, preferred int) (int, error) {
+	f, err := openRegularFile(path)
+	if err != nil || f == nil {
+		return 0, err
+	}
+	defer f.Close()
+
+	opens := map[int]bool{}
+	closes := map[int]bool{}
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+
+		if n := markerRun(line, '<'); n > 0 {
+			opens[n] = true
+		} else if n := markerRun(line, '>'); n > 0 {
+			closes[n] = true
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return 0, err
+	}
+
+	best := 0
+
+	for n := range opens {
+		if !closes[n] {
+			continue
+		}
+
+		if n == preferred {
+			return n, nil
+		}
+
+		if n > best {
+			best = n
+		}
+	}
+
+	return best, nil
+}
+
+// openRegularFile opens path for reading if it is a regular file. It returns a
+// nil file (and nil error) when the path is missing or is not a regular file,
+// e.g. a directory standing in for a conflicted submodule gitlink, or a
+// symlink; neither can hold conflict markers.
+func openRegularFile(path string) (*os.File, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+
+		return nil, err
+	}
+
+	if !info.Mode().IsRegular() {
+		return nil, nil
+	}
+
+	return os.Open(path)
 }
 
 // MarkerSizeFunc returns the conflict marker length in effect for a file
@@ -229,21 +321,31 @@ type FileState struct {
 	// IsSymlink is true when the path is a symbolic link. Git stages the link
 	// target, not the file it points to, so Sum covers the target string.
 	IsSymlink bool
+	// IsDir is true when the path is a directory, which is how a conflicted
+	// submodule (gitlink) appears in the working tree. Its contents are not
+	// hashed: git stages the recorded commit, not the files.
+	IsDir bool
 	// Sum is the SHA-256 of the file contents, or of the link target for a
-	// symlink (zero when Exists is false).
+	// symlink (zero when Exists is false or IsDir is true).
 	Sum [sha256.Size]byte
 	// HasMarkers is true when the file contained textual conflict markers, i.e.
 	// its resolution can later be verified by checking the markers are gone.
 	HasMarkers bool
-	// MarkerSize is the conflict marker length git used for this file, as
-	// determined before the resolver ran.
+	// MarkerSize is the conflict marker length in effect for this file, as
+	// determined before the resolver ran: read from the markers themselves
+	// when the file has any, otherwise from the caller's lookup.
 	MarkerSize int
 }
 
 // SnapshotFiles records the state of each file (relative to dir) so that a
 // resolver's work can be verified afterwards with FilesWithConflictMarkers and
-// UnverifiableFiles. markerSize gives the conflict marker length per file and
-// may be nil, in which case DefaultMarkerSize is used for every file.
+// UnverifiableFiles.
+//
+// The conflict marker size for each file is read from the markers git wrote
+// (see DetectMarkerSize). markerSize, which may be nil, supplies the expected
+// size per file (e.g. from the conflict-marker-size attribute); it breaks ties
+// when a file could be read either way and is recorded for files without
+// markers.
 func SnapshotFiles(dir string, files []string, markerSize MarkerSizeFunc) (map[string]FileState, error) {
 	states := make(map[string]FileState, len(files))
 
@@ -270,15 +372,18 @@ func SnapshotFiles(dir string, files []string, markerSize MarkerSizeFunc) (map[s
 			return nil, fmt.Errorf("failed to read %s: %w", file, err)
 		}
 
-		state.MarkerSize = size
+		// Only regular files can carry markers; a symlink's or gitlink's
+		// resolution is verified by its value changing instead.
+		detected, err := DetectMarkerSize(path, size)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check %s for conflict markers: %w", file, err)
+		}
 
-		// Only regular files can carry markers; a symlink's resolution is
-		// verified by its link target changing.
-		if state.Exists && !state.IsSymlink {
-			state.HasMarkers, err = HasConflictMarkers(path, size)
-			if err != nil {
-				return nil, fmt.Errorf("failed to check %s for conflict markers: %w", file, err)
-			}
+		if detected > 0 {
+			state.HasMarkers = true
+			state.MarkerSize = detected
+		} else {
+			state.MarkerSize = size
 		}
 
 		states[file] = state
@@ -290,7 +395,7 @@ func SnapshotFiles(dir string, files []string, markerSize MarkerSizeFunc) (map[s
 // sameContent reports whether two snapshots describe the same working-tree
 // entry (existence, type and bytes), ignoring the marker bookkeeping.
 func (s FileState) sameContent(other FileState) bool {
-	return s.Exists == other.Exists && s.IsSymlink == other.IsSymlink && s.Sum == other.Sum
+	return s.Exists == other.Exists && s.IsSymlink == other.IsSymlink && s.IsDir == other.IsDir && s.Sum == other.Sum
 }
 
 func snapshotFile(path string) (FileState, error) {
@@ -319,6 +424,14 @@ func snapshotFile(path string) (FileState, error) {
 		return state, nil
 	}
 
+	if info.IsDir() {
+		// A conflicted submodule: git stages the gitlink commit, not the
+		// directory's contents, so there is nothing to hash.
+		state.IsDir = true
+
+		return state, nil
+	}
+
 	f, err := os.Open(path)
 	if err != nil {
 		return FileState{}, err
@@ -336,9 +449,9 @@ func snapshotFile(path string) (FileState, error) {
 }
 
 // UnverifiableFiles returns the files whose resolution cannot be confirmed:
-// git left them without textual conflict markers (binary content, or a
-// modify/delete or add/add conflict) and the resolver did not change or
-// delete them. Such files would otherwise be staged exactly as git left them,
+// git left them without textual conflict markers (binary content, a
+// modify/delete or add/add conflict, a symlink or a submodule) and the
+// resolver did not change or delete them. Such files would otherwise be staged exactly as git left them,
 // silently taking one side of the conflict.
 func UnverifiableFiles(dir string, files []string, before map[string]FileState) ([]string, error) {
 	var unverifiable []string

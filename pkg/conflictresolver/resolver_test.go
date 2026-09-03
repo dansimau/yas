@@ -130,6 +130,66 @@ func TestHasConflictMarkers(t *testing.T) {
 	})
 }
 
+func TestDetectMarkerSize(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	write := func(name, content string) string {
+		path := filepath.Join(dir, name)
+		assert.NilError(t, os.WriteFile(path, []byte(content), 0o644))
+
+		return path
+	}
+
+	seven := write("seven.txt", "a\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> topic\nb\n")
+	twelve := write("twelve.txt", "<<<<<<<<<<<< HEAD\nours\n||||||||||||  base\nbase\n============\ntheirs\n>>>>>>>>>>>> topic\n")
+	clean := write("clean.txt", "no conflict here\n> a quote\n<<< not a marker\n")
+	both := write("both.txt", "<<<<<<< HEAD\n<<<<<<<<<<<< HEAD\nx\n>>>>>>>>>>>> topic\n>>>>>>> topic\n")
+	openOnly := write("open-only.txt", "<<<<<<< HEAD\nx\n")
+
+	// The size comes from the file, whatever the attribute lookup claims.
+	for _, tc := range []struct {
+		path      string
+		preferred int
+		want      int
+	}{
+		{seven, 7, 7},
+		{seven, 12, 7},
+		{twelve, 7, 12},
+		{twelve, 12, 12},
+		{clean, 7, 0},
+		{openOnly, 7, 0},
+		// Ambiguous files: the preferred size wins when present, else the
+		// longest run.
+		{both, 7, 7},
+		{both, 12, 12},
+		{both, 9, 12},
+	} {
+		got, err := conflictresolver.DetectMarkerSize(tc.path, tc.preferred)
+		assert.NilError(t, err, tc.path)
+		assert.Equal(t, got, tc.want, "%s preferred=%d", filepath.Base(tc.path), tc.preferred)
+	}
+
+	// Missing files, directories and symlinks hold no markers.
+	got, err := conflictresolver.DetectMarkerSize(filepath.Join(dir, "missing.txt"), 7)
+	assert.NilError(t, err)
+	assert.Equal(t, got, 0)
+
+	assert.NilError(t, os.Mkdir(filepath.Join(dir, "submodule"), 0o755))
+	got, err = conflictresolver.DetectMarkerSize(filepath.Join(dir, "submodule"), 7)
+	assert.NilError(t, err)
+	assert.Equal(t, got, 0)
+
+	assert.NilError(t, os.Symlink("seven.txt", filepath.Join(dir, "link")))
+	got, err = conflictresolver.DetectMarkerSize(filepath.Join(dir, "link"), 7)
+	assert.NilError(t, err)
+	assert.Equal(t, got, 0)
+
+	hasMarkers, err := conflictresolver.HasConflictMarkers(filepath.Join(dir, "submodule"), 7)
+	assert.NilError(t, err)
+	assert.Assert(t, !hasMarkers)
+}
+
 func TestFilesWithConflictMarkers(t *testing.T) {
 	t.Parallel()
 
@@ -143,11 +203,12 @@ func TestFilesWithConflictMarkers(t *testing.T) {
 	assert.NilError(t, err)
 	assert.DeepEqual(t, remaining, []string{"bad.txt"})
 
-	// The per-file marker size recorded in the snapshot is honoured: with
-	// size 12 for bad.txt its 7-character markers no longer count, and
-	// big.txt's 12-character markers do.
+	// The per-file marker size recorded in the snapshot is honoured. It is
+	// read from the markers themselves: big.txt's 12-character markers count
+	// even though the lookup says 7, and bad.txt's 7-character ones count
+	// even though the lookup says 12.
 	sizeFor := func(file string) (int, error) {
-		if file == "bad.txt" || file == "big.txt" {
+		if file == "bad.txt" || file == "clean.txt" {
 			return 12, nil
 		}
 
@@ -157,11 +218,19 @@ func TestFilesWithConflictMarkers(t *testing.T) {
 	before, err := conflictresolver.SnapshotFiles(dir, []string{"clean.txt", "bad.txt", "big.txt"}, sizeFor)
 	assert.NilError(t, err)
 	assert.Equal(t, before["big.txt"].MarkerSize, 12)
-	assert.Equal(t, before["clean.txt"].MarkerSize, conflictresolver.DefaultMarkerSize)
+	assert.Equal(t, before["bad.txt"].MarkerSize, 7)
+	assert.Equal(t, before["clean.txt"].MarkerSize, 12, "a file without markers records the looked-up size")
 
 	remaining, err = conflictresolver.FilesWithConflictMarkers(dir, []string{"clean.txt", "bad.txt", "big.txt"}, before)
 	assert.NilError(t, err)
-	assert.DeepEqual(t, remaining, []string{"big.txt"})
+	assert.DeepEqual(t, remaining, []string{"bad.txt", "big.txt"})
+
+	// Once the markers are gone the recorded sizes still apply.
+	assert.NilError(t, os.WriteFile(filepath.Join(dir, "big.txt"), []byte("resolved\n"), 0o644))
+
+	remaining, err = conflictresolver.FilesWithConflictMarkers(dir, []string{"clean.txt", "bad.txt", "big.txt"}, before)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, remaining, []string{"bad.txt"})
 
 	_, err = conflictresolver.SnapshotFiles(dir, []string{"bad.txt"}, func(string) (int, error) {
 		return 0, errors.New("attr lookup failed")
@@ -315,8 +384,11 @@ func TestSnapshotAndUnverifiableFiles(t *testing.T) {
 	write("removed.txt", "will be deleted by the resolver\n")
 	// "gone.txt" never existed in the working tree (deleted side of a
 	// modify/delete conflict that git resolved towards the deletion).
+	// "submodule" is a directory: a conflicted gitlink.
+	assert.NilError(t, os.Mkdir(filepath.Join(dir, "submodule"), 0o755))
+	write("submodule/inner.txt", "checked-out submodule content\n")
 
-	files := []string{"textual.txt", "binary.bin", "kept.txt", "touched.txt", "removed.txt", "gone.txt"}
+	files := []string{"textual.txt", "binary.bin", "kept.txt", "touched.txt", "removed.txt", "gone.txt", "submodule"}
 
 	before, err := conflictresolver.SnapshotFiles(dir, files, nil)
 	assert.NilError(t, err)
@@ -324,6 +396,9 @@ func TestSnapshotAndUnverifiableFiles(t *testing.T) {
 	assert.Assert(t, !before["binary.bin"].HasMarkers)
 	assert.Assert(t, before["binary.bin"].Exists)
 	assert.Assert(t, !before["gone.txt"].Exists)
+	assert.Assert(t, before["submodule"].Exists)
+	assert.Assert(t, before["submodule"].IsDir)
+	assert.Assert(t, !before["submodule"].HasMarkers)
 
 	// Simulate a resolver: fixes the textual conflict, rewrites touched.txt,
 	// deletes removed.txt, leaves the rest alone.
@@ -331,9 +406,19 @@ func TestSnapshotAndUnverifiableFiles(t *testing.T) {
 	write("touched.txt", "resolved by the tool\n")
 	assert.NilError(t, os.Remove(filepath.Join(dir, "removed.txt")))
 
+	// Editing inside the submodule's checkout is not a resolution of the
+	// gitlink conflict, so the directory still counts as untouched.
+	write("submodule/inner.txt", "edited by the tool\n")
+
 	unverifiable, err := conflictresolver.UnverifiableFiles(dir, files, before)
 	assert.NilError(t, err)
-	assert.DeepEqual(t, unverifiable, []string{"binary.bin", "kept.txt", "gone.txt"})
+	assert.DeepEqual(t, unverifiable, []string{"binary.bin", "kept.txt", "gone.txt", "submodule"})
+
+	// Markers left in place after the resolver touches the file are still
+	// caught by the marker check, not by this one.
+	remaining, err := conflictresolver.FilesWithConflictMarkers(dir, files, before)
+	assert.NilError(t, err)
+	assert.Equal(t, len(remaining), 0)
 
 	// Files the snapshot doesn't know about are ignored rather than flagged.
 	unverifiable, err = conflictresolver.UnverifiableFiles(dir, []string{"unknown.txt"}, before)

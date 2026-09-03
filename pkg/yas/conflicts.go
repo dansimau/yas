@@ -65,10 +65,15 @@ func isValidAfterResolve(value string) bool {
 
 // ResolveConflictResolution returns the settings that would be used for a
 // restack started with override, after applying the repository config and
-// defaults, validating them and checking the chosen resolver is installed.
-// Commands that do other work before restacking (e.g. sync) call this first
-// so a bad setting fails before anything is touched.
-func (yas *YAS) ResolveConflictResolution(override ConflictResolution) (ConflictResolution, error) {
+// defaults and validating them. Unless dryRun is set it also checks the chosen
+// resolver is installed; a dry run never launches it. Commands that do other
+// work before restacking (e.g. sync) call this first so a bad setting fails
+// before anything is touched.
+func (yas *YAS) ResolveConflictResolution(override ConflictResolution, dryRun bool) (ConflictResolution, error) {
+	if dryRun {
+		return yas.resolveConflictResolution(override)
+	}
+
 	return yas.effectiveConflictResolution(override)
 }
 
@@ -195,8 +200,8 @@ func (yas *YAS) handleRebaseConflict(branch *gitexec.BranchContext, res Conflict
 		}
 
 		// Snapshot the files as git left them so the resolver's work can be
-		// verified afterwards. Marker length can be customised per path via
-		// .gitattributes, so ask git rather than assuming the default.
+		// verified afterwards. The marker length is read from the markers
+		// themselves; the conflict-marker-size attribute only breaks ties.
 		before, err := conflictresolver.SnapshotFiles(branch.Path(), files, branch.ConflictMarkerSize)
 		if err != nil {
 			return err
