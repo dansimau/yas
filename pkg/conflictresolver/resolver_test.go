@@ -1,7 +1,6 @@
 package conflictresolver_test
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,21 +74,29 @@ func TestHasConflictMarkers(t *testing.T) {
 		{"only-end-marker", "a\nb\n>>>>>>> theirs\n", true},
 		{"diff3-marker", "a\n||||||| base\nb\n", true},
 		{"bare-start-marker", "<<<<<<<\n", true},
+		{"no-trailing-newline", "a\n<<<<<<< HEAD", true},
+		// Markers written with a custom conflict-marker-size are longer runs
+		// and count regardless of their length.
+		{"twelve-chars", "a\n<<<<<<<<<<<< HEAD\nb\n============\nc\n>>>>>>>>>>>> theirs\n", true},
+		{"eight-chars", "<<<<<<<< HEAD\n", true},
+		{"very-long", strings.Repeat(">", 300) + " theirs\n", true},
 		// "=======" on its own is legitimate content (e.g. a Markdown setext
 		// heading underline) and must not count as a marker.
 		{"setext-heading", "Title\n=======\nbody\n", false},
-		// Marker-like text that isn't at the start of a line, or is longer
-		// than the 7-character marker, is not a marker.
+		// Runs shorter than git's default, text not at the start of a line,
+		// and runs not followed by a space are not markers.
+		{"six-chars", "<<<<<< HEAD\n", false},
 		{"marker-not-at-start", "x <<<<<<< y\n", false},
-		{"eight-chars", "<<<<<<<< not a marker\n", false},
-		{"no-trailing-newline", "a\n<<<<<<< HEAD", true},
+		{"run-then-text", "<<<<<<<HEAD\n", false},
+		{"markdown-quote", "> quoted\n>> nested\n", false},
+		{"python-prompt", ">>> print(1)\n", false},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := conflictresolver.HasConflictMarkers(write(tc.name, tc.content), conflictresolver.DefaultMarkerSize)
+			got, err := conflictresolver.HasConflictMarkers(write(tc.name, tc.content))
 			assert.NilError(t, err)
 			assert.Equal(t, got, tc.want)
 		})
@@ -98,116 +105,32 @@ func TestHasConflictMarkers(t *testing.T) {
 	t.Run("missing-file", func(t *testing.T) {
 		t.Parallel()
 
-		got, err := conflictresolver.HasConflictMarkers(filepath.Join(dir, "does-not-exist"), conflictresolver.DefaultMarkerSize)
+		got, err := conflictresolver.HasConflictMarkers(filepath.Join(dir, "does-not-exist"))
 		assert.NilError(t, err)
 		assert.Assert(t, !got)
 	})
 
-	t.Run("custom-marker-size", func(t *testing.T) {
+	t.Run("non-regular-files", func(t *testing.T) {
 		t.Parallel()
 
-		// With conflict-marker-size=12 git writes 12-character markers; the
-		// default 7-character run must not be treated as a marker and vice versa.
-		twelve := write("twelve", "a\n<<<<<<<<<<<< HEAD\nb\n============\nc\n>>>>>>>>>>>> theirs\n")
+		// Directories (conflicted gitlinks) and symlinks hold no markers,
+		// even when the link target does.
+		assert.NilError(t, os.Mkdir(filepath.Join(dir, "submodule"), 0o755))
 
-		got, err := conflictresolver.HasConflictMarkers(twelve, 12)
+		got, err := conflictresolver.HasConflictMarkers(filepath.Join(dir, "submodule"))
 		assert.NilError(t, err)
-		assert.Assert(t, got, "12-char markers should be detected with size 12")
+		assert.Assert(t, !got)
 
-		got, err = conflictresolver.HasConflictMarkers(twelve, conflictresolver.DefaultMarkerSize)
+		write("linked", "<<<<<<< HEAD\n")
+		assert.NilError(t, os.Symlink("linked", filepath.Join(dir, "link")))
+
+		got, err = conflictresolver.HasConflictMarkers(filepath.Join(dir, "link"))
 		assert.NilError(t, err)
-		assert.Assert(t, !got, "12-char markers are not 7-char markers")
-
-		seven := write("seven", "<<<<<<< HEAD\n")
-
-		got, err = conflictresolver.HasConflictMarkers(seven, 12)
-		assert.NilError(t, err)
-		assert.Assert(t, !got, "7-char markers are not 12-char markers")
-
-		// A non-positive size falls back to the default.
-		got, err = conflictresolver.HasConflictMarkers(seven, 0)
-		assert.NilError(t, err)
-		assert.Assert(t, got)
+		assert.Assert(t, !got)
 	})
 }
 
-func TestDetectMarkerSize(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	write := func(name, content string) string {
-		path := filepath.Join(dir, name)
-		assert.NilError(t, os.WriteFile(path, []byte(content), 0o644))
-
-		return path
-	}
-
-	seven := write("seven.txt", "a\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> topic\nb\n")
-	twelve := write("twelve.txt", "<<<<<<<<<<<< HEAD\nours\n||||||||||||  base\nbase\n============\ntheirs\n>>>>>>>>>>>> topic\n")
-	clean := write("clean.txt", "no conflict here\n> a quote\n<<< not a marker\n")
-	both := write("both.txt", "<<<<<<< HEAD\n<<<<<<<<<<<< HEAD\nx\n>>>>>>>>>>>> topic\n>>>>>>> topic\n")
-	openOnly := write("open-only.txt", "<<<<<<< HEAD\nx\n")
-
-	// The size comes from the file, whatever the attribute lookup claims.
-	for _, tc := range []struct {
-		path      string
-		preferred int
-		want      int
-	}{
-		{seven, 7, 7},
-		{seven, 12, 7},
-		{twelve, 7, 12},
-		{twelve, 12, 12},
-		{clean, 7, 0},
-		{openOnly, 7, 0},
-		// Ambiguous files: the preferred size wins when present, else the
-		// longest run.
-		{both, 7, 7},
-		{both, 12, 12},
-		{both, 9, 12},
-	} {
-		got, err := conflictresolver.DetectMarkerSize(tc.path, tc.preferred)
-		assert.NilError(t, err, tc.path)
-		assert.Equal(t, got, tc.want, "%s preferred=%d", filepath.Base(tc.path), tc.preferred)
-	}
-
-	// Missing files, directories and symlinks hold no markers.
-	got, err := conflictresolver.DetectMarkerSize(filepath.Join(dir, "missing.txt"), 7)
-	assert.NilError(t, err)
-	assert.Equal(t, got, 0)
-
-	assert.NilError(t, os.Mkdir(filepath.Join(dir, "submodule"), 0o755))
-	got, err = conflictresolver.DetectMarkerSize(filepath.Join(dir, "submodule"), 7)
-	assert.NilError(t, err)
-	assert.Equal(t, got, 0)
-
-	assert.NilError(t, os.Symlink("seven.txt", filepath.Join(dir, "link")))
-	got, err = conflictresolver.DetectMarkerSize(filepath.Join(dir, "link"), 7)
-	assert.NilError(t, err)
-	assert.Equal(t, got, 0)
-
-	hasMarkers, err := conflictresolver.HasConflictMarkers(filepath.Join(dir, "submodule"), 7)
-	assert.NilError(t, err)
-	assert.Assert(t, !hasMarkers)
-
-	// Runs longer than MaxMarkerSize are content, not markers, and an absurd
-	// requested size is treated as the default rather than allocated.
-	huge := write("huge.txt", strings.Repeat("<", 300)+" HEAD\nx\n"+strings.Repeat(">", 300)+" topic\n")
-
-	got, err = conflictresolver.DetectMarkerSize(huge, 300)
-	assert.NilError(t, err)
-	assert.Equal(t, got, 0)
-
-	hasMarkers, err = conflictresolver.HasConflictMarkers(seven, 4294967303)
-	assert.NilError(t, err)
-	assert.Assert(t, hasMarkers, "an out-of-range size falls back to the default")
-
-	hasMarkers, err = conflictresolver.HasConflictMarkers(huge, 4294967303)
-	assert.NilError(t, err)
-	assert.Assert(t, !hasMarkers)
-}
-
-func TestMarkerScan_LongLines(t *testing.T) {
+func TestHasConflictMarkers_LongLines(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -229,22 +152,18 @@ func TestMarkerScan_LongLines(t *testing.T) {
 	assert.NilError(t, err)
 	assert.NilError(t, f.Close())
 
-	hasMarkers, err := conflictresolver.HasConflictMarkers(path, conflictresolver.DefaultMarkerSize)
+	hasMarkers, err := conflictresolver.HasConflictMarkers(path)
 	assert.NilError(t, err)
 	assert.Assert(t, hasMarkers)
-
-	size, err := conflictresolver.DetectMarkerSize(path, conflictresolver.DefaultMarkerSize)
-	assert.NilError(t, err)
-	assert.Equal(t, size, 7)
 
 	// Only the long line, no newline at all: not an error, just no markers.
 	assert.NilError(t, os.WriteFile(filepath.Join(dir, "blob.bin"), chunk, 0o644))
 
-	hasMarkers, err = conflictresolver.HasConflictMarkers(filepath.Join(dir, "blob.bin"), conflictresolver.DefaultMarkerSize)
+	hasMarkers, err = conflictresolver.HasConflictMarkers(filepath.Join(dir, "blob.bin"))
 	assert.NilError(t, err)
 	assert.Assert(t, !hasMarkers)
 
-	before, err := conflictresolver.SnapshotFiles(dir, []string{"long.txt", "blob.bin"}, nil)
+	before, err := conflictresolver.SnapshotFiles(dir, []string{"long.txt", "blob.bin"})
 	assert.NilError(t, err)
 	assert.Assert(t, before["long.txt"].HasMarkers)
 	assert.Assert(t, !before["blob.bin"].HasMarkers)
@@ -258,44 +177,15 @@ func TestFilesWithConflictMarkers(t *testing.T) {
 	assert.NilError(t, os.WriteFile(filepath.Join(dir, "bad.txt"), []byte("<<<<<<< HEAD\nx\n=======\ny\n>>>>>>> z\n"), 0o644))
 	assert.NilError(t, os.WriteFile(filepath.Join(dir, "big.txt"), []byte("<<<<<<<<<<<< HEAD\nx\n============\ny\n>>>>>>>>>>>> z\n"), 0o644))
 
-	// Without a snapshot every file is checked with the default size.
-	remaining, err := conflictresolver.FilesWithConflictMarkers(dir, []string{"clean.txt", "bad.txt", "big.txt", "deleted.txt"}, nil)
-	assert.NilError(t, err)
-	assert.DeepEqual(t, remaining, []string{"bad.txt"})
-
-	// The per-file marker size recorded in the snapshot is honoured. It is
-	// read from the markers themselves: big.txt's 12-character markers count
-	// even though the lookup says 7, and bad.txt's 7-character ones count
-	// even though the lookup says 12.
-	sizeFor := func(file string) (int, error) {
-		if file == "bad.txt" || file == "clean.txt" {
-			return 12, nil
-		}
-
-		return conflictresolver.DefaultMarkerSize, nil
-	}
-
-	before, err := conflictresolver.SnapshotFiles(dir, []string{"clean.txt", "bad.txt", "big.txt"}, sizeFor)
-	assert.NilError(t, err)
-	assert.Equal(t, before["big.txt"].MarkerSize, 12)
-	assert.Equal(t, before["bad.txt"].MarkerSize, 7)
-	assert.Equal(t, before["clean.txt"].MarkerSize, 12, "a file without markers records the looked-up size")
-
-	remaining, err = conflictresolver.FilesWithConflictMarkers(dir, []string{"clean.txt", "bad.txt", "big.txt"}, before)
+	remaining, err := conflictresolver.FilesWithConflictMarkers(dir, []string{"clean.txt", "bad.txt", "big.txt", "deleted.txt"})
 	assert.NilError(t, err)
 	assert.DeepEqual(t, remaining, []string{"bad.txt", "big.txt"})
 
-	// Once the markers are gone the recorded sizes still apply.
 	assert.NilError(t, os.WriteFile(filepath.Join(dir, "big.txt"), []byte("resolved\n"), 0o644))
 
-	remaining, err = conflictresolver.FilesWithConflictMarkers(dir, []string{"clean.txt", "bad.txt", "big.txt"}, before)
+	remaining, err = conflictresolver.FilesWithConflictMarkers(dir, []string{"clean.txt", "bad.txt", "big.txt"})
 	assert.NilError(t, err)
 	assert.DeepEqual(t, remaining, []string{"bad.txt"})
-
-	_, err = conflictresolver.SnapshotFiles(dir, []string{"bad.txt"}, func(string) (int, error) {
-		return 0, errors.New("attr lookup failed")
-	})
-	assert.ErrorContains(t, err, "failed to determine conflict marker size for bad.txt")
 }
 
 func TestClaude_Args(t *testing.T) {
@@ -450,7 +340,7 @@ func TestSnapshotAndUnverifiableFiles(t *testing.T) {
 
 	files := []string{"textual.txt", "binary.bin", "kept.txt", "touched.txt", "removed.txt", "gone.txt", "submodule"}
 
-	before, err := conflictresolver.SnapshotFiles(dir, files, nil)
+	before, err := conflictresolver.SnapshotFiles(dir, files)
 	assert.NilError(t, err)
 	assert.Assert(t, before["textual.txt"].HasMarkers)
 	assert.Assert(t, !before["binary.bin"].HasMarkers)
@@ -477,7 +367,7 @@ func TestSnapshotAndUnverifiableFiles(t *testing.T) {
 
 	// Markers left in place after the resolver touches the file are still
 	// caught by the marker check, not by this one.
-	remaining, err := conflictresolver.FilesWithConflictMarkers(dir, files, before)
+	remaining, err := conflictresolver.FilesWithConflictMarkers(dir, files)
 	assert.NilError(t, err)
 	assert.Equal(t, len(remaining), 0)
 
@@ -485,12 +375,6 @@ func TestSnapshotAndUnverifiableFiles(t *testing.T) {
 	unverifiable, err = conflictresolver.UnverifiableFiles(dir, []string{"unknown.txt"}, before)
 	assert.NilError(t, err)
 	assert.Equal(t, len(unverifiable), 0)
-
-	// Marker size lookups are honoured and their errors surfaced.
-	_, err = conflictresolver.SnapshotFiles(dir, []string{"textual.txt"}, func(string) (int, error) {
-		return 0, errors.New("attr lookup failed")
-	})
-	assert.ErrorContains(t, err, "failed to determine conflict marker size for textual.txt")
 }
 
 func TestSnapshotFiles_Gitlink(t *testing.T) {
@@ -523,7 +407,7 @@ func TestSnapshotFiles_Gitlink(t *testing.T) {
 
 	files := []string{"sub"}
 
-	before, err := conflictresolver.SnapshotFiles(dir, files, nil)
+	before, err := conflictresolver.SnapshotFiles(dir, files)
 	assert.NilError(t, err)
 	assert.Assert(t, before["sub"].IsDir)
 	assert.Equal(t, before["sub"].Gitlink, head())
@@ -553,7 +437,7 @@ func TestSnapshotFiles_Gitlink(t *testing.T) {
 		mkdir empty
 	`)
 
-	states, err := conflictresolver.SnapshotFiles(dir, []string{"empty"}, nil)
+	states, err := conflictresolver.SnapshotFiles(dir, []string{"empty"})
 	assert.NilError(t, err)
 	assert.Assert(t, states["empty"].IsDir)
 	assert.Equal(t, states["empty"].Gitlink, "")
@@ -568,7 +452,7 @@ func TestSnapshotFiles_Symlinks(t *testing.T) {
 
 	files := []string{"link"}
 
-	before, err := conflictresolver.SnapshotFiles(dir, files, nil)
+	before, err := conflictresolver.SnapshotFiles(dir, files)
 	assert.NilError(t, err)
 	assert.Assert(t, before["link"].Exists)
 	assert.Assert(t, before["link"].IsSymlink)

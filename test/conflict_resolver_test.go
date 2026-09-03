@@ -16,17 +16,12 @@ import (
 // invocation (arguments separated by a sentinel line) to $FAKE_CLAUDE_LOG and
 // then acts according to $FAKE_CLAUDE_MODE:
 //
-//   - resolve (default): strip the conflict markers from every unmerged file,
-//     keeping both sides' content in order (and dropping the base section
-//     that diff3/zdiff3 conflict styles add)
+//   - resolve (default): strip the (7-character) conflict markers from every
+//     unmerged file, keeping both sides' content in order (and dropping the
+//     base section that diff3/zdiff3 conflict styles add)
 //   - extra: like resolve, but also create an unrelated helper.txt
 //   - clobber: like resolve, but also append to notes.txt and secret.env,
 //     which the test has left untracked and ignored respectively
-//   - drop-attrs: like resolve, but afterwards remove any conflict-marker-size
-//     line from .gitattributes (the awk only strips 7-character markers, so a
-//     file using a longer size keeps its conflict)
-//   - keep-markers: like resolve for every file except file.txt, to which a
-//     line is appended while its conflict markers are left in place
 //   - checkout-sub: check out origin/side in the submodule at ./sub, the way
 //     a tool would resolve a gitlink conflict
 //   - noop: exit successfully without touching anything
@@ -42,12 +37,8 @@ const fakeClaudeScript = `#!/bin/sh
 } >> "$FAKE_CLAUDE_LOG"
 
 case "${FAKE_CLAUDE_MODE:-resolve}" in
-  resolve|extra|clobber|drop-attrs|keep-markers)
+  resolve|extra|clobber)
     for f in $(git diff --name-only --diff-filter=U); do
-      if [ "$FAKE_CLAUDE_MODE" = "keep-markers" ] && [ "$f" = "file.txt" ]; then
-        echo "tweaked but not resolved" >> "$f"
-        continue
-      fi
       awk '
         /^<<<<<<< / { next }
         /^\|\|\|\|\|\|\| / { base = 1; next }
@@ -63,10 +54,6 @@ case "${FAKE_CLAUDE_MODE:-resolve}" in
     if [ "$FAKE_CLAUDE_MODE" = "clobber" ]; then
       echo "clobbered" >> notes.txt
       echo "clobbered" >> secret.env
-    fi
-    if [ "$FAKE_CLAUDE_MODE" = "drop-attrs" ]; then
-      grep -v conflict-marker-size .gitattributes > .gitattributes.resolved
-      mv .gitattributes.resolved .gitattributes
     fi
     echo "fake claude: resolved conflicts"
     ;;
@@ -705,12 +692,14 @@ func TestConflictResolver_OverwritingDirtyFilesStops(t *testing.T) {
 	equalLines(t, mustExecOutput(tempDir, "git", "diff", "--name-only", "--diff-filter=U"), "file.txt")
 }
 
-// setupAttributesConflictRepo is like setupSingleConflictRepo (without
-// topic-b) but file.txt uses a 12-character conflict marker size, and
-// .gitattributes itself conflicts too.
-func setupAttributesConflictRepo(t *testing.T, tempDir string) {
-	t.Helper()
+func TestConflictResolver_CustomMarkerSize(t *testing.T) {
+	t.Parallel()
 
+	tempDir := t.TempDir()
+	opts, logPath := setupFakeClaude(t, tempDir, "resolve")
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go", opts...)
+
+	// Like setupSingleConflictRepo, but file.txt uses 12-character markers.
 	testutil.ExecOrFail(t, tempDir, `
 		git init --initial-branch=main
 
@@ -721,97 +710,20 @@ func setupAttributesConflictRepo(t *testing.T, tempDir string) {
 
 		git checkout -b topic-a
 		echo "line2-from-a" >> file.txt
-		echo "*.md text" >> .gitattributes
-		git add -A
-		git commit -m "topic-a-0"
+		git commit -am "topic-a-0"
 
 		git checkout main
 		echo "line2-from-main" >> file.txt
-		echo "*.txt text" >> .gitattributes
-		git add -A
-		git commit -m "main-1"
+		git commit -am "main-1"
 
 		git checkout topic-a
 	`)
-}
-
-func TestConflictResolver_MarkerSizeFromBeforeResolution(t *testing.T) {
-	t.Parallel()
-
-	tempDir := t.TempDir()
-	opts, _ := setupFakeClaude(t, tempDir, "drop-attrs")
-	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go", opts...)
-
-	setupAttributesConflictRepo(t, tempDir)
 	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
 	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
 
-	// The resolver fixes .gitattributes but drops the conflict-marker-size
-	// line, and leaves file.txt's 12-character markers in place. Looking the
-	// size up again after the resolver ran would find 7 and miss them; yas
-	// must use the size git actually wrote the markers with.
-	result := cli.Run("restack", "--all", "--conflict-resolver=claude", "--after-resolve=continue")
-	assert.Equal(t, result.ExitCode(), 1)
-	assert.Assert(t, result.StderrContains("left conflict markers in:"), "stderr: %s", result.Stderr())
-	assert.Assert(t, result.StderrContains("- file.txt"), "stderr: %s", result.Stderr())
-	assert.Assert(t, assertRestackStateExists(t, tempDir))
-
-	content, err := os.ReadFile(filepath.Join(tempDir, "file.txt"))
-	assert.NilError(t, err)
-	assert.Assert(t, strings.Contains(string(content), "<<<<<<<<<<<< "), "file.txt should still hold 12-character markers: %s", content)
-
-	// Nothing was staged or committed with markers in it.
-	equalLines(t, mustExecOutput(tempDir, "git", "diff", "--name-only", "--diff-filter=U"), ".gitattributes\nfile.txt")
-	equalLines(t, fileOnBranch(t, tempDir, "topic-a", "file.txt"), "line1\nline2-from-a")
-}
-
-// setupDisagreeingAttributesRepo makes .gitattributes conflict such that the
-// two sides set different conflict-marker-size values for file.txt. Git writes
-// file.txt's markers using HEAD's value (7), but `git check-attr` on the
-// conflicted working-tree .gitattributes sees the other side's line last and
-// reports 12.
-func setupDisagreeingAttributesRepo(t *testing.T, tempDir string) {
-	t.Helper()
-
-	testutil.ExecOrFail(t, tempDir, `
-		git init --initial-branch=main
-
-		echo "*.md text" > .gitattributes
-		echo "line1" > file.txt
-		git add -A
-		git commit -m "main-0"
-
-		git checkout -b topic-a
-		echo "line2-from-a" >> file.txt
-		echo "file.txt conflict-marker-size=12" >> .gitattributes
-		git add -A
-		git commit -m "topic-a-0"
-
-		git checkout main
-		echo "line2-from-main" >> file.txt
-		echo "file.txt conflict-marker-size=7" >> .gitattributes
-		git add -A
-		git commit -m "main-1"
-
-		git checkout topic-a
-	`)
-}
-
-func TestConflictResolver_MarkerSizeReadFromFile(t *testing.T) {
-	t.Parallel()
-
-	tempDir := t.TempDir()
-	opts, logPath := setupFakeClaude(t, tempDir, "keep-markers")
-	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go", opts...)
-
-	setupDisagreeingAttributesRepo(t, tempDir)
-	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
-	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
-
-	// The resolver resolves .gitattributes (keeping both lines, so the
-	// attribute still reads 12 afterwards) and edits file.txt without
-	// removing its 7-character markers. Trusting the attribute would treat
-	// file.txt as markerless and, since its bytes changed, accept it.
+	// The fake resolver only knows how to strip 7-character markers, so it
+	// leaves the 12-character ones behind. yas must recognise them as
+	// markers without being told the size.
 	result := cli.Run("restack", "--all", "--conflict-resolver=claude", "--after-resolve=continue")
 	assert.Equal(t, result.ExitCode(), 1)
 	assert.Assert(t, result.StderrContains("left conflict markers in:"), "stderr: %s", result.Stderr())
@@ -819,13 +731,12 @@ func TestConflictResolver_MarkerSizeReadFromFile(t *testing.T) {
 	assert.Assert(t, assertRestackStateExists(t, tempDir))
 	assert.Equal(t, len(fakeClaudeCalls(t, logPath)), 1)
 
-	// Confirm the premise: the file has 7-character markers while the
-	// attribute lookup claims 12.
 	content, err := os.ReadFile(filepath.Join(tempDir, "file.txt"))
 	assert.NilError(t, err)
-	assert.Assert(t, strings.Contains(string(content), "\n<<<<<<< "), "file.txt should hold 7-character markers: %s", content)
-	assert.Assert(t, strings.Contains(mustExecOutput(tempDir, "git", "check-attr", "conflict-marker-size", "file.txt"), ": 12"))
+	assert.Assert(t, strings.Contains(string(content), "<<<<<<<<<<<< "), "file.txt should hold 12-character markers: %s", content)
 
+	// Nothing was staged or committed with markers in it.
+	equalLines(t, mustExecOutput(tempDir, "git", "diff", "--name-only", "--diff-filter=U"), "file.txt")
 	equalLines(t, fileOnBranch(t, tempDir, "topic-a", "file.txt"), "line1\nline2-from-a")
 }
 

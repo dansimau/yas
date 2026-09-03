@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -534,39 +533,6 @@ func (r *Repo) UnmergedFiles() ([]string, error) {
 	}
 
 	return splitNUL(out), nil
-}
-
-// DefaultConflictMarkerSize is git's marker length when the
-// conflict-marker-size attribute is not set for a path.
-const DefaultConflictMarkerSize = 7
-
-// MaxConflictMarkerSize is the largest conflict-marker-size value honoured;
-// anything above it is treated as unset. Git accepts huge values (some of
-// which it silently ignores), and building markers that long serves no one.
-const MaxConflictMarkerSize = 256
-
-// ConflictMarkerSize returns the length of the conflict markers git writes for
-// path, honouring the conflict-marker-size attribute from .gitattributes.
-func (r *Repo) ConflictMarkerSize(path string) (int, error) {
-	// -z output is: <path> NUL <attribute> NUL <value> NUL
-	out, err := r.rawOutput("git", "check-attr", "-z", "conflict-marker-size", "--", path)
-	if err != nil {
-		return 0, err
-	}
-
-	records := splitNUL(out)
-	if len(records) != 3 {
-		return 0, fmt.Errorf("unexpected check-attr output for %s: %q", path, out)
-	}
-
-	size, err := strconv.Atoi(records[2])
-	if err != nil || size <= 0 || size > MaxConflictMarkerSize {
-		// "unspecified", "unset", "set", garbage or an absurd size: use the
-		// default.
-		return DefaultConflictMarkerSize, nil
-	}
-
-	return size, nil
 }
 
 // Add stages the given paths. Paths that no longer exist in the working tree

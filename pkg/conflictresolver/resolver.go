@@ -125,23 +125,12 @@ func Names() []string {
 	return names
 }
 
-// DefaultMarkerSize is the length of git's conflict markers unless a path
-// sets the conflict-marker-size attribute.
-const DefaultMarkerSize = 7
-
-// MaxMarkerSize is the largest conflict-marker-size yas honours. Git accepts
-// absurd values (and silently falls back to normal markers for some of them);
-// treating anything larger as the default avoids building huge marker strings.
-const MaxMarkerSize = 256
-
-// normaliseMarkerSize maps sizes git wouldn't sensibly use to the default.
-func normaliseMarkerSize(size int) int {
-	if size <= 0 || size > MaxMarkerSize {
-		return DefaultMarkerSize
-	}
-
-	return size
-}
+// MinMarkerSize is the shortest run of marker characters treated as a
+// conflict marker. It is git's default conflict-marker-size. The attribute
+// can make markers longer, so any run of at least this length counts; shorter
+// runs are far more likely to be ordinary content (Markdown quotes, Python
+// prompts) than a deliberately tiny marker.
+const MinMarkerSize = 7
 
 // conflictMarkerChars are the characters git repeats to open each side of a
 // conflict. "=" is deliberately excluded because a run of "=" also appears in
@@ -149,13 +138,10 @@ func normaliseMarkerSize(size int) int {
 // a conflict without one of these.
 var conflictMarkerChars = []byte{'<', '>', '|'}
 
-// HasConflictMarkers reports whether the file at path still contains git
-// conflict markers of the given length (see DefaultMarkerSize and git's
-// conflict-marker-size attribute). A file that no longer exists (deleted as
-// part of the resolution) has no markers.
-func HasConflictMarkers(path string, markerSize int) (bool, error) {
-	markerSize = normaliseMarkerSize(markerSize)
-
+// HasConflictMarkers reports whether the file at path contains git conflict
+// markers of any length (see isConflictMarker). A missing path, or one that is
+// not a regular file, has no markers.
+func HasConflictMarkers(path string) (bool, error) {
 	f, err := openRegularFile(path)
 	if err != nil || f == nil {
 		return false, err
@@ -165,7 +151,7 @@ func HasConflictMarkers(path string, markerSize int) (bool, error) {
 	found := false
 
 	err = scanLinePrefixes(f, func(line []byte) bool {
-		found = isConflictMarker(line, markerSize)
+		found = isConflictMarker(line)
 
 		return !found
 	})
@@ -173,9 +159,26 @@ func HasConflictMarkers(path string, markerSize int) (bool, error) {
 	return found, err
 }
 
+// isConflictMarker reports whether line is a git conflict marker: a run of at
+// least MinMarkerSize repetitions of one marker character, followed by end of
+// line or a space. The run may be any length, so markers written with a custom
+// conflict-marker-size are recognised without consulting .gitattributes.
+func isConflictMarker(line []byte) bool {
+	if len(line) < MinMarkerSize || bytes.IndexByte(conflictMarkerChars, line[0]) < 0 {
+		return false
+	}
+
+	n := 1
+	for n < len(line) && line[n] == line[0] {
+		n++
+	}
+
+	return n >= MinMarkerSize && (n == len(line) || line[n] == ' ')
+}
+
 // linePrefixSize is how much of each line scanLinePrefixes hands to its
-// callback. Conflict markers sit at the very start of a line and are at most
-// MaxMarkerSize long (plus a space), so this is plenty.
+// callback. Conflict markers sit at the very start of a line, so nothing past
+// this can change whether a line is one.
 const linePrefixSize = 64 * 1024
 
 // scanLinePrefixes calls fn with the start of every line in r (without the
@@ -208,96 +211,6 @@ func scanLinePrefixes(r io.Reader, fn func(prefix []byte) bool) error {
 	}
 }
 
-// isConflictMarker reports whether line is a git conflict marker: exactly
-// markerSize repetitions of a marker character followed by end of line or a
-// space.
-func isConflictMarker(line []byte, markerSize int) bool {
-	for _, ch := range conflictMarkerChars {
-		prefix := bytes.Repeat([]byte{ch}, markerSize)
-		if !bytes.HasPrefix(line, prefix) {
-			continue
-		}
-
-		rest := line[len(prefix):]
-		if len(rest) == 0 || rest[0] == ' ' {
-			return true
-		}
-	}
-
-	return false
-}
-
-// markerRun returns the length of the run of ch that line starts with, if the
-// run is followed by end of line or a space (the shape of every git conflict
-// marker), and 0 otherwise.
-func markerRun(line []byte, ch byte) int {
-	n := 0
-	for n < len(line) && line[n] == ch {
-		n++
-	}
-
-	if n == 0 || (n < len(line) && line[n] != ' ') {
-		return 0
-	}
-
-	return n
-}
-
-// DetectMarkerSize scans the file at path for git conflict markers and returns
-// the marker length actually present: a run of "<" opening a hunk with a run of
-// ">" of the same length closing one. It returns 0 when the file holds no
-// recognisable markers (including when it is missing or not a regular file).
-//
-// If several lengths qualify, preferred wins when it is one of them and the
-// longest otherwise, since a long run is the least likely to be ordinary
-// content. Runs longer than MaxMarkerSize are not considered markers.
-//
-// Reading the size off the file is more reliable than asking git for the
-// conflict-marker-size attribute: when .gitattributes is itself conflicted,
-// `git check-attr` parses the marker-riddled working-tree copy and can report
-// a size other than the one git used when it wrote the file.
-func DetectMarkerSize(path string, preferred int) (int, error) {
-	f, err := openRegularFile(path)
-	if err != nil || f == nil {
-		return 0, err
-	}
-	defer f.Close()
-
-	opens := map[int]bool{}
-	closes := map[int]bool{}
-
-	err = scanLinePrefixes(f, func(line []byte) bool {
-		if n := markerRun(line, '<'); n > 0 && n <= MaxMarkerSize {
-			opens[n] = true
-		} else if n := markerRun(line, '>'); n > 0 && n <= MaxMarkerSize {
-			closes[n] = true
-		}
-
-		return true
-	})
-	if err != nil {
-		return 0, err
-	}
-
-	best := 0
-
-	for n := range opens {
-		if !closes[n] {
-			continue
-		}
-
-		if n == preferred {
-			return n, nil
-		}
-
-		if n > best {
-			best = n
-		}
-	}
-
-	return best, nil
-}
-
 // openRegularFile opens path for reading if it is a regular file. It returns a
 // nil file (and nil error) when the path is missing or is not a regular file,
 // e.g. a directory standing in for a conflicted submodule gitlink, or a
@@ -319,29 +232,13 @@ func openRegularFile(path string) (*os.File, error) {
 	return os.Open(path)
 }
 
-// MarkerSizeFunc returns the conflict marker length in effect for a file
-// (relative to the rebase directory).
-type MarkerSizeFunc func(file string) (int, error)
-
 // FilesWithConflictMarkers returns the subset of files (relative to dir) that
-// still contain conflict markers, using the marker size recorded for each file
-// in before (see SnapshotFiles). Files missing from before are checked with
-// DefaultMarkerSize.
-//
-// The size is deliberately not looked up again: if .gitattributes was itself
-// conflicted and the resolver changed conflict-marker-size, a fresh lookup
-// would describe markers git never wrote, and the ones it did write could go
-// unnoticed.
-func FilesWithConflictMarkers(dir string, files []string, before map[string]FileState) ([]string, error) {
+// still contain conflict markers.
+func FilesWithConflictMarkers(dir string, files []string) ([]string, error) {
 	var remaining []string
 
 	for _, file := range files {
-		size := DefaultMarkerSize
-		if prev, ok := before[file]; ok && prev.MarkerSize > 0 {
-			size = prev.MarkerSize
-		}
-
-		hasMarkers, err := HasConflictMarkers(filepath.Join(dir, file), size)
+		hasMarkers, err := HasConflictMarkers(filepath.Join(dir, file))
 		if err != nil {
 			return nil, fmt.Errorf("failed to check %s for conflict markers: %w", file, err)
 		}
@@ -376,38 +273,15 @@ type FileState struct {
 	// HasMarkers is true when the file contained textual conflict markers, i.e.
 	// its resolution can later be verified by checking the markers are gone.
 	HasMarkers bool
-	// MarkerSize is the conflict marker length in effect for this file, as
-	// determined before the resolver ran: read from the markers themselves
-	// when the file has any, otherwise from the caller's lookup.
-	MarkerSize int
 }
 
 // SnapshotFiles records the state of each file (relative to dir) so that a
 // resolver's work can be verified afterwards with FilesWithConflictMarkers and
 // UnverifiableFiles.
-//
-// The conflict marker size for each file is read from the markers git wrote
-// (see DetectMarkerSize). markerSize, which may be nil, supplies the expected
-// size per file (e.g. from the conflict-marker-size attribute); it breaks ties
-// when a file could be read either way and is recorded for files without
-// markers.
-func SnapshotFiles(dir string, files []string, markerSize MarkerSizeFunc) (map[string]FileState, error) {
+func SnapshotFiles(dir string, files []string) (map[string]FileState, error) {
 	states := make(map[string]FileState, len(files))
 
 	for _, file := range files {
-		size := DefaultMarkerSize
-
-		if markerSize != nil {
-			var err error
-
-			size, err = markerSize(file)
-			if err != nil {
-				return nil, fmt.Errorf("failed to determine conflict marker size for %s: %w", file, err)
-			}
-
-			size = normaliseMarkerSize(size)
-		}
-
 		path := filepath.Join(dir, file)
 
 		state, err := snapshotFile(path)
@@ -417,16 +291,9 @@ func SnapshotFiles(dir string, files []string, markerSize MarkerSizeFunc) (map[s
 
 		// Only regular files can carry markers; a symlink's or gitlink's
 		// resolution is verified by its value changing instead.
-		detected, err := DetectMarkerSize(path, size)
+		state.HasMarkers, err = HasConflictMarkers(path)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check %s for conflict markers: %w", file, err)
-		}
-
-		if detected > 0 {
-			state.HasMarkers = true
-			state.MarkerSize = detected
-		} else {
-			state.MarkerSize = size
 		}
 
 		states[file] = state

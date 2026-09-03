@@ -60,38 +60,6 @@ func TestUnmergedFiles_NoneWhenClean(t *testing.T) {
 	assert.Equal(t, len(files), 0)
 }
 
-func TestConflictMarkerSize(t *testing.T) {
-	t.Parallel()
-
-	repoPath := t.TempDir()
-	setupRepo(t, repoPath, `
-		printf 'big.txt conflict-marker-size=12\nbogus.txt conflict-marker-size=abc\nflag.txt conflict-marker-size\nmax.txt conflict-marker-size=256\nover.txt conflict-marker-size=257\nhuge.txt conflict-marker-size=4294967303\nneg.txt conflict-marker-size=-5\n' > .gitattributes
-		git add .gitattributes
-		git commit -m attrs
-	`)
-
-	repo := WithRepo(repoPath)
-
-	for _, tc := range []struct {
-		path string
-		want int
-	}{
-		{"big.txt", 12},
-		{"plain.txt", DefaultConflictMarkerSize},
-		{"bogus.txt", DefaultConflictMarkerSize},
-		{"flag.txt", DefaultConflictMarkerSize},
-		{"max.txt", MaxConflictMarkerSize},
-		{"over.txt", DefaultConflictMarkerSize},
-		{"huge.txt", DefaultConflictMarkerSize},
-		{"neg.txt", DefaultConflictMarkerSize},
-		{"caf\u00e9 menu.txt", DefaultConflictMarkerSize},
-	} {
-		size, err := repo.ConflictMarkerSize(tc.path)
-		assert.NilError(t, err, tc.path)
-		assert.Equal(t, size, tc.want, tc.path)
-	}
-}
-
 func TestStatusEntries(t *testing.T) {
 	t.Parallel()
 

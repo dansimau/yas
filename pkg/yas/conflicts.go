@@ -201,9 +201,8 @@ func (yas *YAS) handleRebaseConflict(branch *gitexec.BranchContext, res Conflict
 		}
 
 		// Snapshot the files as git left them so the resolver's work can be
-		// verified afterwards. The marker length is read from the markers
-		// themselves; the conflict-marker-size attribute only breaks ties.
-		before, err := conflictresolver.SnapshotFiles(branch.Path(), files, branch.ConflictMarkerSize)
+		// verified afterwards.
+		before, err := conflictresolver.SnapshotFiles(branch.Path(), files)
 		if err != nil {
 			return err
 		}
@@ -229,9 +228,7 @@ func (yas *YAS) handleRebaseConflict(branch *gitexec.BranchContext, res Conflict
 			return fmt.Errorf("%s\n\nFix conflicts and run 'yas continue' to resume", msg)
 		}
 
-		// Marker sizes come from the snapshot: the resolver may have rewritten
-		// a conflicted .gitattributes, but the markers were written before.
-		remaining, err := conflictresolver.FilesWithConflictMarkers(branch.Path(), files, before)
+		remaining, err := conflictresolver.FilesWithConflictMarkers(branch.Path(), files)
 		if err != nil {
 			return err
 		}
