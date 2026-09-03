@@ -18,6 +18,9 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/dansimau/yas/pkg/gitexec"
+	"github.com/dansimau/yas/pkg/xexec"
 )
 
 // None is the resolver name meaning "do not attempt automatic resolution".
@@ -126,6 +129,20 @@ func Names() []string {
 // sets the conflict-marker-size attribute.
 const DefaultMarkerSize = 7
 
+// MaxMarkerSize is the largest conflict-marker-size yas honours. Git accepts
+// absurd values (and silently falls back to normal markers for some of them);
+// treating anything larger as the default avoids building huge marker strings.
+const MaxMarkerSize = 256
+
+// normaliseMarkerSize maps sizes git wouldn't sensibly use to the default.
+func normaliseMarkerSize(size int) int {
+	if size <= 0 || size > MaxMarkerSize {
+		return DefaultMarkerSize
+	}
+
+	return size
+}
+
 // conflictMarkerChars are the characters git repeats to open each side of a
 // conflict. "=" is deliberately excluded because a run of "=" also appears in
 // ordinary content (e.g. setext headings in Markdown) and is never present in
@@ -137,9 +154,7 @@ var conflictMarkerChars = []byte{'<', '>', '|'}
 // conflict-marker-size attribute). A file that no longer exists (deleted as
 // part of the resolution) has no markers.
 func HasConflictMarkers(path string, markerSize int) (bool, error) {
-	if markerSize <= 0 {
-		markerSize = DefaultMarkerSize
-	}
+	markerSize = normaliseMarkerSize(markerSize)
 
 	f, err := openRegularFile(path)
 	if err != nil || f == nil {
@@ -147,20 +162,50 @@ func HasConflictMarkers(path string, markerSize int) (bool, error) {
 	}
 	defer f.Close()
 
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	found := false
 
-	for scanner.Scan() {
-		if isConflictMarker(scanner.Bytes(), markerSize) {
-			return true, nil
+	err = scanLinePrefixes(f, func(line []byte) bool {
+		found = isConflictMarker(line, markerSize)
+
+		return !found
+	})
+
+	return found, err
+}
+
+// linePrefixSize is how much of each line scanLinePrefixes hands to its
+// callback. Conflict markers sit at the very start of a line and are at most
+// MaxMarkerSize long (plus a space), so this is plenty.
+const linePrefixSize = 64 * 1024
+
+// scanLinePrefixes calls fn with the start of every line in r (without the
+// trailing newline, and at most linePrefixSize bytes) until fn returns false
+// or the input ends. Unlike bufio.Scanner it imposes no limit on line length:
+// files with enormous lines, or binaries with no newline at all, are simply
+// streamed past.
+func scanLinePrefixes(r io.Reader, fn func(prefix []byte) bool) error {
+	br := bufio.NewReaderSize(r, linePrefixSize)
+
+	for {
+		line, err := br.ReadSlice('\n')
+
+		if len(line) > 0 && !fn(bytes.TrimSuffix(line, []byte{'\n'})) {
+			return nil
+		}
+
+		// The line was longer than the buffer: discard the rest of it.
+		for errors.Is(err, bufio.ErrBufferFull) {
+			_, err = br.ReadSlice('\n')
+		}
+
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+
+		if err != nil {
+			return err
 		}
 	}
-
-	if err := scanner.Err(); err != nil {
-		return false, err
-	}
-
-	return false, nil
 }
 
 // isConflictMarker reports whether line is a git conflict marker: exactly
@@ -205,7 +250,7 @@ func markerRun(line []byte, ch byte) int {
 //
 // If several lengths qualify, preferred wins when it is one of them and the
 // longest otherwise, since a long run is the least likely to be ordinary
-// content.
+// content. Runs longer than MaxMarkerSize are not considered markers.
 //
 // Reading the size off the file is more reliable than asking git for the
 // conflict-marker-size attribute: when .gitattributes is itself conflicted,
@@ -221,20 +266,16 @@ func DetectMarkerSize(path string, preferred int) (int, error) {
 	opens := map[int]bool{}
 	closes := map[int]bool{}
 
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
-
-	for scanner.Scan() {
-		line := scanner.Bytes()
-
-		if n := markerRun(line, '<'); n > 0 {
+	err = scanLinePrefixes(f, func(line []byte) bool {
+		if n := markerRun(line, '<'); n > 0 && n <= MaxMarkerSize {
 			opens[n] = true
-		} else if n := markerRun(line, '>'); n > 0 {
+		} else if n := markerRun(line, '>'); n > 0 && n <= MaxMarkerSize {
 			closes[n] = true
 		}
-	}
 
-	if err := scanner.Err(); err != nil {
+		return true
+	})
+	if err != nil {
 		return 0, err
 	}
 
@@ -323,8 +364,12 @@ type FileState struct {
 	IsSymlink bool
 	// IsDir is true when the path is a directory, which is how a conflicted
 	// submodule (gitlink) appears in the working tree. Its contents are not
-	// hashed: git stages the recorded commit, not the files.
+	// hashed: git stages the commit checked out inside it, held in Gitlink.
 	IsDir bool
+	// Gitlink is the commit checked out in the submodule at this path (what
+	// `git add` would stage), or empty when the directory is not an
+	// initialised submodule.
+	Gitlink string
 	// Sum is the SHA-256 of the file contents, or of the link target for a
 	// symlink (zero when Exists is false or IsDir is true).
 	Sum [sha256.Size]byte
@@ -360,9 +405,7 @@ func SnapshotFiles(dir string, files []string, markerSize MarkerSizeFunc) (map[s
 				return nil, fmt.Errorf("failed to determine conflict marker size for %s: %w", file, err)
 			}
 
-			if size <= 0 {
-				size = DefaultMarkerSize
-			}
+			size = normaliseMarkerSize(size)
 		}
 
 		path := filepath.Join(dir, file)
@@ -395,7 +438,8 @@ func SnapshotFiles(dir string, files []string, markerSize MarkerSizeFunc) (map[s
 // sameContent reports whether two snapshots describe the same working-tree
 // entry (existence, type and bytes), ignoring the marker bookkeeping.
 func (s FileState) sameContent(other FileState) bool {
-	return s.Exists == other.Exists && s.IsSymlink == other.IsSymlink && s.IsDir == other.IsDir && s.Sum == other.Sum
+	return s.Exists == other.Exists && s.IsSymlink == other.IsSymlink && s.IsDir == other.IsDir &&
+		s.Gitlink == other.Gitlink && s.Sum == other.Sum
 }
 
 func snapshotFile(path string) (FileState, error) {
@@ -425,9 +469,16 @@ func snapshotFile(path string) (FileState, error) {
 	}
 
 	if info.IsDir() {
-		// A conflicted submodule: git stages the gitlink commit, not the
-		// directory's contents, so there is nothing to hash.
+		// A conflicted submodule: git stages the commit checked out inside
+		// it, not the directory's contents, so record that instead of a hash.
 		state.IsDir = true
+
+		commit, err := gitlinkCommit(path)
+		if err != nil {
+			return FileState{}, err
+		}
+
+		state.Gitlink = commit
 
 		return state, nil
 	}
@@ -446,6 +497,34 @@ func snapshotFile(path string) (FileState, error) {
 	copy(state.Sum[:], h.Sum(nil))
 
 	return state, nil
+}
+
+// gitlinkCommit returns the commit checked out in the submodule at dir, i.e.
+// what `git add dir` would record in the superproject. It returns "" when dir
+// is not an initialised submodule (no .git entry) or has no commit yet.
+func gitlinkCommit(dir string) (string, error) {
+	// Without this guard git would walk up and report the superproject's HEAD
+	// for an empty (uninitialised) submodule directory.
+	if _, err := os.Lstat(filepath.Join(dir, ".git")); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+
+		return "", err
+	}
+
+	out, err := xexec.Command("git", "rev-parse", "--verify", "--quiet", "HEAD").
+		WithWorkingDir(dir).
+		WithEnvVars(gitexec.CleanedGitEnv()).
+		WithStdout(nil).
+		WithStderr(nil).
+		Output()
+	if err != nil {
+		// Unborn HEAD or a broken checkout: nothing git could stage.
+		return "", nil
+	}
+
+	return strings.TrimSpace(string(out)), nil
 }
 
 // UnverifiableFiles returns the files whose resolution cannot be confirmed:

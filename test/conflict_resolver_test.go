@@ -27,8 +27,11 @@ import (
 //     file using a longer size keeps its conflict)
 //   - keep-markers: like resolve for every file except file.txt, to which a
 //     line is appended while its conflict markers are left in place
+//   - checkout-sub: check out origin/side in the submodule at ./sub, the way
+//     a tool would resolve a gitlink conflict
 //   - noop: exit successfully without touching anything
 //   - fail: exit non-zero
+//   - fail-after-edit: create an unrelated helper.txt, then exit non-zero
 const fakeClaudeScript = `#!/bin/sh
 {
   for arg in "$@"; do
@@ -67,11 +70,20 @@ case "${FAKE_CLAUDE_MODE:-resolve}" in
     fi
     echo "fake claude: resolved conflicts"
     ;;
+  checkout-sub)
+    git -C sub checkout -q origin/side
+    echo "fake claude: checked out submodule commit"
+    ;;
   noop)
     echo "fake claude: did nothing"
     ;;
   fail)
     echo "fake claude: failing on purpose" >&2
+    exit 2
+    ;;
+  fail-after-edit)
+    echo "helper" > helper.txt
+    echo "fake claude: failing after a partial edit" >&2
     exit 2
     ;;
 esac
@@ -321,6 +333,31 @@ func TestConflictResolver_ResolverFailure(t *testing.T) {
 	equalLines(t, mustExecOutput(tempDir, "git", "diff", "--name-only", "--diff-filter=U"), "file.txt")
 
 	assert.NilError(t, cli.Run("abort").Err())
+}
+
+func TestConflictResolver_FailureStillReportsStrayEdits(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	opts, logPath := setupFakeClaude(t, tempDir, "fail-after-edit")
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go", opts...)
+
+	setupSingleConflictRepo(t, tempDir)
+	trackSingleConflictRepo(t, cli)
+
+	// The tool creates helper.txt and then dies. The failure is reported,
+	// and so is the file it left behind outside the conflict.
+	result := cli.Run("restack", "--all", "--conflict-resolver=claude", "--after-resolve=continue")
+	assert.Equal(t, result.ExitCode(), 1)
+	assert.Assert(t, result.StderrContains("conflict resolver claude failed"), "stderr: %s", result.Stderr())
+	assert.Assert(t, result.StderrContains("changed files outside the conflicted paths"), "stderr: %s", result.Stderr())
+	assert.Assert(t, result.StderrContains("- helper.txt"), "stderr: %s", result.Stderr())
+	assert.Assert(t, result.StderrContains("yas continue"), "stderr: %s", result.Stderr())
+	assert.Equal(t, len(fakeClaudeCalls(t, logPath)), 1)
+
+	assert.Assert(t, assertRestackStateExists(t, tempDir))
+	equalLines(t, mustExecOutput(tempDir, "git", "diff", "--name-only", "--diff-filter=U"), "file.txt")
+	assert.Assert(t, strings.Contains(mustExecOutput(tempDir, "git", "status", "--porcelain"), "?? helper.txt"), "helper.txt should be left for the user to inspect")
 }
 
 func TestConflictResolver_ConfigAndFlagOverride(t *testing.T) {
@@ -848,6 +885,19 @@ func TestConflictResolver_SubmoduleConflict(t *testing.T) {
 	assert.Assert(t, assertRestackStateExists(t, tempDir))
 	assert.Equal(t, len(fakeClaudeCalls(t, logPath)), 1)
 	equalLines(t, mustExecOutput(tempDir, "git", "diff", "--name-only", "--diff-filter=U"), "sub")
+
+	// A tool that checks out a commit inside the submodule has resolved the
+	// gitlink: yas sees the new commit, stages it and finishes the rebase.
+	assert.NilError(t, cli.Run("abort").Err())
+
+	sideCommit := strings.TrimSpace(mustExecOutput(filepath.Join(tempDir, "sub"), "git", "rev-parse", "origin/side"))
+	checkoutOpts, _ := setupFakeClaude(t, tempDir, "checkout-sub")
+	resolving := gocmdtester.FromPath(t, "../cmd/yas/main.go", checkoutOpts...)
+
+	result = resolving.Run("restack", "--all", "--conflict-resolver=claude", "--after-resolve=continue")
+	assert.Equal(t, result.ExitCode(), 0, "stderr: %s", result.Stderr())
+	assert.Assert(t, !assertRestackStateExists(t, tempDir))
+	assert.Assert(t, strings.Contains(mustExecOutput(tempDir, "git", "ls-tree", "topic-a", "sub"), sideCommit), "topic-a should record the checked-out submodule commit")
 }
 
 func TestConflictResolver_DryRunDoesNotNeedTool(t *testing.T) {

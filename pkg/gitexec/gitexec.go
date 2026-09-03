@@ -540,6 +540,11 @@ func (r *Repo) UnmergedFiles() ([]string, error) {
 // conflict-marker-size attribute is not set for a path.
 const DefaultConflictMarkerSize = 7
 
+// MaxConflictMarkerSize is the largest conflict-marker-size value honoured;
+// anything above it is treated as unset. Git accepts huge values (some of
+// which it silently ignores), and building markers that long serves no one.
+const MaxConflictMarkerSize = 256
+
 // ConflictMarkerSize returns the length of the conflict markers git writes for
 // path, honouring the conflict-marker-size attribute from .gitattributes.
 func (r *Repo) ConflictMarkerSize(path string) (int, error) {
@@ -555,8 +560,9 @@ func (r *Repo) ConflictMarkerSize(path string) (int, error) {
 	}
 
 	size, err := strconv.Atoi(records[2])
-	if err != nil || size <= 0 {
-		// "unspecified", "unset", "set" or garbage: git falls back to the default.
+	if err != nil || size <= 0 || size > MaxConflictMarkerSize {
+		// "unspecified", "unset", "set", garbage or an absurd size: use the
+		// default.
 		return DefaultConflictMarkerSize, nil
 	}
 

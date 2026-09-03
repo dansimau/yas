@@ -3,6 +3,7 @@ package yas
 import (
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -216,7 +217,16 @@ func (yas *YAS) handleRebaseConflict(branch *gitexec.BranchContext, res Conflict
 		}
 
 		if err := resolver.Resolve(req); err != nil {
-			return fmt.Errorf("conflict resolver %s failed while rebasing %s onto %s: %w\n\nFix conflicts and run 'yas continue' to resume", resolver.Name(), childBranch, parentBranch, err)
+			// The tool may have edited files before failing (e.g. a session
+			// dropped mid-way), so still report anything it touched outside
+			// the conflict.
+			msg := fmt.Sprintf("conflict resolver %s failed while rebasing %s onto %s: %v", resolver.Name(), childBranch, parentBranch, err)
+
+			if unexpected := yas.strayChangesAfterFailure(branch, statusBefore, files); len(unexpected) > 0 {
+				msg += "\n\nBefore failing it changed files outside the conflicted paths:\n  - " + strings.Join(unexpected, "\n  - ")
+			}
+
+			return fmt.Errorf("%s\n\nFix conflicts and run 'yas continue' to resume", msg)
 		}
 
 		// Marker sizes come from the snapshot: the resolver may have rewritten
@@ -306,6 +316,21 @@ func (yas *YAS) handleRebaseConflict(branch *gitexec.BranchContext, res Conflict
 		// Another commit in the same rebase hit conflicts; go round again.
 		cause = continueErr
 	}
+}
+
+// strayChangesAfterFailure lists the paths a failed resolver changed outside
+// the conflicted files. It is best effort: the resolver's own error is what
+// the user needs to see, so a failure to read the status is reported on
+// stderr rather than replacing it.
+func (yas *YAS) strayChangesAfterFailure(branch *gitexec.BranchContext, statusBefore map[string]gitexec.StatusEntry, files []string) []string {
+	statusAfter, err := branch.StatusEntries()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: unable to check for files changed by the resolver: %v\n", err)
+
+		return nil
+	}
+
+	return unexpectedChanges(statusBefore, statusAfter, files)
 }
 
 // unexpectedChanges returns the paths whose status or working-tree fingerprint

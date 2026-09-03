@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/dansimau/yas/pkg/conflictresolver"
+	"github.com/dansimau/yas/pkg/testutil"
 	"gotest.tools/v3/assert"
 )
 
@@ -188,6 +189,65 @@ func TestDetectMarkerSize(t *testing.T) {
 	hasMarkers, err := conflictresolver.HasConflictMarkers(filepath.Join(dir, "submodule"), 7)
 	assert.NilError(t, err)
 	assert.Assert(t, !hasMarkers)
+
+	// Runs longer than MaxMarkerSize are content, not markers, and an absurd
+	// requested size is treated as the default rather than allocated.
+	huge := write("huge.txt", strings.Repeat("<", 300)+" HEAD\nx\n"+strings.Repeat(">", 300)+" topic\n")
+
+	got, err = conflictresolver.DetectMarkerSize(huge, 300)
+	assert.NilError(t, err)
+	assert.Equal(t, got, 0)
+
+	hasMarkers, err = conflictresolver.HasConflictMarkers(seven, 4294967303)
+	assert.NilError(t, err)
+	assert.Assert(t, hasMarkers, "an out-of-range size falls back to the default")
+
+	hasMarkers, err = conflictresolver.HasConflictMarkers(huge, 4294967303)
+	assert.NilError(t, err)
+	assert.Assert(t, !hasMarkers)
+}
+
+func TestMarkerScan_LongLines(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	// A 17 MiB line with no newline (as in a large binary or minified file),
+	// followed by an ordinary conflict. bufio.Scanner would give up on the
+	// first line; the scan must stream past it.
+	path := filepath.Join(dir, "long.txt")
+	f, err := os.Create(path)
+	assert.NilError(t, err)
+
+	chunk := []byte(strings.Repeat("x", 1024*1024))
+	for range 17 {
+		_, err = f.Write(chunk)
+		assert.NilError(t, err)
+	}
+
+	_, err = f.WriteString("\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> topic\n")
+	assert.NilError(t, err)
+	assert.NilError(t, f.Close())
+
+	hasMarkers, err := conflictresolver.HasConflictMarkers(path, conflictresolver.DefaultMarkerSize)
+	assert.NilError(t, err)
+	assert.Assert(t, hasMarkers)
+
+	size, err := conflictresolver.DetectMarkerSize(path, conflictresolver.DefaultMarkerSize)
+	assert.NilError(t, err)
+	assert.Equal(t, size, 7)
+
+	// Only the long line, no newline at all: not an error, just no markers.
+	assert.NilError(t, os.WriteFile(filepath.Join(dir, "blob.bin"), chunk, 0o644))
+
+	hasMarkers, err = conflictresolver.HasConflictMarkers(filepath.Join(dir, "blob.bin"), conflictresolver.DefaultMarkerSize)
+	assert.NilError(t, err)
+	assert.Assert(t, !hasMarkers)
+
+	before, err := conflictresolver.SnapshotFiles(dir, []string{"long.txt", "blob.bin"}, nil)
+	assert.NilError(t, err)
+	assert.Assert(t, before["long.txt"].HasMarkers)
+	assert.Assert(t, !before["blob.bin"].HasMarkers)
 }
 
 func TestFilesWithConflictMarkers(t *testing.T) {
@@ -399,6 +459,7 @@ func TestSnapshotAndUnverifiableFiles(t *testing.T) {
 	assert.Assert(t, before["submodule"].Exists)
 	assert.Assert(t, before["submodule"].IsDir)
 	assert.Assert(t, !before["submodule"].HasMarkers)
+	assert.Equal(t, before["submodule"].Gitlink, "", "a plain directory has no gitlink commit")
 
 	// Simulate a resolver: fixes the textual conflict, rewrites touched.txt,
 	// deletes removed.txt, leaves the rest alone.
@@ -430,6 +491,72 @@ func TestSnapshotAndUnverifiableFiles(t *testing.T) {
 		return 0, errors.New("attr lookup failed")
 	})
 	assert.ErrorContains(t, err, "failed to determine conflict marker size for textual.txt")
+}
+
+func TestSnapshotFiles_Gitlink(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	// "sub" is an initialised submodule: a nested repository with a commit
+	// checked out. What `git add sub` stages is that commit.
+	testutil.ExecOrFail(t, dir, `
+		git init -q sub
+		git -C sub config user.email test@example.com
+		git -C sub config user.name "Test User"
+		git -C sub config commit.gpgsign false
+		echo s0 > sub/s.txt
+		git -C sub add s.txt
+		git -C sub commit -qm s0
+	`)
+
+	head := func() string {
+		out, err := os.ReadFile(filepath.Join(dir, "sub", ".git", "HEAD"))
+		assert.NilError(t, err)
+
+		ref := strings.TrimSpace(strings.TrimPrefix(string(out), "ref: "))
+		sha, err := os.ReadFile(filepath.Join(dir, "sub", ".git", ref))
+		assert.NilError(t, err)
+
+		return strings.TrimSpace(string(sha))
+	}
+
+	files := []string{"sub"}
+
+	before, err := conflictresolver.SnapshotFiles(dir, files, nil)
+	assert.NilError(t, err)
+	assert.Assert(t, before["sub"].IsDir)
+	assert.Equal(t, before["sub"].Gitlink, head())
+
+	// Editing files inside the submodule does not change what would be
+	// staged, so the conflict is still unresolved.
+	assert.NilError(t, os.WriteFile(filepath.Join(dir, "sub", "s.txt"), []byte("edited\n"), 0o644))
+
+	unverifiable, err := conflictresolver.UnverifiableFiles(dir, files, before)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, unverifiable, []string{"sub"})
+
+	// Checking out (here: creating) a different commit is a resolution.
+	testutil.ExecOrFail(t, dir, `
+		git -C sub commit -qam s1
+	`)
+	assert.Assert(t, head() != before["sub"].Gitlink)
+
+	unverifiable, err = conflictresolver.UnverifiableFiles(dir, files, before)
+	assert.NilError(t, err)
+	assert.Equal(t, len(unverifiable), 0)
+
+	// An uninitialised submodule is an empty directory: no gitlink, and it
+	// must not pick up the enclosing repository's HEAD.
+	testutil.ExecOrFail(t, dir, `
+		git init -q .
+		mkdir empty
+	`)
+
+	states, err := conflictresolver.SnapshotFiles(dir, []string{"empty"}, nil)
+	assert.NilError(t, err)
+	assert.Assert(t, states["empty"].IsDir)
+	assert.Equal(t, states["empty"].Gitlink, "")
 }
 
 func TestSnapshotFiles_Symlinks(t *testing.T) {

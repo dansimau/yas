@@ -65,7 +65,7 @@ func TestConflictMarkerSize(t *testing.T) {
 
 	repoPath := t.TempDir()
 	setupRepo(t, repoPath, `
-		printf 'big.txt conflict-marker-size=12\nbogus.txt conflict-marker-size=abc\nflag.txt conflict-marker-size\n' > .gitattributes
+		printf 'big.txt conflict-marker-size=12\nbogus.txt conflict-marker-size=abc\nflag.txt conflict-marker-size\nmax.txt conflict-marker-size=256\nover.txt conflict-marker-size=257\nhuge.txt conflict-marker-size=4294967303\nneg.txt conflict-marker-size=-5\n' > .gitattributes
 		git add .gitattributes
 		git commit -m attrs
 	`)
@@ -80,6 +80,10 @@ func TestConflictMarkerSize(t *testing.T) {
 		{"plain.txt", DefaultConflictMarkerSize},
 		{"bogus.txt", DefaultConflictMarkerSize},
 		{"flag.txt", DefaultConflictMarkerSize},
+		{"max.txt", MaxConflictMarkerSize},
+		{"over.txt", DefaultConflictMarkerSize},
+		{"huge.txt", DefaultConflictMarkerSize},
+		{"neg.txt", DefaultConflictMarkerSize},
 		{"caf\u00e9 menu.txt", DefaultConflictMarkerSize},
 	} {
 		size, err := repo.ConflictMarkerSize(tc.path)
