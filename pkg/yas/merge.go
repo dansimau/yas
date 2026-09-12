@@ -138,8 +138,8 @@ func (yas *YAS) Merge(branchName string, force bool) error {
 	}
 
 	// Execute gh pr merge
-	//	if err := xexec.Command("gh", "pr", "merge", prNumber, "--squash", "--delete-branch", "--auto", "--subject", finalTitle, "--body", finalBody).Run(); err != nil {
-	if err := xexec.Command("gh", "pr", "merge", prNumber, "--squash", "--auto", "--subject", finalTitle, "--body", finalBody).Run(); err != nil {
+	//	if err := yas.gh("pr", "merge", prNumber, "--squash", "--delete-branch", "--auto", "--subject", finalTitle, "--body", finalBody).Run(); err != nil {
+	if err := yas.gh("pr", "merge", prNumber, "--squash", "--auto", "--subject", finalTitle, "--body", finalBody).Run(); err != nil {
 		return fmt.Errorf("failed to merge PR: %w", err)
 	}
 
@@ -157,7 +157,7 @@ func (yas *YAS) Merge(branchName string, force bool) error {
 
 // getPRTitleAndBody fetches the PR title and body using gh pr view.
 func (yas *YAS) getPRTitleAndBody(prNumber string) (string, string, error) {
-	output, err := xexec.Command("gh", "pr", "view", prNumber, "--json", "title,body", "-q", ".title + \"\n---SEPARATOR---\n\" + .body").WithStdout(nil).Output()
+	output, err := yas.gh("pr", "view", prNumber, "--json", "title,body", "-q", ".title + \"\n---SEPARATOR---\n\" + .body").WithStdout(nil).Output()
 	if err != nil {
 		return "", "", err
 	}

@@ -130,3 +130,54 @@ func TestRefresh_LeavesUpstreamUnsetWhenBranchIsNotOnRemote(t *testing.T) {
 	// "upstream is gone" state, so it must be left alone.
 	assert.Equal(t, "", upstreamOf(tempDir, "topic-a"))
 }
+
+// gh derives the GitHub repository from its working directory, so when yas is
+// pointed at a repository via --repo, gh has to run inside that repository
+// rather than wherever yas was invoked from.
+func TestRefresh_RunsGhInsideSelectedRepo(t *testing.T) {
+	t.Parallel()
+
+	repoDir := t.TempDir()
+	outsideDir := t.TempDir()
+	fakeOrigin := filepath.Join(t.TempDir(), "origin.git")
+
+	// Invoke yas from a directory that is not a git repository at all.
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(outsideDir),
+	)
+
+	ghPRList := cli.Mock(
+		"gh", "pr", "list",
+		"--head", "topic-a",
+		"--state", "all",
+		"--json", "id,state,url,isDraft,baseRefName",
+	).WithStdout(mustMarshalJSON([]yas.PullRequestMetadata{{BaseRefName: "main"}}))
+
+	testutil.ExecOrFail(t, repoDir, stringutil.MustInterpolate(`
+		git init --bare {{.fakeOrigin}}
+
+		git init --initial-branch=main
+		git remote add origin {{.fakeOrigin}}
+
+		touch main
+		git add main
+		git commit -m "main-0"
+		git push -u origin main
+
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+		git push -u origin topic-a
+	`, map[string]string{"fakeOrigin": fakeOrigin}))
+
+	assert.NilError(t, cli.Run("--repo="+repoDir, "config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("--repo="+repoDir, "refresh", "topic-a").Err())
+
+	calls := ghPRList.Calls()
+	assert.Assert(t, len(calls) > 0, "expected gh pr list to be called")
+
+	for _, call := range calls {
+		assert.Equal(t, resolvePath(call.Dir), resolvePath(repoDir))
+	}
+}

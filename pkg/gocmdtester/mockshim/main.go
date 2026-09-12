@@ -37,6 +37,7 @@ type MockConfig struct {
 type Invocation struct {
 	Command   string    `json:"command"`
 	Args      []string  `json:"args"`
+	Dir       string    `json:"dir"`
 	Timestamp time.Time `json:"timestamp"`
 }
 
@@ -115,9 +116,14 @@ func loadConfig(mockDir string) ([]MockConfig, error) {
 }
 
 func logInvocation(mockDir, command string, args []string) error {
+	// The working directory is recorded so tests can check where a command ran,
+	// not just what was run. Failing to determine it should not break the test.
+	dir, _ := os.Getwd()
+
 	invocation := Invocation{
 		Command:   command,
 		Args:      args,
+		Dir:       dir,
 		Timestamp: time.Now(),
 	}
 
