@@ -142,6 +142,9 @@ func (yas *YAS) submitBranches(branches []string, draft bool) error {
 		return err
 	}
 
+	// Phase 3: Link each submitted lineage as a stack on GitHub
+	yas.linkSubmittedBranches(branches)
+
 	fmt.Printf("\nSuccessfully submitted and annotated %d branch(es)\n", len(branches))
 
 	return nil

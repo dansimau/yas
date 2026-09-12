@@ -112,6 +112,24 @@ func (yas *YAS) parentBranchName(branchMetadata BranchMetadata) string {
 	return branchMetadata.GitHubPullRequest.BaseRefName
 }
 
+// lineage returns the branches from trunk (exclusive) up to and including
+// branch, bottom to top. The walk stops at trunk, at a branch with no known
+// parent, and at a deleted parent: deleted branches are also left out of the
+// branch graph, so ancestors and descendants follow the same rule.
+func (yas *YAS) lineage(branch string) []string {
+	chain := []string{branch}
+
+	for {
+		parent := yas.parentBranchName(yas.data.Branches.Get(branch))
+		if parent == "" || parent == yas.cfg.TrunkBranch || yas.data.Branches.Get(parent).Deleted != nil {
+			return chain
+		}
+
+		chain = append([]string{parent}, chain...)
+		branch = parent
+	}
+}
+
 func (yas *YAS) countPRsInStack(currentBranch string) (int, error) {
 	// Get the graph
 	graph, err := yas.graph()
@@ -121,20 +139,11 @@ func (yas *YAS) countPRsInStack(currentBranch string) (int, error) {
 
 	count := 0
 
-	// Count ancestors (walking up to trunk)
-	branch := currentBranch
-	for {
-		metadata := yas.data.Branches.Get(branch)
-		if metadata.GitHubPullRequest.ID != "" {
+	// Count the current branch and its ancestors (walking up to trunk)
+	for _, branch := range yas.lineage(currentBranch) {
+		if yas.data.Branches.Get(branch).GitHubPullRequest.ID != "" {
 			count++
 		}
-
-		parent := yas.parentBranchName(metadata)
-		if parent == "" || parent == yas.cfg.TrunkBranch {
-			break
-		}
-
-		branch = parent
 	}
 
 	// Count descendants (walking down from current)
@@ -161,20 +170,8 @@ func (yas *YAS) buildStackVisualization(currentBranch string) (string, error) {
 	}
 
 	// Get ancestors (walking up to trunk)
-	ancestors := []string{}
-
-	branch := currentBranch
-	for {
-		metadata := yas.data.Branches.Get(branch)
-
-		parent := yas.parentBranchName(metadata)
-		if parent == "" || parent == yas.cfg.TrunkBranch {
-			break
-		}
-
-		ancestors = append([]string{parent}, ancestors...)
-		branch = parent
-	}
+	lineage := yas.lineage(currentBranch)
+	ancestors := lineage[:len(lineage)-1]
 
 	// Get descendants (walking down from current)
 	descendants := []string{}

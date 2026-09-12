@@ -82,6 +82,7 @@ func Run(args ...string) (exitCode int) {
 	mustAddCommand(parser.AddCommand("delete", "Delete a branch and its worktree", "", &deleteCmd{}))
 	mustAddCommand(parser.AddCommand("hook", "Print shell integration hook for bash or zsh", "", &hookCmd{}))
 	mustAddCommand(parser.AddCommand("init", "Set up initial configuration", "", &initCmd{}))
+	mustAddCommand(parser.AddCommand("link", "Link the current stack as a GitHub stacked PR stack", "", &linkCmd{})).Hidden = true
 	mustAddCommand(parser.AddCommand("list", "List stacks", "", &listCmd{})).Aliases = []string{"ls"}
 	mustAddCommand(parser.AddCommand("merge", "Merge PR for current branch", "", &mergeCmd{}))
 	mustAddCommand(parser.AddCommand("move", "Move current branch and descendants to a new parent", "", &moveCmd{}))
