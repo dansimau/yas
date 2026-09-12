@@ -8,11 +8,11 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	restoreGitConfig := testutil.IsolateGitConfig()
+	restoreHome := testutil.IsolateHome()
 
 	exitCode := m.Run()
 
-	restoreGitConfig()
+	restoreHome()
 
 	os.Exit(exitCode)
 }

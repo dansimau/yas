@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -160,6 +161,44 @@ func WithEnv(vars ...string) func() {
 				panic(err)
 			}
 		}
+	}
+}
+
+// IsolateHome points HOME at a temporary directory so that git never reads
+// the developer's own ~/.gitconfig (e.g. commit.gpgsign, includes). It also
+// drops XDG_CONFIG_HOME and any GIT_* variables (such as GIT_CONFIG_GLOBAL)
+// from the environment so they cannot override the isolated config. The
+// temporary home contains only a git user identity, since tests rely on the
+// global config for that. It is intended to be called from TestMain; the
+// returned function restores the environment and removes the directory.
+func IsolateHome() func() {
+	home, err := os.MkdirTemp("", "yas-test-home-")
+	if err != nil {
+		panic(err)
+	}
+
+	gitconfig := "[user]\n\tname = Test User\n\temail = test@example.com\n"
+	if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte(gitconfig), 0o644); err != nil {
+		panic(err)
+	}
+
+	env := []string{"HOME=" + home}
+
+	for _, v := range os.Environ() {
+		name, _ := parseEnvVar(v)
+		if name == "HOME" || name == "XDG_CONFIG_HOME" || strings.HasPrefix(name, "GIT_") {
+			continue
+		}
+
+		env = append(env, v)
+	}
+
+	restore := WithEnv(env...)
+
+	return func() {
+		restore()
+
+		_ = os.RemoveAll(home)
 	}
 }
 
