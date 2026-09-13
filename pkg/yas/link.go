@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"os/exec"
 	"regexp"
@@ -258,11 +259,55 @@ type linkOutcome struct {
 	Attempted bool
 }
 
+// lineageStacks returns the distinct stacks that the given PRs belong to,
+// bottom to top. Every PR is looked up unless a stack already found contains
+// it, so a lineage whose bottom PR is not stacked yet still finds the stack its
+// higher PRs are in.
+func (yas *YAS) lineageStacks(prNumbers []int) ([]*Stack, error) {
+	stacks := []*Stack{}
+	covered := map[int]bool{}
+
+	for _, n := range prNumbers {
+		if covered[n] {
+			continue
+		}
+
+		stack, err := yas.findStackForPR(n)
+		if err != nil {
+			return nil, err
+		}
+
+		if stack == nil {
+			continue
+		}
+
+		stacks = append(stacks, stack)
+
+		for _, pr := range stack.PullRequests {
+			covered[pr.Number] = true
+		}
+	}
+
+	return stacks, nil
+}
+
+// describeStacks renders the open PRs of each stack, e.g.
+// "stack #7 contains #41, #42; stack #8 contains #43".
+func describeStacks(stacks []*Stack) string {
+	parts := make([]string, 0, len(stacks))
+	for _, stack := range stacks {
+		parts = append(parts, fmt.Sprintf("stack #%d contains %s", stack.Number, formatPRNumbers(stack.openPRNumbers())))
+	}
+
+	return strings.Join(parts, "; ")
+}
+
 // linkLineage makes sure the lineage trunk→branch is linked as a stack on
 // GitHub. Merged PRs are ignored on both sides: yas deletes merged branches, so
 // the local lineage starts above them, while GitHub keeps them in the stack.
-// The stack is created if it doesn't exist and extended if the lineage grew;
-// any other difference is reported without changing anything.
+// The stack is created if none of the lineage's PRs is stacked yet and extended
+// if the lineage grew; any other difference is reported without changing
+// anything.
 func (yas *YAS) linkLineage(branch string, dryRun bool) (linkOutcome, error) {
 	numbers, missing, err := yas.lineagePRNumbers(branch)
 	if err != nil {
@@ -277,12 +322,12 @@ func (yas *YAS) linkLineage(branch string, dryRun bool) (linkOutcome, error) {
 		return linkOutcome{Message: "nothing to link (a stack needs at least two PRs)"}, nil
 	}
 
-	stack, err := yas.findStackForPR(numbers[0])
+	stacks, err := yas.lineageStacks(numbers)
 	if err != nil {
 		return linkOutcome{}, err
 	}
 
-	if stack == nil {
+	if len(stacks) == 0 {
 		if dryRun {
 			return attempted("would create stack with %s", formatPRNumbers(numbers)), nil
 		}
@@ -295,12 +340,24 @@ func (yas *YAS) linkLineage(branch string, dryRun bool) (linkOutcome, error) {
 		return attempted("linked %s as stack #%d", formatPRNumbers(numbers), created.Number), nil
 	}
 
-	merged := stack.mergedPRNumbers()
-	open := stack.openPRNumbers()
+	merged := []int{}
+	for _, stack := range stacks {
+		merged = append(merged, stack.mergedPRNumbers()...)
+	}
 
 	desired := slices.DeleteFunc(slices.Clone(numbers), func(n int) bool {
 		return slices.Contains(merged, n)
 	})
+
+	mismatch := attempted("this lineage (%s) does not match GitHub: %s; run 'yas link --unlink' and then 'yas link' to relink it",
+		formatPRNumbers(desired), describeStacks(stacks))
+
+	if len(stacks) > 1 {
+		return mismatch, nil
+	}
+
+	stack := stacks[0]
+	open := stack.openPRNumbers()
 
 	switch {
 	case isPrefix(desired, open):
@@ -320,8 +377,7 @@ func (yas *YAS) linkLineage(branch string, dryRun bool) (linkOutcome, error) {
 		return attempted("added %s to stack #%d", formatPRNumbers(delta), stack.Number), nil
 
 	default:
-		return attempted("stack #%d contains %s, which does not match this lineage (%s); run 'yas link --unlink' and then 'yas link' to relink it",
-			stack.Number, formatPRNumbers(open), formatPRNumbers(desired)), nil
+		return mismatch, nil
 	}
 }
 
@@ -366,20 +422,33 @@ func (yas *YAS) Link(dryRun bool) error {
 	return nil
 }
 
-// Unlink removes the unmerged PRs of the current branch's stack from that stack
-// on GitHub.
+// Unlink is the reverse of Link: it removes the unmerged PRs from every stack
+// that any PR in the lineage trunk→current branch belongs to, so that the
+// lineage can be linked again from scratch.
 func (yas *YAS) Unlink(dryRun bool) error {
 	currentBranch, err := yas.currentBranchForLinking()
 	if err != nil {
 		return err
 	}
 
-	n, ok := prNumber(yas.data.Branches.Get(currentBranch))
-	if !ok {
-		return fmt.Errorf("branch '%s' does not have a PR", currentBranch)
+	lineage, err := yas.lineage(currentBranch)
+	if err != nil {
+		return err
 	}
 
-	stack, err := yas.findStackForPR(n)
+	numbers := []int{}
+
+	for _, name := range lineage {
+		if n, ok := prNumber(yas.data.Branches.Get(name)); ok {
+			numbers = append(numbers, n)
+		}
+	}
+
+	if len(numbers) == 0 {
+		return fmt.Errorf("no branch in the lineage of '%s' has a PR", currentBranch)
+	}
+
+	stacks, err := yas.lineageStacks(numbers)
 	if errors.Is(err, errStacksUnavailable) {
 		fmt.Println(err.Error())
 
@@ -390,30 +459,32 @@ func (yas *YAS) Unlink(dryRun bool) error {
 		return err
 	}
 
-	if stack == nil {
-		fmt.Printf("%s is not part of a stack\n", currentBranch)
+	if len(stacks) == 0 {
+		fmt.Printf("nothing to unlink: no PR in the lineage of %s is part of a stack\n", currentBranch)
 
 		return nil
 	}
 
-	if dryRun {
-		fmt.Printf("would unstack stack #%d (%s)\n", stack.Number, formatPRNumbers(stack.openPRNumbers()))
+	for _, stack := range stacks {
+		if dryRun {
+			fmt.Printf("would unstack stack #%d (%s)\n", stack.Number, formatPRNumbers(stack.openPRNumbers()))
 
-		return nil
+			continue
+		}
+
+		remaining, err := yas.unstack(stack.Number)
+		if err != nil {
+			return fmt.Errorf("failed to unstack stack #%d: %w", stack.Number, err)
+		}
+
+		if remaining == nil {
+			fmt.Printf("dissolved stack #%d\n", stack.Number)
+
+			continue
+		}
+
+		fmt.Printf("removed open PRs from stack #%d; merged PRs remain (%s)\n", stack.Number, formatPRNumbers(remaining.mergedPRNumbers()))
 	}
-
-	remaining, err := yas.unstack(stack.Number)
-	if err != nil {
-		return fmt.Errorf("failed to unstack stack #%d: %w", stack.Number, err)
-	}
-
-	if remaining == nil {
-		fmt.Printf("dissolved stack #%d\n", stack.Number)
-
-		return nil
-	}
-
-	fmt.Printf("removed open PRs from stack #%d; merged PRs remain (%s)\n", stack.Number, formatPRNumbers(remaining.mergedPRNumbers()))
 
 	return nil
 }
@@ -431,19 +502,26 @@ func (yas *YAS) currentBranchForLinking() (string, error) {
 	return currentBranch, nil
 }
 
-// forkPoint returns a branch that has more than one child among the given
-// branches, and those children, or "" if the branches form a single line.
+// forkPoint returns a branch with more than one child among the given branches,
+// and those children, or "" if the branches form a single line. The parent need
+// not be one of the branches itself: submit --outdated leaves out parents that
+// are up to date, but two siblings still cannot share one stack. Trunk is not a
+// fork point, since stacks growing from trunk are independent of each other.
 func (yas *YAS) forkPoint(branches []string) (parent string, children []string) {
 	childrenOf := map[string][]string{}
 
 	for _, name := range branches {
 		p := yas.parentBranchName(yas.data.Branches.Get(name))
+		if p == "" || p == yas.cfg.TrunkBranch {
+			continue
+		}
+
 		childrenOf[p] = append(childrenOf[p], name)
 	}
 
-	for _, name := range branches {
-		if len(childrenOf[name]) > 1 {
-			return name, childrenOf[name]
+	for _, p := range slices.Sorted(maps.Keys(childrenOf)) {
+		if len(childrenOf[p]) > 1 {
+			return p, childrenOf[p]
 		}
 	}
 

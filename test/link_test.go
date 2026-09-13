@@ -185,6 +185,7 @@ func TestLink_CreatesStack(t *testing.T) {
 	cli, tempDir := newLinkTester(t)
 
 	mockStackLookup(cli, "41")
+	mockStackLookup(cli, "42")
 	mockStackCreate(cli, stackNumber7(openStackPR(41, "topic-a"), openStackPR(42, "topic-b")), "41", "42")
 
 	setupLinkRepo(t, cli, tempDir, twoBranchStack(), "topic-b")
@@ -245,6 +246,7 @@ func TestLink_AddsNewPRsToExistingStack(t *testing.T) {
 	cli, tempDir := newLinkTester(t)
 
 	mockStackLookup(cli, "41", stackNumber7(openStackPR(41, "topic-a"), openStackPR(42, "topic-b")))
+	mockStackLookup(cli, "43")
 	mockStackAdd(cli, "7", "43")
 
 	setupLinkRepo(t, cli, tempDir, threeBranchStack(), "topic-c")
@@ -260,12 +262,54 @@ func TestLink_ReportsMismatchWithoutChangingStack(t *testing.T) {
 	cli, tempDir := newLinkTester(t)
 
 	mockStackLookup(cli, "41", stackNumber7(openStackPR(41, "topic-a"), openStackPR(99, "other")))
+	mockStackLookup(cli, "42")
 
 	setupLinkRepo(t, cli, tempDir, twoBranchStack(), "topic-b")
 
 	result := cli.Run("link")
 	assert.NilError(t, result.Err())
 	assert.Assert(t, result.StdoutContains("stack #7 contains #41, #99"), result.Stdout())
+	assert.Assert(t, result.StdoutContains("yas link --unlink"), result.Stdout())
+}
+
+func stackNumber8(prs ...yas.StackPullRequest) yas.Stack {
+	return yas.Stack{ID: 1001, Number: 8, Base: yas.StackRef{Ref: "main"}, Open: true, PullRequests: prs}
+}
+
+// When a new PR appears at the bottom of a lineage whose higher PRs are already
+// stacked, GitHub would reject creating a second stack from them. The existing
+// stack is found through the higher PRs and reported as a mismatch instead.
+func TestLink_ReportsStackFoundAboveNewBottomPR(t *testing.T) {
+	t.Parallel()
+
+	cli, tempDir := newLinkTester(t)
+
+	mockStackLookup(cli, "41")
+	mockStackLookup(cli, "42", stackNumber7(openStackPR(42, "topic-b"), openStackPR(43, "topic-c")))
+
+	setupLinkRepo(t, cli, tempDir, threeBranchStack(), "topic-c")
+
+	result := cli.Run("link")
+	assert.NilError(t, result.Err())
+	assert.Assert(t, result.StdoutContains("this lineage (#41, #42, #43) does not match GitHub: stack #7 contains #42, #43"), result.Stdout())
+	assert.Assert(t, result.StdoutContains("yas link --unlink"), result.Stdout())
+}
+
+// A lineage whose PRs are spread over several stacks cannot be fixed by adding
+// to one of them; it is reported so the user can unlink and relink.
+func TestLink_ReportsLineageSpanningMultipleStacks(t *testing.T) {
+	t.Parallel()
+
+	cli, tempDir := newLinkTester(t)
+
+	mockStackLookup(cli, "41", stackNumber7(openStackPR(41, "topic-a"), openStackPR(42, "topic-b")))
+	mockStackLookup(cli, "43", stackNumber8(openStackPR(43, "topic-c")))
+
+	setupLinkRepo(t, cli, tempDir, threeBranchStack(), "topic-c")
+
+	result := cli.Run("link")
+	assert.NilError(t, result.Err())
+	assert.Assert(t, result.StdoutContains("stack #7 contains #41, #42; stack #8 contains #43"), result.Stdout())
 	assert.Assert(t, result.StdoutContains("yas link --unlink"), result.Stdout())
 }
 
@@ -295,6 +339,7 @@ func TestLink_WalksThroughDeletedParent(t *testing.T) {
 	cli, tempDir := newLinkTester(t)
 
 	mockStackLookup(cli, "41")
+	mockStackLookup(cli, "43")
 	mockStackCreate(cli, stackNumber7(openStackPR(41, "topic-a"), openStackPR(43, "topic-c")), "41", "43")
 
 	branches := threeBranchStack()
@@ -363,6 +408,7 @@ func TestLink_NotFoundWhileAddingToStackIsAnError(t *testing.T) {
 	cli, tempDir := newLinkTester(t)
 
 	mockStackLookup(cli, "41", stackNumber7(openStackPR(41, "topic-a"), openStackPR(42, "topic-b")))
+	mockStackLookup(cli, "43")
 	mockGH(cli, append([]string{"api", "--method", "POST", stacksAPIPath + "/7/add"}, pullRequestFields("43")...)...).
 		WithCode(1).
 		WithStderr("gh: Not Found (HTTP 404)\n")
@@ -408,6 +454,7 @@ func TestLink_OtherAPIErrorsAreReported(t *testing.T) {
 	cli, tempDir := newLinkTester(t)
 
 	mockStackLookup(cli, "41")
+	mockStackLookup(cli, "42")
 	mockGH(cli, append([]string{"api", "--method", "POST", stacksAPIPath}, pullRequestFields("41", "42")...)...).
 		WithCode(1).
 		WithStderr("gh: Validation Failed (HTTP 422)\n")
@@ -425,6 +472,7 @@ func TestLink_DryRun(t *testing.T) {
 	cli, tempDir := newLinkTester(t)
 
 	mockStackLookup(cli, "41")
+	mockStackLookup(cli, "42")
 
 	setupLinkRepo(t, cli, tempDir, twoBranchStack(), "topic-b")
 
@@ -438,7 +486,7 @@ func TestLink_Unlink_DissolvesStack(t *testing.T) {
 
 	cli, tempDir := newLinkTester(t)
 
-	mockStackLookup(cli, "42", stackNumber7(openStackPR(41, "topic-a"), openStackPR(42, "topic-b")))
+	mockStackLookup(cli, "41", stackNumber7(openStackPR(41, "topic-a"), openStackPR(42, "topic-b")))
 	mockStackUnstack(cli, "7", "")
 
 	setupLinkRepo(t, cli, tempDir, twoBranchStack(), "topic-b")
@@ -455,7 +503,7 @@ func TestLink_Unlink_MergedPRsRemain(t *testing.T) {
 
 	remaining := stackNumber7(mergedStackPR(40, "topic-0"))
 
-	mockStackLookup(cli, "42", stackNumber7(mergedStackPR(40, "topic-0"), openStackPR(41, "topic-a"), openStackPR(42, "topic-b")))
+	mockStackLookup(cli, "41", stackNumber7(mergedStackPR(40, "topic-0"), openStackPR(41, "topic-a"), openStackPR(42, "topic-b")))
 	mockStackUnstack(cli, "7", mustMarshalJSON(remaining))
 
 	setupLinkRepo(t, cli, tempDir, twoBranchStack(), "topic-b")
@@ -465,18 +513,60 @@ func TestLink_Unlink_MergedPRsRemain(t *testing.T) {
 	equalLines(t, result.Stdout(), "removed open PRs from stack #7; merged PRs remain (#40)")
 }
 
+// Unlink is the reverse of link: a stack that conflicts with the lineage may
+// only be reachable through an ancestor's PR, and unlink has to find it there
+// so that a subsequent link can relink the lineage.
+func TestLink_Unlink_FindsStackThroughAncestor(t *testing.T) {
+	t.Parallel()
+
+	cli, tempDir := newLinkTester(t)
+
+	mockStackLookup(cli, "41", stackNumber7(openStackPR(41, "topic-a"), openStackPR(99, "other")))
+	mockStackLookup(cli, "42")
+	mockStackUnstack(cli, "7", "")
+
+	setupLinkRepo(t, cli, tempDir, twoBranchStack(), "topic-b")
+
+	result := cli.Run("link", "--unlink")
+	assert.NilError(t, result.Err())
+	equalLines(t, result.Stdout(), "dissolved stack #7")
+}
+
+// Every stack any PR in the lineage belongs to is unlinked, so that the whole
+// lineage can be relinked from scratch.
+func TestLink_Unlink_UnlinksEveryStackInLineage(t *testing.T) {
+	t.Parallel()
+
+	cli, tempDir := newLinkTester(t)
+
+	mockStackLookup(cli, "41", stackNumber7(openStackPR(41, "topic-a"), openStackPR(42, "topic-b")))
+	mockStackLookup(cli, "43", stackNumber8(openStackPR(43, "topic-c")))
+	mockStackUnstack(cli, "7", "")
+	mockStackUnstack(cli, "8", "")
+
+	setupLinkRepo(t, cli, tempDir, threeBranchStack(), "topic-c")
+
+	result := cli.Run("link", "--unlink")
+	assert.NilError(t, result.Err())
+	equalLines(t, result.Stdout(), `
+		dissolved stack #7
+		dissolved stack #8
+	`)
+}
+
 func TestLink_Unlink_NotInStack(t *testing.T) {
 	t.Parallel()
 
 	cli, tempDir := newLinkTester(t)
 
+	mockStackLookup(cli, "41")
 	mockStackLookup(cli, "42")
 
 	setupLinkRepo(t, cli, tempDir, twoBranchStack(), "topic-b")
 
 	result := cli.Run("link", "--unlink")
 	assert.NilError(t, result.Err())
-	equalLines(t, result.Stdout(), "topic-b is not part of a stack")
+	equalLines(t, result.Stdout(), "nothing to unlink: no PR in the lineage of topic-b is part of a stack")
 }
 
 func TestLink_Unlink_DryRun(t *testing.T) {
@@ -484,7 +574,7 @@ func TestLink_Unlink_DryRun(t *testing.T) {
 
 	cli, tempDir := newLinkTester(t)
 
-	mockStackLookup(cli, "42", stackNumber7(openStackPR(41, "topic-a"), openStackPR(42, "topic-b")))
+	mockStackLookup(cli, "41", stackNumber7(openStackPR(41, "topic-a"), openStackPR(42, "topic-b")))
 
 	setupLinkRepo(t, cli, tempDir, twoBranchStack(), "topic-b")
 
@@ -495,7 +585,7 @@ func TestLink_Unlink_DryRun(t *testing.T) {
 
 // Submitting a stack links it on GitHub once the PRs have been annotated. Every
 // submitted branch is linked in turn, but a single-PR lineage is not a stack, so
-// only topic-b's lineage reaches GitHub: one lookup and one create.
+// only topic-b's lineage reaches GitHub: one lookup per PR and one create.
 func TestSubmit_LinksStackAfterAnnotate(t *testing.T) {
 	t.Parallel()
 
@@ -513,6 +603,7 @@ func TestSubmit_LinksStackAfterAnnotate(t *testing.T) {
 	editB := cli.Mock("gh", "pr", "edit", "42", "--body", annotationBody([]string{"41", "42"}, 1))
 
 	lookup := mockStackLookup(cli, "41")
+	mockStackLookup(cli, "42")
 	create := mockStackCreate(cli, stackNumber7(openStackPR(41, "topic-a"), openStackPR(42, "topic-b")), "41", "42")
 
 	testutil.ExecOrFail(t, tempDir, stringutil.MustInterpolate(`
@@ -672,4 +763,71 @@ func TestSubmit_ForkedStackIsNotLinked(t *testing.T) {
 	assert.Assert(t, !result.StdoutContains("Linking stacks:"), result.Stdout())
 	assert.Assert(t, !result.StdoutContains("failed to link stack"), result.Stdout())
 	assert.Assert(t, result.StdoutContains("Successfully submitted and annotated 3 branch(es)"), result.Stdout())
+}
+
+// submit --outdated leaves out branches that are already up to date. Two
+// outdated siblings still fork at their shared, up-to-date parent, and that
+// fork must be detected even though the parent is not being submitted.
+func TestSubmit_ForkThroughUnsubmittedParentIsNotLinked(t *testing.T) {
+	t.Parallel()
+
+	cli, tempDir := newLinkTester(t)
+
+	fakeOrigin := t.TempDir()
+
+	mockGitHubPRForBranch(cli, "topic-b", yas.PullRequestMetadata{URL: githubPRURL("42"), BaseRefName: "topic-a"})
+	mockGitHubPRForBranch(cli, "topic-c", yas.PullRequestMetadata{URL: githubPRURL("43"), BaseRefName: "topic-a"})
+
+	cli.Mock("gh", "pr", "view", gocmdtester.AnyFurtherArgs).WithStdout("")
+	cli.Mock("gh", "pr", "edit", gocmdtester.AnyFurtherArgs)
+
+	// No `gh api` mocks: the Stacks API must not be contacted at all
+
+	testutil.ExecOrFail(t, tempDir, stringutil.MustInterpolate(`
+		git init --bare {{.fakeOrigin}}
+
+		git init --initial-branch=main
+		git remote add origin {{.fakeOrigin}}
+
+		touch main
+		git add main
+		git commit -m "main-0"
+		git push -u origin main
+
+		# topic-a is already submitted and up to date
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+		git push -u origin topic-a
+
+		git checkout -b topic-b
+		touch b
+		git add b
+		git commit -m "topic-b-0"
+
+		git checkout -b topic-c topic-a
+		touch c
+		git add c
+		git commit -m "topic-c-0"
+
+		git checkout topic-a
+	`, map[string]string{"fakeOrigin": fakeOrigin}))
+
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+
+	branches := map[string]yas.BranchMetadata{
+		"topic-a": trackedBranchWithPR("topic-a", "main", "41"),
+		"topic-b": trackedBranchWithPR("topic-b", "topic-a", "42"),
+		"topic-c": trackedBranchWithPR("topic-c", "topic-a", "43"),
+	}
+	writeStateFileToDir(t, tempDir, yasState{Branches: branches})
+
+	result := cli.Run("submit", "--outdated")
+	assert.NilError(t, result.Err())
+
+	assert.Assert(t, result.StdoutContains("stack forks at topic-a (topic-b, topic-c)"), result.Stdout())
+	assert.Assert(t, !result.StdoutContains("Linking stacks:"), result.Stdout())
+	assert.Assert(t, !result.StdoutContains("failed to link stack"), result.Stdout())
+	assert.Assert(t, result.StdoutContains("Successfully submitted and annotated 2 branch(es)"), result.Stdout())
 }
