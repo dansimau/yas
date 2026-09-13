@@ -2,6 +2,7 @@ package yascli
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/dansimau/yas/pkg/yas"
 )
@@ -24,7 +25,7 @@ func (c *syncCmd) trackUntrackedBranches() error {
 	return c.yasInstance.RefreshRemoteStatus(untrackedBranches...)
 }
 
-func (c *syncCmd) checkForClosedPRs() error {
+func (c *syncCmd) checkForClosedPRs(primaryRepoPath string) error {
 	fmt.Println("🧹 Checking for merged PRs...")
 	// Fetch latest PR metadata from GitHub for branches that have PRs
 	if err := c.yasInstance.RefreshRemoteStatus(c.yasInstance.TrackedBranches().WithPRs().BranchNames()...); err != nil {
@@ -44,6 +45,14 @@ func (c *syncCmd) checkForClosedPRs() error {
 		if !cmd.DryRun {
 			if err := c.yasInstance.DeleteBranch(branch.Name, false); err != nil {
 				return fmt.Errorf("error deleting branch %s: %w", branch.Name, err)
+			}
+
+			// Deleting the worktree from which sync was launched invalidates the
+			// repository path held by this YAS instance. Reopen from the primary
+			// worktree so subsequent deletions and a requested restack keep working.
+			c.yasInstance, err = yas.NewFromRepository(primaryRepoPath)
+			if err != nil {
+				return fmt.Errorf("failed to reopen repository from primary worktree: %w", err)
 			}
 
 			if worktreePath != "" {
@@ -106,14 +115,27 @@ func (c *syncCmd) Execute(args []string) error {
 		return NewError(err.Error())
 	}
 
-	if err := c.checkForClosedPRs(); err != nil {
+	// A merged branch may own the worktree from which this command was
+	// launched. Move the process to the primary worktree before removing any
+	// merged branches, otherwise deleting that worktree leaves the process in a
+	// nonexistent directory and later git commands fail.
+	primaryRepoPath, err := yasInstance.PrimaryRepoPath()
+	if err != nil {
+		return NewError(fmt.Sprintf("failed to get primary repo path: %v", err))
+	}
+
+	if err := os.Chdir(primaryRepoPath); err != nil {
+		return NewError(fmt.Sprintf("failed to change to primary worktree: %v", err))
+	}
+
+	if err := c.checkForClosedPRs(primaryRepoPath); err != nil {
 		return NewError(err.Error())
 	}
 
 	if c.Restack {
 		fmt.Println("🔄 Restacking branches...")
 
-		if err := yasInstance.Restack(yasInstance.Config().TrunkBranch, cmd.DryRun, resolution); err != nil {
+		if err := c.yasInstance.Restack(c.yasInstance.Config().TrunkBranch, cmd.DryRun, resolution); err != nil {
 			return NewError(err.Error())
 		}
 	}

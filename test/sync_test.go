@@ -1,6 +1,7 @@
 package test
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -350,4 +351,72 @@ func TestSync_RunFromWorktree(t *testing.T) {
 	// Run sync from inside the worktree
 	result := cliWorktree.Run("sync")
 	assert.NilError(t, result.Err(), "yas sync should succeed from worktree; stderr: %s", result.Stderr())
+}
+
+func TestSync_RestackFromMergedBranchWorktree(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	fakeOrigin := t.TempDir()
+	worktreePath := filepath.Join(tempDir, "worktrees", "topic-a")
+	shellExecPath := filepath.Join(t.TempDir(), "shell-exec")
+
+	cliPrimary := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+	cliWorktree := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(worktreePath),
+		gocmdtester.WithEnv("YAS_SHELL_EXEC", shellExecPath),
+	)
+
+	mockGitHubPRForBranch(cliWorktree, "topic-a", yas.PullRequestMetadata{
+		ID:          "PR_kwDOTest123",
+		State:       "MERGED",
+		URL:         "https://github.com/test/test/pull/42",
+		BaseRefName: "main",
+	})
+	cliWorktree.Mock("git", "pull", gocmdtester.AnyFurtherArgs).WithStdout("Already up to date.\n")
+	cliWorktree.Mock("git", gocmdtester.AnyFurtherArgs).WithPassthroughExec()
+
+	testutil.ExecOrFail(t, tempDir, stringutil.MustInterpolate(`
+		git init --bare {{.fakeOrigin}}
+		git init --initial-branch=main
+		git remote add origin {{.fakeOrigin}}
+
+		touch main
+		git add main
+		git commit -m "main-0"
+		git push -u origin main
+
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+
+		git checkout -b topic-b
+		touch b
+		git add b
+		git commit -m "topic-b-0"
+
+		git checkout main
+		mkdir -p worktrees
+		git worktree add {{.worktreePath}} topic-a
+	`, map[string]string{
+		"fakeOrigin":   fakeOrigin,
+		"worktreePath": worktreePath,
+	}))
+
+	assert.NilError(t, cliPrimary.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cliPrimary.Run("add", "topic-a", "--parent=main").Err())
+	assert.NilError(t, cliPrimary.Run("add", "topic-b", "--parent=topic-a").Err())
+
+	result := cliWorktree.Run("sync", "--restack")
+	assert.NilError(t, result.Err(), "yas sync --restack should survive deleting its starting worktree; stderr: %s", result.Stderr())
+
+	_, err := os.Stat(worktreePath)
+	assert.Assert(t, os.IsNotExist(err), "merged branch worktree should be removed")
+	equalLines(t, mustExecOutput(tempDir, "git", "log", "--pretty=%D : %s", "topic-b"), `
+		topic-b : topic-b-0
+		HEAD -> main, origin/main : main-0
+	`)
 }
