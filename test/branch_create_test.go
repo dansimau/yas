@@ -1,6 +1,8 @@
 package test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -333,4 +335,55 @@ func TestConfigSet_AutoPrefixBranch(t *testing.T) {
 	testutil.ExecOrFail(t, tempDir, `
 		grep -q "autoPrefixBranch: false" .yas/yas.yaml
 	`)
+}
+
+// TestBranchCreate_FailedCheckoutLeavesNothingBehind covers creating a branch
+// from an explicit parent when the checkout cannot proceed because local
+// changes conflict with the parent's tree. Nothing may be left behind: no
+// branch ref, no stack entry, and the current checkout untouched. Otherwise a
+// retry would treat the half-created branch as an existing one.
+func TestBranchCreate_FailedCheckoutLeavesNothingBehind(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+		echo main > file
+		git add file
+		git commit -m "main-0"
+
+		git checkout -b feature-a
+		echo feature-a > file
+		git commit -am "feature-a-0"
+	`)
+
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("config", "set", "--no-auto-prefix-branch").Err())
+	assert.NilError(t, cli.Run("add", "feature-a", "--parent=main").Err())
+
+	// An uncommitted change to a file that differs between feature-a and main
+	// makes git refuse to switch to a branch based on main.
+	testutil.ExecOrFail(t, tempDir, `
+		echo local > file
+	`)
+
+	result := cli.Run("branch", "--parent=main", "feature-b")
+	assert.Assert(t, result.Err() != nil, "expected branch creation to fail")
+
+	// Still on feature-a with the local change intact
+	equalLines(t, mustExecOutput(tempDir, "git", "branch", "--show-current"), "feature-a")
+	equalLines(t, mustExecOutput(tempDir, "cat", "file"), "local")
+
+	// No branch ref was left behind
+	equalLines(t, mustExecOutput(tempDir, "git", "branch", "--list", "feature-b"), "")
+
+	// No stack entry was left behind
+	state, err := os.ReadFile(filepath.Join(tempDir, ".yas/yas.state.json"))
+	assert.NilError(t, err)
+	assert.Assert(t, !strings.Contains(string(state), "feature-b"), "state should not contain feature-b: %s", state)
 }
