@@ -73,9 +73,9 @@ func (s *Stack) mergedPRNumbers() []int {
 	return numbers
 }
 
-// errStacksUnavailable is returned when the Stacks API responds with 404, which
-// GitHub uses to signal that stacked pull requests are not enabled for the
-// repository.
+// errStacksUnavailable is returned when looking up a stack responds with 404,
+// which GitHub uses to signal that stacked pull requests are not enabled for
+// the repository.
 var errStacksUnavailable = errors.New("stacked PRs are not available for this repository")
 
 // ghHTTPError is an HTTP error reported by `gh api`.
@@ -93,8 +93,8 @@ func (e *ghHTTPError) Error() string {
 var ghHTTPStatusPattern = regexp.MustCompile(`\(HTTP (\d{3})\)`)
 
 // ghAPI runs `gh api` with the given arguments and returns the response body.
-// HTTP failures are returned as *ghHTTPError, except for 404 which becomes
-// errStacksUnavailable. Nothing is written to the terminal.
+// HTTP failures are returned as *ghHTTPError. Nothing is written to the
+// terminal.
 func ghAPI(args ...string) ([]byte, error) {
 	out, err := xexec.Command(append([]string{"gh", "api"}, args...)...).
 		WithStdout(nil).
@@ -113,9 +113,6 @@ func ghAPI(args ...string) ([]byte, error) {
 
 	if match := ghHTTPStatusPattern.FindStringSubmatch(stderr); match != nil {
 		status, _ := strconv.Atoi(match[1])
-		if status == http.StatusNotFound {
-			return nil, errStacksUnavailable
-		}
 
 		return nil, &ghHTTPError{Status: status, Message: stderr}
 	}
@@ -133,9 +130,17 @@ func ghAPI(args ...string) ([]byte, error) {
 const stacksPath = "repos/{owner}/{repo}/stacks"
 
 // findStackForPR returns the stack containing the given PR, or nil if the PR is
-// not part of a stack.
+// not part of a stack. A 404 here means stacked PRs are not enabled for the
+// repository; the lookup always runs before any stack is changed, so this is
+// the only place a 404 is read that way.
 func (yas *YAS) findStackForPR(prNumber int) (*Stack, error) {
 	out, err := ghAPI(fmt.Sprintf("%s?pull_request=%d", stacksPath, prNumber))
+
+	httpErr := &ghHTTPError{}
+	if errors.As(err, &httpErr) && httpErr.Status == http.StatusNotFound {
+		return nil, errStacksUnavailable
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -226,17 +231,22 @@ func prNumber(metadata BranchMetadata) (int, bool) {
 // lineagePRNumbers returns the PR numbers of the branches from trunk up to and
 // including branch, bottom to top. A stack needs every layer to be a PR, so if
 // any branch in the lineage has none its name is returned as missing.
-func (yas *YAS) lineagePRNumbers(branch string) (numbers []int, missing string) {
-	for _, name := range yas.lineage(branch) {
+func (yas *YAS) lineagePRNumbers(branch string) (numbers []int, missing string, err error) {
+	lineage, err := yas.lineage(branch)
+	if err != nil {
+		return nil, "", err
+	}
+
+	for _, name := range lineage {
 		n, ok := prNumber(yas.data.Branches.Get(name))
 		if !ok {
-			return nil, name
+			return nil, name, nil
 		}
 
 		numbers = append(numbers, n)
 	}
 
-	return numbers, ""
+	return numbers, "", nil
 }
 
 // linkOutcome describes the result of linking one lineage.
@@ -254,7 +264,11 @@ type linkOutcome struct {
 // The stack is created if it doesn't exist and extended if the lineage grew;
 // any other difference is reported without changing anything.
 func (yas *YAS) linkLineage(branch string, dryRun bool) (linkOutcome, error) {
-	numbers, missing := yas.lineagePRNumbers(branch)
+	numbers, missing, err := yas.lineagePRNumbers(branch)
+	if err != nil {
+		return linkOutcome{}, err
+	}
+
 	if missing != "" {
 		return linkOutcome{Message: missing + " has no PR; nothing to link"}, nil
 	}
@@ -417,10 +431,40 @@ func (yas *YAS) currentBranchForLinking() (string, error) {
 	return currentBranch, nil
 }
 
+// forkPoint returns a branch that has more than one child among the given
+// branches, and those children, or "" if the branches form a single line.
+func (yas *YAS) forkPoint(branches []string) (parent string, children []string) {
+	childrenOf := map[string][]string{}
+
+	for _, name := range branches {
+		p := yas.parentBranchName(yas.data.Branches.Get(name))
+		childrenOf[p] = append(childrenOf[p], name)
+	}
+
+	for _, name := range branches {
+		if len(childrenOf[name]) > 1 {
+			return name, childrenOf[name]
+		}
+	}
+
+	return "", nil
+}
+
 // linkSubmittedBranches links the lineage of every submitted branch, one after
 // another: a later branch's lookup has to see the stack an earlier one created.
 // Linking never fails a submit; problems are reported and skipped.
+//
+// A GitHub stack is a single line of PRs, so when the submitted branches fork
+// only one side could be linked and which one would depend on iteration order.
+// Nothing is linked in that case; the user picks a side with `yas link`.
 func (yas *YAS) linkSubmittedBranches(branches []string) {
+	if parent, children := yas.forkPoint(branches); parent != "" {
+		fmt.Printf("\nstack forks at %s (%s); GitHub stacks are linear, so nothing was linked. Run 'yas link' from the branch whose lineage should be linked.\n",
+			parent, strings.Join(children, ", "))
+
+		return
+	}
+
 	headerShown := false
 
 	for _, branchName := range branches {

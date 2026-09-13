@@ -312,6 +312,69 @@ func TestLink_WalksThroughDeletedParent(t *testing.T) {
 	equalLines(t, result.Stdout(), "linked #41, #43 as stack #7")
 }
 
+// A deleted parent whose PR is not merged is still the base of its child's PR
+// on GitHub (until a restack moves the child), so it stays in the lineage.
+func TestLink_KeepsDeletedParentWithOpenPR(t *testing.T) {
+	t.Parallel()
+
+	cli, tempDir := newLinkTester(t)
+
+	mockStackLookup(cli, "41", stackNumber7(openStackPR(41, "topic-a"), openStackPR(42, "topic-b"), openStackPR(43, "topic-c")))
+
+	branches := threeBranchStack()
+	deletedAt := time.Now()
+	topicB := branches["topic-b"]
+	topicB.Deleted = &deletedAt
+	branches["topic-b"] = topicB
+
+	setupLinkRepo(t, cli, tempDir, branches, "topic-c")
+	testutil.ExecOrFail(t, tempDir, "git branch -D topic-b")
+
+	result := cli.Run("link")
+	assert.NilError(t, result.Err())
+	equalLines(t, result.Stdout(), "already linked (stack #7)")
+}
+
+// Parent relationships are stored as plain metadata and can be made to loop.
+// The lineage walk must fail instead of running forever.
+func TestLink_ParentCycleIsAnError(t *testing.T) {
+	t.Parallel()
+
+	cli, tempDir := newLinkTester(t)
+
+	branches := twoBranchStack()
+	topicA := branches["topic-a"]
+	topicA.Parent = "topic-b"
+	branches["topic-a"] = topicA
+
+	setupLinkRepo(t, cli, tempDir, branches, "topic-b")
+
+	// No gh mocks: GitHub must not be contacted at all
+	result := cli.Run("link")
+	assert.ErrorContains(t, result.Err(), "exit status 1")
+	assert.Assert(t, result.StderrContains("branch 'topic-b' is its own ancestor"), result.Stderr())
+}
+
+// Only the stack lookup reads a 404 as "stacked PRs are not enabled". A 404
+// from changing a stack (which has vanished since the lookup) is a failure.
+func TestLink_NotFoundWhileAddingToStackIsAnError(t *testing.T) {
+	t.Parallel()
+
+	cli, tempDir := newLinkTester(t)
+
+	mockStackLookup(cli, "41", stackNumber7(openStackPR(41, "topic-a"), openStackPR(42, "topic-b")))
+	mockGH(cli, append([]string{"api", "--method", "POST", stacksAPIPath + "/7/add"}, pullRequestFields("43")...)...).
+		WithCode(1).
+		WithStderr("gh: Not Found (HTTP 404)\n")
+
+	setupLinkRepo(t, cli, tempDir, threeBranchStack(), "topic-c")
+
+	result := cli.Run("link")
+	assert.ErrorContains(t, result.Err(), "exit status 1")
+	assert.Assert(t, result.StderrContains("failed to add to stack #7: gh: Not Found (HTTP 404)"), result.Stderr())
+	assert.Assert(t, !result.StdoutContains("not available"), result.Stdout())
+}
+
 func TestLink_SinglePRHasNothingToLink(t *testing.T) {
 	t.Parallel()
 
@@ -547,4 +610,66 @@ func TestSubmit_SkipsLinkingWhenStacksUnavailable(t *testing.T) {
 	assert.Equal(t, unavailable.CalledTimes(), 1)
 	assert.Assert(t, result.StdoutContains("stacked PRs are not available for this repository; skipping stack linking"), result.Stdout())
 	assert.Assert(t, result.StdoutContains("Successfully submitted and annotated 2 branch(es)"), result.Stdout())
+}
+
+// A GitHub stack is a single line of PRs. When the submitted branches fork,
+// linking one side would leave the other unlinked depending on iteration order,
+// so nothing is linked and the user is told to pick a side with `yas link`.
+func TestSubmit_ForkedStackIsNotLinked(t *testing.T) {
+	t.Parallel()
+
+	cli, tempDir := newLinkTester(t)
+
+	fakeOrigin := t.TempDir()
+
+	mockGitHubPRForBranch(cli, "topic-a", yas.PullRequestMetadata{URL: githubPRURL("41"), BaseRefName: "main"})
+	mockGitHubPRForBranch(cli, "topic-b", yas.PullRequestMetadata{URL: githubPRURL("42"), BaseRefName: "topic-a"})
+	mockGitHubPRForBranch(cli, "topic-c", yas.PullRequestMetadata{URL: githubPRURL("43"), BaseRefName: "topic-a"})
+
+	cli.Mock("gh", "pr", "view", gocmdtester.AnyFurtherArgs).WithStdout("")
+	cli.Mock("gh", "pr", "edit", gocmdtester.AnyFurtherArgs)
+
+	// No `gh api` mocks: the Stacks API must not be contacted at all
+
+	testutil.ExecOrFail(t, tempDir, stringutil.MustInterpolate(`
+		git init --bare {{.fakeOrigin}}
+
+		git init --initial-branch=main
+		git remote add origin {{.fakeOrigin}}
+
+		touch main
+		git add main
+		git commit -m "main-0"
+		git push -u origin main
+
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+
+		git checkout -b topic-b
+		touch b
+		git add b
+		git commit -m "topic-b-0"
+
+		git checkout -b topic-c topic-a
+		touch c
+		git add c
+		git commit -m "topic-c-0"
+
+		git checkout topic-a
+	`, map[string]string{"fakeOrigin": fakeOrigin}))
+
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-b", "--parent=topic-a").Err())
+	assert.NilError(t, cli.Run("add", "topic-c", "--parent=topic-a").Err())
+
+	result := cli.Run("submit", "--stack")
+	assert.NilError(t, result.Err())
+
+	assert.Assert(t, result.StdoutContains("stack forks at topic-a (topic-b, topic-c)"), result.Stdout())
+	assert.Assert(t, !result.StdoutContains("Linking stacks:"), result.Stdout())
+	assert.Assert(t, !result.StdoutContains("failed to link stack"), result.Stdout())
+	assert.Assert(t, result.StdoutContains("Successfully submitted and annotated 3 branch(es)"), result.Stdout())
 }

@@ -114,20 +114,31 @@ func (yas *YAS) parentBranchName(branchMetadata BranchMetadata) string {
 
 // lineage returns the branches from trunk (exclusive) up to and including
 // branch, bottom to top. The walk stops at trunk and at a branch with no known
-// parent. Deleted branches are skipped but walked through: sync deletes a
-// merged branch before its children are reparented (that happens on the next
-// restack), so a living branch may still name a deleted parent whose own
-// ancestors are part of the stack.
-func (yas *YAS) lineage(branch string) []string {
+// parent, and fails if the parent chain loops back on itself.
+//
+// A deleted parent whose PR was merged is skipped but walked through: sync
+// deletes merged branches before their children are reparented (that happens on
+// the next restack), and GitHub ignores merged PRs when comparing stacks. A
+// deleted parent whose PR is not merged stays in the lineage, since its PR is
+// still the base of its child's PR on GitHub until a restack moves the child.
+func (yas *YAS) lineage(branch string) ([]string, error) {
 	chain := []string{branch}
+	seen := map[string]bool{branch: true}
 
 	for {
 		parent := yas.parentBranchName(yas.data.Branches.Get(branch))
 		if parent == "" || parent == yas.cfg.TrunkBranch {
-			return chain
+			return chain, nil
 		}
 
-		if yas.data.Branches.Get(parent).Deleted == nil {
+		if seen[parent] {
+			return nil, fmt.Errorf("branch '%s' is its own ancestor; fix the parent of one of the branches with 'yas add --parent'", parent)
+		}
+
+		seen[parent] = true
+
+		parentMetadata := yas.data.Branches.Get(parent)
+		if parentMetadata.Deleted == nil || parentMetadata.GitHubPullRequest.State != "MERGED" {
 			chain = append([]string{parent}, chain...)
 		}
 
@@ -142,10 +153,15 @@ func (yas *YAS) countPRsInStack(currentBranch string) (int, error) {
 		return 0, err
 	}
 
+	lineage, err := yas.lineage(currentBranch)
+	if err != nil {
+		return 0, err
+	}
+
 	count := 0
 
 	// Count the current branch and its ancestors (walking up to trunk)
-	for _, branch := range yas.lineage(currentBranch) {
+	for _, branch := range lineage {
 		if yas.data.Branches.Get(branch).GitHubPullRequest.ID != "" {
 			count++
 		}
@@ -175,7 +191,11 @@ func (yas *YAS) buildStackVisualization(currentBranch string) (string, error) {
 	}
 
 	// Get ancestors (walking up to trunk)
-	lineage := yas.lineage(currentBranch)
+	lineage, err := yas.lineage(currentBranch)
+	if err != nil {
+		return "", err
+	}
+
 	ancestors := lineage[:len(lineage)-1]
 
 	// Get descendants (walking down from current)
