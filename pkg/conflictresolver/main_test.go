@@ -8,11 +8,13 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	restoreHome := testutil.IsolateHome()
+	cleanup := testutil.WithEnv(append(os.Environ(),
+		"GIT_CONFIG_GLOBAL="+testutil.MustGetFixtureFilePath("../../test/gitconfig"),
+	)...)
 
 	exitCode := m.Run()
 
-	restoreHome()
+	cleanup()
 
 	os.Exit(exitCode)
 }
