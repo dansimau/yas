@@ -3,6 +3,7 @@ package test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dansimau/yas/pkg/gocmdtester"
 	"github.com/dansimau/yas/pkg/stringutil"
@@ -282,6 +283,33 @@ func TestLink_BranchWithoutPRInLineage(t *testing.T) {
 	result := cli.Run("link")
 	assert.NilError(t, result.Err())
 	equalLines(t, result.Stdout(), "topic-b has no PR; nothing to link")
+}
+
+// sync deletes a merged branch before its children are reparented (that
+// happens on the next restack), so topic-c may still name the deleted topic-b
+// as its parent. The lineage must continue through topic-b to topic-a so that
+// it matches the stack GitHub sees: topic-a and topic-c, with topic-b merged.
+func TestLink_WalksThroughDeletedParent(t *testing.T) {
+	t.Parallel()
+
+	cli, tempDir := newLinkTester(t)
+
+	mockStackLookup(cli, "41")
+	mockStackCreate(cli, stackNumber7(openStackPR(41, "topic-a"), openStackPR(43, "topic-c")), "41", "43")
+
+	branches := threeBranchStack()
+	deletedAt := time.Now()
+	topicB := branches["topic-b"]
+	topicB.GitHubPullRequest.State = "MERGED"
+	topicB.Deleted = &deletedAt
+	branches["topic-b"] = topicB
+
+	setupLinkRepo(t, cli, tempDir, branches, "topic-c")
+	testutil.ExecOrFail(t, tempDir, "git branch -D topic-b")
+
+	result := cli.Run("link")
+	assert.NilError(t, result.Err())
+	equalLines(t, result.Stdout(), "linked #41, #43 as stack #7")
 }
 
 func TestLink_SinglePRHasNothingToLink(t *testing.T) {

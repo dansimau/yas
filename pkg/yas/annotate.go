@@ -113,19 +113,24 @@ func (yas *YAS) parentBranchName(branchMetadata BranchMetadata) string {
 }
 
 // lineage returns the branches from trunk (exclusive) up to and including
-// branch, bottom to top. The walk stops at trunk, at a branch with no known
-// parent, and at a deleted parent: deleted branches are also left out of the
-// branch graph, so ancestors and descendants follow the same rule.
+// branch, bottom to top. The walk stops at trunk and at a branch with no known
+// parent. Deleted branches are skipped but walked through: sync deletes a
+// merged branch before its children are reparented (that happens on the next
+// restack), so a living branch may still name a deleted parent whose own
+// ancestors are part of the stack.
 func (yas *YAS) lineage(branch string) []string {
 	chain := []string{branch}
 
 	for {
 		parent := yas.parentBranchName(yas.data.Branches.Get(branch))
-		if parent == "" || parent == yas.cfg.TrunkBranch || yas.data.Branches.Get(parent).Deleted != nil {
+		if parent == "" || parent == yas.cfg.TrunkBranch {
 			return chain
 		}
 
-		chain = append([]string{parent}, chain...)
+		if yas.data.Branches.Get(parent).Deleted == nil {
+			chain = append([]string{parent}, chain...)
+		}
+
 		branch = parent
 	}
 }
