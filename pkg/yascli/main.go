@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 
 	"github.com/dansimau/yas/pkg/fsutil"
 	"github.com/jessevdk/go-flags"
@@ -50,13 +51,24 @@ func Run(args ...string) (exitCode int) {
 		}
 
 		// Apply defaults to cmd
-		if !skipRepo && cmd.RepoDirectory == "" {
-			gitDir, err := fsutil.SearchParentsForPathFromCwd(".git")
-			if err != nil {
-				return NewError("cannot find repository (.git directory) (hint: specify --repo or run yas from inside repostory)")
+		if !skipRepo {
+			if cmd.RepoDirectory == "" {
+				gitDir, err := fsutil.SearchParentsForPathFromCwd(".git")
+				if err != nil {
+					return NewError("cannot find repository (.git directory) (hint: specify --repo or run yas from inside repostory)")
+				}
+
+				cmd.RepoDirectory = path.Dir(gitDir)
 			}
 
-			cmd.RepoDirectory = path.Dir(gitDir)
+			// Commands may change the process working directory (sync moves to
+			// the primary worktree), so a relative --repo must be anchored now.
+			absRepoDirectory, err := filepath.Abs(cmd.RepoDirectory)
+			if err != nil {
+				return NewError(fmt.Sprintf("failed to resolve repo directory: %v", err))
+			}
+
+			cmd.RepoDirectory = absRepoDirectory
 		}
 
 		if cmd.Verbose {
