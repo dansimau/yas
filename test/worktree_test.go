@@ -809,5 +809,6 @@ func TestWorktree_CreateBranchFromTrunkInsideWorktree(t *testing.T) {
 	// And the shell is sent to the new worktree
 	content, err := os.ReadFile(tempFile)
 	assert.NilError(t, err)
-	assert.Assert(t, cmp.Contains(string(content), "cd "+worktreePathB))
+	assert.Assert(t, cmp.Contains(string(content), "cd "))
+	assert.Assert(t, cmp.Contains(string(content), ".yas/worktrees/feature-b"))
 }

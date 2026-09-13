@@ -159,9 +159,8 @@ func (yas *YAS) CreateBranch(branchName string, parentBranch string) (string, er
 
 	// When an explicit parent different from the current branch is requested,
 	// create a fresh branch based on that parent rather than the current HEAD.
-	// In that case we do not auto-commit; any staged changes are preserved in
-	// the index (git only carries them across when they don't conflict with
-	// the switch) rather than being silently discarded.
+	// In that case we do not auto-commit; any staged changes are left in the
+	// current checkout rather than being silently discarded.
 	createFromParent := parentBranch != currentBranch
 
 	// Create the new branch
@@ -174,6 +173,12 @@ func (yas *YAS) CreateBranch(branchName string, parentBranch string) (string, er
 			return "", err
 		}
 
+		// Create the branch without checking it out. Switching is left to
+		// SwitchBranch, which knows whether the branch belongs in its own
+		// worktree. Checking out here would move the current worktree onto the
+		// new branch, and from a linked worktree there is then no way back:
+		// the parent (typically trunk) is already checked out in the primary
+		// worktree, so git refuses to switch to it.
 		if err := yas.git.CreateBranchFrom(fullBranchName, startPoint); err != nil {
 			return "", fmt.Errorf("failed to create branch: %w", err)
 		}
