@@ -50,10 +50,12 @@ func (c *syncCmd) checkForClosedPRs(primaryRepoPath string) error {
 			// Deleting the worktree from which sync was launched invalidates the
 			// repository path held by this YAS instance. Reopen from the primary
 			// worktree so subsequent deletions and a requested restack keep working.
-			c.yasInstance, err = yas.NewFromRepository(primaryRepoPath)
+			reopened, err := yas.NewFromRepository(primaryRepoPath)
 			if err != nil {
 				return fmt.Errorf("failed to reopen repository from primary worktree: %w", err)
 			}
+
+			c.yasInstance = reopened
 
 			if worktreePath != "" {
 				fmt.Printf("Deleted branch '%s' and worktree at %s\n", branch.Name, worktreePath)
