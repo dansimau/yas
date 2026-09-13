@@ -176,8 +176,15 @@ func (r *Repo) CreateTrackingBranch(branch string, remote string) error {
 }
 
 // CreateBranchFrom creates a new branch based on the given start point (e.g.
-// another branch or commit) and switches to it.
+// another branch or commit). The branch is not checked out, so the current
+// worktree is left untouched.
 func (r *Repo) CreateBranchFrom(branch string, startPoint string) error {
+	return r.run("git", "branch", branch, startPoint)
+}
+
+// CheckoutNewBranchFrom creates a new branch based on the given start point
+// and switches to it in one step, so nothing is created if the switch fails.
+func (r *Repo) CheckoutNewBranchFrom(branch string, startPoint string) error {
 	return r.run("git", "checkout", "-b", branch, startPoint)
 }
 

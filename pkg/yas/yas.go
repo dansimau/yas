@@ -109,7 +109,11 @@ func (yas *YAS) validate() error {
 // If parentBranch is empty, it uses the current branch as the parent.
 // The new branch is created, checked out, and added to the stack.
 // If there are staged changes, they are automatically committed.
-func (yas *YAS) CreateBranch(branchName string, parentBranch string) (string, error) {
+// CreateBranch creates a new branch stacked on parentBranch (the current
+// branch when empty). Set useWorktree when the branch is going to get its own
+// worktree, so the current checkout is left alone. Switching to the new branch
+// is otherwise left to SwitchBranch.
+func (yas *YAS) CreateBranch(branchName string, parentBranch string, useWorktree bool) (string, error) {
 	// Determine full branch name (with or without prefix based on config)
 	fullBranchName := branchName
 
@@ -174,8 +178,26 @@ func (yas *YAS) CreateBranch(branchName string, parentBranch string) (string, er
 			return "", err
 		}
 
-		if err := yas.git.CreateBranchFrom(fullBranchName, startPoint); err != nil {
-			return "", fmt.Errorf("failed to create branch: %w", err)
+		checkoutHere, err := yas.newBranchIsCheckedOutHere(useWorktree)
+		if err != nil {
+			return "", err
+		}
+
+		if checkoutHere {
+			// Create and switch in one step so that a refused switch (e.g.
+			// local changes that conflict with the parent's tree) leaves no
+			// branch behind.
+			if err := yas.git.CheckoutNewBranchFrom(fullBranchName, startPoint); err != nil {
+				return "", fmt.Errorf("failed to create branch: %w", err)
+			}
+		} else {
+			// The branch is going to live somewhere else, so don't move the
+			// current checkout onto it. From a linked worktree there would be
+			// no way back: the parent (typically trunk) is already checked out
+			// in the primary worktree, so git refuses to switch to it.
+			if err := yas.git.CreateBranchFrom(fullBranchName, startPoint); err != nil {
+				return "", fmt.Errorf("failed to create branch: %w", err)
+			}
 		}
 	} else {
 		if err := yas.git.CreateBranch(fullBranchName); err != nil {
@@ -205,6 +227,23 @@ func (yas *YAS) CreateBranch(branchName string, parentBranch string) (string, er
 	}
 
 	return fullBranchName, nil
+}
+
+// newBranchIsCheckedOutHere reports whether SwitchBranch will check a newly
+// created branch out in the current worktree. It won't when the branch gets
+// its own worktree, or when we're in a linked worktree (SwitchBranch then hops
+// back to the primary worktree and checks out there).
+func (yas *YAS) newBranchIsCheckedOutHere(useWorktree bool) (bool, error) {
+	if useWorktree {
+		return false, nil
+	}
+
+	inLinkedWorktree, err := yas.git.IsLinkedWorktree()
+	if err != nil {
+		return false, fmt.Errorf("failed to check if in worktree: %w", err)
+	}
+
+	return !inLinkedWorktree, nil
 }
 
 // resolveBranchStartPoint resolves a parent branch name to a git ref usable as
