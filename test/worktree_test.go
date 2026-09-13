@@ -744,3 +744,70 @@ func TestWorktree_SwitchToTrunkWithWorktreeBranchConfig(t *testing.T) {
 	// Should switch to primary repo and run yas br main there
 	assert.Assert(t, cmp.Contains(contentStr, "yas br main"))
 }
+
+// TestWorktree_CreateBranchFromTrunkInsideWorktree reproduces
+// https://github.com/dansimau/yas/issues/109: running `yas br <new> --parent
+// main` from inside a linked worktree (with worktree-branch enabled) must not
+// touch the current worktree's checkout. Previously the new branch was checked
+// out in place, and yas then failed trying to switch back to main (held by the
+// primary worktree), leaving the current worktree on the wrong branch.
+func TestWorktree_CreateBranchFromTrunkInsideWorktree(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+
+	worktreePathA := filepath.Join(tempDir, ".yas", "worktrees", "feature-a")
+	testutil.ExecOrFail(t, tempDir, `
+		git init --initial-branch=main
+		touch main
+		git add main
+		git commit -m "main-0"
+
+		git checkout -b feature-a
+		touch a
+		git add a
+		git commit -m "feature-a-0"
+
+		git checkout main
+		mkdir -p .yas/worktrees
+		git worktree add `+worktreePathA+` feature-a
+	`)
+
+	cliMain := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+	assert.NilError(t, cliMain.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cliMain.Run("config", "set", "--worktree-branch").Err())
+	assert.NilError(t, cliMain.Run("add", "feature-a", "--parent=main").Err())
+
+	tempFile := filepath.Join(t.TempDir(), "shell-exec")
+	cliInWorktree := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(worktreePathA),
+		gocmdtester.WithEnv("YAS_SHELL_EXEC", tempFile),
+	)
+
+	result := cliInWorktree.Run("branch", "feature-b", "--parent=main")
+	assert.NilError(t, result.Err(), result.Stderr())
+
+	// The worktree we ran from must still be on its own branch
+	output := mustExecOutput(worktreePathA, "git", "branch", "--show-current")
+	assert.Equal(t, strings.TrimSpace(output), "feature-a")
+
+	// The primary worktree must still be on main
+	output = mustExecOutput(tempDir, "git", "branch", "--show-current")
+	assert.Equal(t, strings.TrimSpace(output), "main")
+
+	// The new branch got its own worktree, based on main (not feature-a)
+	worktreePathB := filepath.Join(tempDir, ".yas", "worktrees", "feature-b")
+	output = mustExecOutput(worktreePathB, "git", "branch", "--show-current")
+	assert.Equal(t, strings.TrimSpace(output), "feature-b")
+
+	output = mustExecOutput(tempDir, "git", "rev-parse", "feature-b")
+	mainHash := mustExecOutput(tempDir, "git", "rev-parse", "main")
+	assert.Equal(t, strings.TrimSpace(output), strings.TrimSpace(mainHash))
+
+	// And the shell is sent to the new worktree
+	content, err := os.ReadFile(tempFile)
+	assert.NilError(t, err)
+	assert.Assert(t, cmp.Contains(string(content), "cd "+worktreePathB))
+}
