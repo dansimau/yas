@@ -182,6 +182,12 @@ func (r *Repo) CreateBranchFrom(branch string, startPoint string) error {
 	return r.run("git", "branch", branch, startPoint)
 }
 
+// CheckoutNewBranchFrom creates a new branch based on the given start point
+// and switches to it in one step, so nothing is created if the switch fails.
+func (r *Repo) CheckoutNewBranchFrom(branch string, startPoint string) error {
+	return r.run("git", "checkout", "-b", branch, startPoint)
+}
+
 func (r *Repo) DeleteBranch(branch string) error {
 	return xexec.Command("git", "branch", "-D", branch).
 		WithEnvVars(CleanedGitEnv()).
