@@ -1,39 +1,35 @@
-package gitexec
+package gitexec_test
 
 import (
-	"os"
 	"strings"
 	"testing"
 
+	"github.com/dansimau/yas/pkg/gitexec"
 	"gotest.tools/v3/assert"
 )
 
-func TestCleanGitEnvVars(t *testing.T) {
-	testEnvName := "GIT_TEST_VAR"
-	testEnvValue := "foo"
+func TestCleanedGitEnv(t *testing.T) {
+	t.Setenv("GIT_TEST_VAR", "foo")
+	t.Setenv("GIT_CONFIG_GLOBAL", "/path/to/global")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/path/to/system")
 
-	t.Setenv(testEnvName, testEnvValue)
+	cleaned := envMap(gitexec.CleanedGitEnv())
 
-	envVars := os.Environ()
+	_, hasTestVar := cleaned["GIT_TEST_VAR"]
+	assert.Assert(t, !hasTestVar, "GIT_TEST_VAR should be removed")
 
-	var containsGitVar bool
+	assert.Equal(t, cleaned["GIT_CONFIG_GLOBAL"], "/path/to/global")
+	assert.Equal(t, cleaned["GIT_CONFIG_SYSTEM"], "/path/to/system")
+}
 
-	for _, envVar := range envVars {
-		if strings.HasPrefix(envVar, "GIT_") {
-			containsGitVar = true
-		}
+// envMap converts a list of KEY=VALUE strings into a map.
+func envMap(vars []string) map[string]string {
+	m := make(map[string]string, len(vars))
+
+	for _, v := range vars {
+		key, value, _ := strings.Cut(v, "=")
+		m[key] = value
 	}
 
-	assert.Assert(t, containsGitVar)
-
-	cleanedEnvVars := CleanedGitEnv()
-	containsGitVar = false
-
-	for _, envVar := range cleanedEnvVars {
-		if strings.HasPrefix(envVar, "GIT_") {
-			containsGitVar = true
-		}
-	}
-
-	assert.Assert(t, !containsGitVar)
+	return m
 }

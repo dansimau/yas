@@ -35,6 +35,6 @@ test:
 				tee test-results.json | \
 				python3 bin/colourise-go-test-output.py >/dev/null
 
-	go run github.com/wadey/gocovmerge@latest coverage/main.cov coverage/integration-tests.cov > coverage/combined.out
+	go tool gocovmerge coverage/main.cov coverage/integration-tests.cov > coverage/combined.out
 	go tool cover -html=coverage/combined.out -o=coverage/cover.html
 	go run github.com/vladopajic/go-test-coverage/v2@latest --config=./.testcoverage.yaml

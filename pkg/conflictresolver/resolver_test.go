@@ -434,7 +434,6 @@ func TestSnapshotFiles_Gitlink(t *testing.T) {
 		git init -q sub
 		git -C sub config user.email test@example.com
 		git -C sub config user.name "Test User"
-		git -C sub config commit.gpgsign false
 		echo s0 > sub/s.txt
 		git -C sub add s.txt
 		git -C sub commit -qm s0

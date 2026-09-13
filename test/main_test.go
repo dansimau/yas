@@ -10,7 +10,10 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	cleanup := testutil.WithEnv(append(os.Environ(), "XEXEC_VERBOSE=1")...)
+	cleanup := testutil.WithEnv(append(os.Environ(),
+		"XEXEC_VERBOSE=1",
+		"GIT_CONFIG_GLOBAL="+testutil.MustGetFixtureFilePath("./gitconfig"),
+	)...)
 
 	// Strip YAS_SHELL_EXEC from env so it doesn't interfere with tests
 	if err := os.Unsetenv("YAS_SHELL_EXEC"); err != nil {

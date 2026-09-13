@@ -13,7 +13,6 @@ func setupConflictedRepo(t *testing.T, repoPath, weirdFile string) {
 	t.Helper()
 
 	setupRepo(t, repoPath, `
-		git config commit.gpgsign false
 		git checkout -B main
 		printf 'base\n' > '`+weirdFile+`'
 		printf 'base\n' > plain.txt
@@ -65,7 +64,6 @@ func TestStatusEntries(t *testing.T) {
 
 	repoPath := t.TempDir()
 	setupRepo(t, repoPath, `
-		git config commit.gpgsign false
 		printf 'a\n' > tracked.txt
 		printf 'b\n' > renamed-from.txt
 		printf 'd\n' > removed.txt

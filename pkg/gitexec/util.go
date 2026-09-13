@@ -2,8 +2,14 @@ package gitexec
 
 import (
 	"os"
+	"slices"
 	"strings"
 )
+
+var allowedGitEnvVars = []string{
+	"GIT_CONFIG_GLOBAL",
+	"GIT_CONFIG_SYSTEM",
+}
 
 // CleanedGitEnv ensures we have a clean environment to execute the git
 // binary in. If we don't clean this, GIT_ variables from a parent git context
@@ -14,7 +20,10 @@ func CleanedGitEnv() []string {
 
 	for _, envVar := range os.Environ() {
 		if strings.HasPrefix(envVar, "GIT_") {
-			continue
+			envVarKey, _, _ := strings.Cut(envVar, "=")
+			if !slices.Contains(allowedGitEnvVars, envVarKey) {
+				continue
+			}
 		}
 
 		newEnv = append(newEnv, envVar)

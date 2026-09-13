@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -219,6 +220,20 @@ func SetupFakeRemote(t *testing.T, branchName string) {
 	if err := xexec.Command("git", "config", "branch."+branchName+".merge", "refs/heads/"+branchName).Run(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func MustGetFixtureFilePath(filePath string) string {
+	dir, err := os.Getwd()
+	if err != nil {
+		panic(err)
+	}
+
+	fixturePath := filepath.Join(dir, filePath)
+	if _, err := os.Stat(fixturePath); err != nil {
+		panic(err)
+	}
+
+	return fixturePath
 }
 
 // parseEnvVar parses an env var string e.g. "foo=bar" and returns the
