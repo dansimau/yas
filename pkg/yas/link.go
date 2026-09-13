@@ -11,8 +11,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-
-	"github.com/dansimau/yas/pkg/xexec"
 )
 
 // Stack is a GitHub stacked pull request stack, as returned by the Stacks REST
@@ -93,11 +91,11 @@ func (e *ghHTTPError) Error() string {
 // e.g. "gh: Not Found (HTTP 404)".
 var ghHTTPStatusPattern = regexp.MustCompile(`\(HTTP (\d{3})\)`)
 
-// ghAPI runs `gh api` with the given arguments and returns the response body.
-// HTTP failures are returned as *ghHTTPError. Nothing is written to the
-// terminal.
-func ghAPI(args ...string) ([]byte, error) {
-	out, err := xexec.Command(append([]string{"gh", "api"}, args...)...).
+// ghAPI runs `gh api` inside the repository with the given arguments and
+// returns the response body. HTTP failures are returned as *ghHTTPError.
+// Nothing is written to the terminal.
+func (yas *YAS) ghAPI(args ...string) ([]byte, error) {
+	out, err := yas.gh(append([]string{"api"}, args...)...).
 		WithStdout(nil).
 		WithStderr(nil).
 		Output()
@@ -135,7 +133,7 @@ const stacksPath = "repos/{owner}/{repo}/stacks"
 // repository; the lookup always runs before any stack is changed, so this is
 // the only place a 404 is read that way.
 func (yas *YAS) findStackForPR(prNumber int) (*Stack, error) {
-	out, err := ghAPI(fmt.Sprintf("%s?pull_request=%d", stacksPath, prNumber))
+	out, err := yas.ghAPI(fmt.Sprintf("%s?pull_request=%d", stacksPath, prNumber))
 
 	httpErr := &ghHTTPError{}
 	if errors.As(err, &httpErr) && httpErr.Status == http.StatusNotFound {
@@ -173,7 +171,7 @@ func pullRequestFields(prNumbers []int) []string {
 func (yas *YAS) createStack(prNumbers []int) (*Stack, error) {
 	args := append([]string{"--method", "POST", stacksPath}, pullRequestFields(prNumbers)...)
 
-	out, err := ghAPI(args...)
+	out, err := yas.ghAPI(args...)
 	if err != nil {
 		return nil, err
 	}
@@ -190,7 +188,7 @@ func (yas *YAS) createStack(prNumbers []int) (*Stack, error) {
 func (yas *YAS) addToStack(stackNumber int, prNumbers []int) error {
 	args := append([]string{"--method", "POST", fmt.Sprintf("%s/%d/add", stacksPath, stackNumber)}, pullRequestFields(prNumbers)...)
 
-	_, err := ghAPI(args...)
+	_, err := yas.ghAPI(args...)
 
 	return err
 }
@@ -198,7 +196,7 @@ func (yas *YAS) addToStack(stackNumber int, prNumbers []int) error {
 // unstack removes the unmerged PRs from a stack. It returns the remaining stack,
 // or nil when the stack was dissolved because nothing remained.
 func (yas *YAS) unstack(stackNumber int) (*Stack, error) {
-	out, err := ghAPI("--method", "POST", fmt.Sprintf("%s/%d/unstack", stacksPath, stackNumber))
+	out, err := yas.ghAPI("--method", "POST", fmt.Sprintf("%s/%d/unstack", stacksPath, stackNumber))
 	if err != nil {
 		return nil, err
 	}
