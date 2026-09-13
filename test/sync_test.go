@@ -10,6 +10,7 @@ import (
 	"github.com/dansimau/yas/pkg/testutil"
 	"github.com/dansimau/yas/pkg/yas"
 	"gotest.tools/v3/assert"
+	"gotest.tools/v3/assert/cmp"
 )
 
 func TestSync_RestacksChildrenOntoParentWhenMergedPRDeleted(t *testing.T) {
@@ -416,6 +417,162 @@ func TestSync_RestackFromMergedBranchWorktree(t *testing.T) {
 	_, err := os.Stat(worktreePath)
 	assert.Assert(t, os.IsNotExist(err), "merged branch worktree should be removed")
 	equalLines(t, mustExecOutput(tempDir, "git", "log", "--pretty=%D : %s", "topic-b"), `
+		topic-b : topic-b-0
+		HEAD -> main, origin/main : main-0
+	`)
+}
+
+// When sync is launched from a merged branch's worktree and other merged
+// branches are deleted in the same run, the shell must still be moved to the
+// primary worktree. Merged branches are iterated in map order, so which one is
+// deleted first is random; the outcome must not depend on it.
+func TestSync_FromMergedWorktreeMovesShellWhenOtherBranchesMerged(t *testing.T) {
+	t.Parallel()
+
+	tempDir := resolvePath(t.TempDir())
+	fakeOrigin := t.TempDir()
+	worktreePath := filepath.Join(tempDir, "worktrees", "topic-a")
+	shellExecPath := filepath.Join(t.TempDir(), "shell-exec")
+
+	cliPrimary := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+	cliWorktree := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(worktreePath),
+		gocmdtester.WithEnv("YAS_SHELL_EXEC", shellExecPath),
+	)
+
+	for i, branch := range []string{"topic-a", "topic-c", "topic-d"} {
+		mockGitHubPRForBranch(cliWorktree, branch, yas.PullRequestMetadata{
+			ID:          "PR_kwDOTest" + branch,
+			State:       "MERGED",
+			URL:         githubPRURL(string(rune('1' + i))),
+			BaseRefName: "main",
+		})
+	}
+
+	cliWorktree.Mock("git", "pull", gocmdtester.AnyFurtherArgs).WithStdout("Already up to date.\n")
+	cliWorktree.Mock("git", gocmdtester.AnyFurtherArgs).WithPassthroughExec()
+
+	testutil.ExecOrFail(t, tempDir, stringutil.MustInterpolate(`
+		git init --bare {{.fakeOrigin}}
+		git init --initial-branch=main
+		git remote add origin {{.fakeOrigin}}
+
+		touch main
+		git add main
+		git commit -m "main-0"
+		git push -u origin main
+
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+
+		git checkout main
+		git checkout -b topic-c
+		touch c
+		git add c
+		git commit -m "topic-c-0"
+
+		git checkout main
+		git checkout -b topic-d
+		touch d
+		git add d
+		git commit -m "topic-d-0"
+
+		git checkout main
+		mkdir -p worktrees
+		git worktree add {{.worktreePath}} topic-a
+	`, map[string]string{
+		"fakeOrigin":   fakeOrigin,
+		"worktreePath": worktreePath,
+	}))
+
+	assert.NilError(t, cliPrimary.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cliPrimary.Run("add", "topic-a", "--parent=main").Err())
+	assert.NilError(t, cliPrimary.Run("add", "topic-c", "--parent=main").Err())
+	assert.NilError(t, cliPrimary.Run("add", "topic-d", "--parent=main").Err())
+	assert.NilError(t, cliWorktree.Run("refresh", "topic-a", "topic-c", "topic-d").Err())
+
+	result := cliWorktree.Run("sync")
+	assert.NilError(t, result.Err(), "yas sync should succeed from a merged worktree; stderr: %s", result.Stderr())
+
+	_, err := os.Stat(worktreePath)
+	assert.Assert(t, os.IsNotExist(err), "merged branch worktree should be removed")
+
+	for _, branch := range []string{"topic-a", "topic-c", "topic-d"} {
+		assert.Equal(t, mustExecExitCode(tempDir, "git", "show-ref", "--verify", "--quiet", "refs/heads/"+branch), 1,
+			"branch %s should be deleted", branch)
+	}
+
+	content, err := os.ReadFile(shellExecPath)
+	assert.NilError(t, err, "shell hook should have been asked to leave the deleted worktree")
+	assert.Assert(t, cmp.Contains(string(content), "cd "+tempDir), "shell exec content: %q", string(content))
+}
+
+// --repo accepts a path relative to the current directory. Sync changes the
+// process directory to the primary worktree, which must not break git
+// operations that still use the relative repo path.
+func TestSync_RestackWithRelativeRepoFlag(t *testing.T) {
+	t.Parallel()
+
+	parentDir := t.TempDir()
+	fakeOrigin := t.TempDir()
+	repoDir := filepath.Join(parentDir, "repo")
+
+	assert.NilError(t, os.Mkdir(repoDir, 0o755))
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(parentDir),
+	)
+
+	mockGitHubPRForBranch(cli, "topic-a", yas.PullRequestMetadata{
+		ID:          "PR_kwDOTest123",
+		State:       "MERGED",
+		URL:         githubPRURL("42"),
+		BaseRefName: "main",
+	})
+	mockGitHubPRForBranch(cli, "main", yas.PullRequestMetadata{})
+	cli.Mock("git", "pull", gocmdtester.AnyFurtherArgs).WithStdout("Already up to date.\n")
+	cli.Mock("git", gocmdtester.AnyFurtherArgs).WithPassthroughExec()
+
+	testutil.ExecOrFail(t, repoDir, stringutil.MustInterpolate(`
+		git init --bare {{.fakeOrigin}}
+		git init --initial-branch=main
+		git remote add origin {{.fakeOrigin}}
+
+		touch main
+		git add main
+		git commit -m "main-0"
+		git push -u origin main
+
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+
+		git checkout -b topic-b
+		touch b
+		git add b
+		git commit -m "topic-b-0"
+
+		git checkout main
+	`, map[string]string{
+		"fakeOrigin": fakeOrigin,
+	}))
+
+	assert.NilError(t, cli.Run("--repo=repo", "config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("--repo=repo", "add", "topic-a", "--parent=main").Err())
+	assert.NilError(t, cli.Run("--repo=repo", "add", "topic-b", "--parent=topic-a").Err())
+	assert.NilError(t, cli.Run("--repo=repo", "refresh", "topic-a").Err())
+
+	result := cli.Run("--repo=repo", "sync", "--restack")
+	assert.NilError(t, result.Err(), "yas sync --restack should work with a relative --repo; stderr: %s", result.Stderr())
+
+	assert.Equal(t, mustExecExitCode(repoDir, "git", "show-ref", "--verify", "--quiet", "refs/heads/topic-a"), 1,
+		"merged branch topic-a should be deleted")
+	equalLines(t, mustExecOutput(repoDir, "git", "log", "--pretty=%D : %s", "topic-b"), `
 		topic-b : topic-b-0
 		HEAD -> main, origin/main : main-0
 	`)
