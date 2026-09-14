@@ -40,18 +40,21 @@ func isNotDirError(err error) bool {
 		strings.Contains(err.Error(), "not a directory"))
 }
 
-// searchPaths returns a list of paths from basePath upwards to the root ("/).
+// searchPaths returns a list of paths from basePath upwards to the filesystem
+// root.
 func searchPaths(basePath string) (paths []string) {
-	root := basePath
+	dir := basePath
 
-	for root != "/" {
-		paths = append(paths, root)
-		root = filepath.Dir(root)
+	for {
+		paths = append(paths, dir)
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return paths
+		}
+
+		dir = parent
 	}
-
-	paths = append(paths, "/")
-
-	return paths
 }
 
 func SearchParentsForPath(filename, searchPath string) (path string, err error) {
