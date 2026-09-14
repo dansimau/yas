@@ -18,6 +18,7 @@ make test
 # Run tests in a specific package
 go test ./pkg/yas
 go test ./test
+go test ./cmd/workyard/tests
 
 # Run a specific test
 go test ./test -run TestUpdateTrunk
@@ -33,6 +34,10 @@ make lint
 - **cmd/yas/main.go**: Entry point that delegates to `pkg/yascli`
 - **pkg/yascli**: CLI command handlers and argument parsing using go-flags
 - **pkg/yas**: Core business logic for stacked diff management
+- **cmd/workyard/main.go**: Entry point of the separate `workyard` binary, delegating to `pkg/workyardcli`
+- **pkg/workyardcli**: go-flags CLI for workyard (`create`, `status`/`st`, `diff`, `git`, `list`/`ls`, `remove`)
+- **pkg/workyard**: Library for creating and operating on workyards (scan, copy/clone, worktree creation, fan-out, removal); no printing, results via return values and callbacks
+- **cmd/workyard/tests**: Black-box integration tests for the workyard CLI (same `gocmdtester` pattern as `test/`)
 - **pkg/conflictresolver**: Pluggable tools for automatically resolving rebase conflicts (registry + `claude` implementation)
 - **pkg/gitexec**: Git operations wrapper using go-git and command execution
 - **pkg/xexec**: Command execution utilities with environment control
@@ -87,13 +92,21 @@ yas uses a Directed Acyclic Graph (DAG) from `github.com/heimdalr/dag` to model 
 - Deletes local branches for merged PRs
 - Updates trunk branch with `git pull --ff --ff-only`
 
+**Workyard** (`workyard create`, separate binary in `cmd/workyard`):
+
+- A workyard is a copy of a directory tree (e.g. a multi-repo workspace) in which every git repository becomes a `git worktree` of the source repository, checked out at one branch
+- `pkg/workyard.PlanCreate` guards (target empty, no containment, not inside a repo/yard), scans the source in parallel (never following symlinks, never descending into repos; a dir is a repo if it has a `.git` entry or a bare layout) and resolves the branch per repo: existing local branch → remote-only branch (tracking) → tag/commit (detached) → create from trunk (`.workyard/config.yaml` `trunk`/`repos.<path>.trunk`, else `Repo.DetectMainBranch`). Repos sharing a git common dir get the branch once; the rest are detached
+- `Create` writes `.workyard/metadata.json` first (`complete: false`), copies non-repo subtrees (APFS `clonefile` on macOS with plain-copy fallback, `WORKYARD_COPY_MODE`/`--copy-mode`), adds worktrees with hooks disabled (serialized per common dir), then marks the metadata complete. Failures roll back (worktrees removed via the source repos, target deleted) unless `--keep-partial`
+- `status`/`diff`/`git` fan out `git -C <repo>` over every repo in the metadata (`Yard.Run`); unknown options and everything after the first positional are passed to git verbatim. Root discovery: `WORKYARD_ROOT`, else walk up to `.workyard/metadata.json`
+- `remove` removes each worktree through its source repo (refusing dirty ones without `-f`), deletes the directory, prunes, and optionally deletes branches workyard created
+
 ### Environment Management
 
 Git operations use cleaned environments (`CleanedGitEnv()` in pkg/gitexec/util.go) to avoid inheriting unwanted git configuration from the parent process.
 
 ### Testing Patterns
 
-Integration tests (in `test/`) use `gocmdtester.FromPath()` to compile and run the CLI binary with coverage collection. Tests use `t.TempDir()` to create isolated directories and `testutil.ExecOrFail()` to run shell setup scripts. Coverage from integration tests is merged with unit test coverage via `gocmdtester.WriteCombinedCoverage()`.
+Integration tests (in `test/` for yas and `cmd/workyard/tests/` for workyard) use `gocmdtester.FromPath()` to compile and run the CLI binary with coverage collection. Tests use `t.TempDir()` to create isolated directories and `testutil.ExecOrFail()` to run shell setup scripts. Coverage from integration tests is merged with unit test coverage via `gocmdtester.WriteCombinedCoverage()`. The shared `test/gitconfig` fixture sets `init.defaultBranch = main`.
 
 Test helpers in `test/util.go`:
 
