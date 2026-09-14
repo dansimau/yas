@@ -7,7 +7,6 @@ import (
 
 	"github.com/dansimau/yas/pkg/log"
 	"github.com/dansimau/yas/pkg/progress"
-	"github.com/dansimau/yas/pkg/xexec"
 )
 
 func (yas *YAS) Submit(draft bool) error {
@@ -221,7 +220,7 @@ func (yas *YAS) submitBranch(branchName string, draft bool, status func(string))
 
 			status("Updating PR base branch...")
 
-			if err := xexec.Command("gh", "pr", "edit", prNumber, "--base", metadata.Parent).WithStdout(nil).Run(); err != nil {
+			if err := yas.gh("pr", "edit", prNumber, "--base", metadata.Parent).WithStdout(nil).Run(); err != nil {
 				return fmt.Errorf("failed to update PR base branch: %w", err)
 			}
 
@@ -270,7 +269,7 @@ func (yas *YAS) submitBranch(branchName string, draft bool, status func(string))
 		prCreateArgs = append(prCreateArgs, "--base", metadata.Parent)
 	}
 
-	if err := xexec.Command(append([]string{"gh", "pr", "create"}, prCreateArgs...)...).WithStdout(nil).Run(); err != nil {
+	if err := yas.gh(append([]string{"pr", "create"}, prCreateArgs...)...).WithStdout(nil).Run(); err != nil {
 		return err
 	}
 

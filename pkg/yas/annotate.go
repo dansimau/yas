@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/dansimau/yas/pkg/progress"
-	"github.com/dansimau/yas/pkg/xexec"
 )
 
 func (yas *YAS) Annotate() error {
@@ -251,7 +250,7 @@ func (yas *YAS) formatStackLine(branchName string, indent int, isCurrent bool) s
 }
 
 func (yas *YAS) getPRBody(prNumber string) (string, error) {
-	output, err := xexec.Command("gh", "pr", "view", prNumber, "--json", "body", "-q", ".body").WithStdout(nil).Output()
+	output, err := yas.gh("pr", "view", prNumber, "--json", "body", "-q", ".body").WithStdout(nil).Output()
 	if err != nil {
 		return "", err
 	}
@@ -260,7 +259,7 @@ func (yas *YAS) getPRBody(prNumber string) (string, error) {
 }
 
 func (yas *YAS) updatePRBody(prNumber, newBody string) error {
-	return xexec.Command("gh", "pr", "edit", prNumber, "--body", newBody).WithStdout(nil).WithStderr(nil).Run()
+	return yas.gh("pr", "edit", prNumber, "--body", newBody).WithStdout(nil).WithStderr(nil).Run()
 }
 
 func removeStackSection(currentBody string) string {

@@ -104,10 +104,12 @@ func (m *Mock) Calls() []Invocation {
 	return matches
 }
 
-// Invocation represents a recorded command invocation.
+// Invocation represents a recorded command invocation. Dir is the working
+// directory the command was run in.
 type Invocation struct {
 	Command   string    `json:"command"`
 	Args      []string  `json:"args"`
+	Dir       string    `json:"dir"`
 	Timestamp time.Time `json:"timestamp"`
 }
 

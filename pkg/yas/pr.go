@@ -5,14 +5,13 @@ import (
 	"strings"
 
 	"github.com/dansimau/yas/pkg/log"
-	"github.com/dansimau/yas/pkg/xexec"
 	"github.com/sourcegraph/conc/pool"
 )
 
 func (yas *YAS) fetchGitHubPullRequestStatus(branchName string) (*PullRequestMetadata, error) {
 	log.Info("Fetching PRs for branch", branchName)
 
-	b, err := xexec.Command("gh", "pr", "list", "--head", branchName, "--state", "all", "--json", "id,state,url,isDraft,baseRefName").WithStdout(nil).Output()
+	b, err := yas.gh("pr", "list", "--head", branchName, "--state", "all", "--json", "id,state,url,isDraft,baseRefName").WithStdout(nil).Output()
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +32,7 @@ func (yas *YAS) fetchGitHubPullRequestStatus(branchName string) (*PullRequestMet
 func (yas *YAS) fetchPRStatusWithChecks(branchName string) (*PullRequestMetadata, error) {
 	log.Info("Fetching PR status with checks for branch", branchName)
 
-	b, err := xexec.Command("gh", "pr", "list", "--head", branchName, "--state", "all", "--json", "id,state,url,isDraft,baseRefName,reviewDecision,statusCheckRollup").WithStdout(nil).Output()
+	b, err := yas.gh("pr", "list", "--head", branchName, "--state", "all", "--json", "id,state,url,isDraft,baseRefName,reviewDecision,statusCheckRollup").WithStdout(nil).Output()
 	if err != nil {
 		return nil, err
 	}
