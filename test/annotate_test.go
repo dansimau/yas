@@ -81,6 +81,9 @@ Stacked PRs:
   * https://github.com/test/test/pull/42 👈 (this PR)
     * https://github.com/test/test/pull/43`)
 
+	// Submit tries to link the stack on GitHub afterwards
+	mockStacksUnavailable(cli)
+
 	fakeOrigin := t.TempDir()
 
 	testutil.ExecOrFail(t, tempDir, stringutil.MustInterpolate(`

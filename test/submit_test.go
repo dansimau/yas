@@ -185,6 +185,9 @@ Stacked PRs:
   * https://github.com/test/test/pull/2
     * https://github.com/test/test/pull/3 👈 (this PR)`)
 
+	// Submit tries to link the stack on GitHub afterwards
+	mockStacksUnavailable(cli)
+
 	// Submit with --stack pushes all branches in the stack
 	testutil.ExecOrFail(t, tempDir, "git checkout topic-b")
 
@@ -1021,6 +1024,9 @@ func TestSubmit_StackSetsUpstreamTrackingForEveryBranch(t *testing.T) {
 			git commit -m "{{.branch}}-0"
 		`, map[string]string{"branch": branch}))
 	}
+
+	// Submit tries to link the stack on GitHub afterwards
+	mockStacksUnavailable(cli)
 
 	testutil.ExecOrFail(t, tempDir, setup.String())
 
