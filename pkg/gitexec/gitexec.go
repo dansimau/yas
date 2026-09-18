@@ -195,6 +195,12 @@ func (r *Repo) DeleteBranch(branch string) error {
 		Run()
 }
 
+// DeleteBranchSafe deletes a branch only if it is fully merged into its
+// upstream or HEAD (git branch -d).
+func (r *Repo) DeleteBranchSafe(branch string) error {
+	return r.run("git", "branch", "-d", branch)
+}
+
 func (r *Repo) GetConfig(key string) (string, error) {
 	return r.output("git", "config", key)
 }
@@ -593,4 +599,83 @@ func (r *Repo) StatusEntries() (map[string]string, error) {
 	}
 
 	return entries, nil
+}
+
+// IsCommitish reports whether ref resolves to a commit (a branch, tag, or
+// commit hash).
+func (r *Repo) IsCommitish(ref string) (bool, error) {
+	if err := r.run("git", "rev-parse", "--verify", "--quiet", ref+"^{commit}"); err != nil {
+		// Exit code 1 means the ref doesn't resolve
+		if isExitCode(err, 1) {
+			return false, nil
+		}
+
+		return false, err
+	}
+
+	return true, nil
+}
+
+// RemoteBranchRefs returns the remote-tracking refs (as "<remote>/<branch>")
+// that exist locally for the branch on each configured remote.
+func (r *Repo) RemoteBranchRefs(branch string) ([]string, error) {
+	remotes, err := r.Remotes()
+	if err != nil {
+		return nil, err
+	}
+
+	out, err := r.output("git", "for-each-ref", "--format=%(refname)", "refs/remotes/")
+	if err != nil {
+		return nil, err
+	}
+
+	refs := map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
+		refs[line] = true
+	}
+
+	var result []string
+
+	for _, remote := range remotes {
+		if refs["refs/remotes/"+remote+"/"+branch] {
+			result = append(result, remote+"/"+branch)
+		}
+	}
+
+	return result, nil
+}
+
+// CheckBranchName returns an error if name is not a valid branch name.
+func (r *Repo) CheckBranchName(name string) error {
+	if err := r.run("git", "check-ref-format", "--branch", name); err != nil {
+		return fmt.Errorf("invalid branch name %q", name)
+	}
+
+	return nil
+}
+
+// SubmoduleCount returns the number of submodules recorded in the working
+// tree.
+func (r *Repo) SubmoduleCount() (int, error) {
+	out, err := r.output("git", "submodule", "status")
+	if err != nil {
+		return 0, err
+	}
+
+	if out == "" {
+		return 0, nil
+	}
+
+	return len(strings.Split(out, "\n")), nil
+}
+
+// IgnoredTopLevel returns the ignored files and directories in the working
+// tree, collapsing ignored directories to a single entry each.
+func (r *Repo) IgnoredTopLevel() ([]string, error) {
+	out, err := r.rawOutput("git", "ls-files", "-o", "-i", "--exclude-standard", "--directory", "-z")
+	if err != nil {
+		return nil, err
+	}
+
+	return splitNUL(out), nil
 }
