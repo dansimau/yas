@@ -124,8 +124,14 @@ func PlanCreate(ctx context.Context, o CreateOptions) (*Plan, error) {
 		return nil, err
 	}
 
-	if isWithin(source, target) || isWithin(target, source) {
-		return nil, fmt.Errorf("target %s and source %s must not contain each other", target, source)
+	// The target and the source must not contain each other, with one
+	// exception: a yard may live inside the source's .workyard directory
+	// (which is never copied), as long as it does not swallow the yard
+	// metadata kept in .workyard/yards.
+	metaDir := filepath.Join(source, workyardDir, yardsDir)
+	if isWithin(target, metaDir) || (isWithin(source, target) && !isWithin(filepath.Join(source, workyardDir), target)) {
+		return nil, fmt.Errorf("target %s and source %s must not contain each other (a yard may live under %s, but not at %s)",
+			target, source, filepath.Join(source, workyardDir), metaDir)
 	}
 
 	if entries, err := os.ReadDir(target); err == nil && len(entries) > 0 {
