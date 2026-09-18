@@ -345,6 +345,61 @@ func TestCreate_Guards(t *testing.T) {
 		assert.Assert(t, cmp.Contains(result.Stderr(), "must not contain each other"))
 	})
 
+	t.Run("target inside the source's .workyard directory", func(t *testing.T) {
+		t.Parallel()
+
+		// The conventional place for yards, mirroring yas' .yas/worktrees.
+		f := setupFixture(t)
+		target := filepath.Join(f.Source, ".workyard", "yards", "feature")
+		allowCleanup(t, filepath.Join(target, "readonly"))
+
+		result := newCLI(t, f.Source).Run("create", "--source", f.Source, target)
+		assert.Equal(t, result.ExitCode(), 0, result.Stderr())
+		assertExists(t, filepath.Join(target, "repoA"))
+		// The source's .workyard directory is not copied into the yard, whose
+		// own .workyard is just the pointer file.
+		pointer, err := os.Lstat(filepath.Join(target, ".workyard"))
+		assert.NilError(t, err)
+		assert.Assert(t, pointer.Mode().IsRegular())
+		assert.Equal(t, len(yardMetadataFiles(t, f.Source)), 1)
+		assert.Equal(t, mustOutput(t, filepath.Join(target, "repoA"), "git", "branch", "--show-current"), "feature")
+
+		// A second yard next to it must not disturb the first.
+		second := filepath.Join(f.Source, ".workyard", "yards", "feature2")
+		allowCleanup(t, filepath.Join(second, "readonly"))
+
+		result = newCLI(t, f.Source).Run("create", "--source", f.Source, second)
+		assert.Equal(t, result.ExitCode(), 0, result.Stderr())
+		assert.Equal(t, len(yardMetadataFiles(t, f.Source)), 2)
+
+		// Commands find the yard from inside it, and remove cleans up only it.
+		result = newCLI(t, filepath.Join(target, "plain")).Run("ls")
+		assert.Equal(t, result.ExitCode(), 0, result.Stderr())
+		assert.Assert(t, cmp.Contains(result.Stdout(), "repoA"))
+
+		result = newCLI(t, f.Source).Run("remove", target)
+		assert.Equal(t, result.ExitCode(), 0, result.Stderr())
+		assertNotExists(t, target)
+		assertExists(t, filepath.Join(second, "repoA"))
+		assert.Equal(t, len(yardMetadataFiles(t, f.Source)), 1)
+	})
+
+	t.Run("target that would swallow the source's metadata", func(t *testing.T) {
+		t.Parallel()
+
+		f := setupFixture(t)
+
+		for _, target := range []string{
+			filepath.Join(f.Source, ".workyard"),
+			filepath.Join(f.Source, ".workyard", "yards"),
+		} {
+			result := newCLI(t, f.Source).Run("create", "--source", f.Source, "--branch", "feature", target)
+			assert.Equal(t, result.ExitCode(), 1, target)
+			assert.Assert(t, cmp.Contains(result.Stderr(), "must not contain each other"))
+			assertNotExists(t, target)
+		}
+	})
+
 	t.Run("source that is a repository", func(t *testing.T) {
 		t.Parallel()
 
