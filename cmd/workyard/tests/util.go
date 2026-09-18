@@ -17,11 +17,6 @@ import (
 
 const mainGo = "../main.go"
 
-// copyModes are the copy modes every create test runs under. On macOS "auto"
-// exercises clonefile (source and target share the temp volume); elsewhere
-// both modes copy.
-var copyModes = []string{"auto", "plain"}
-
 // fixtureRepos are the repositories in the standard fixture, in path order.
 var fixtureRepos = []string{"repoA", "sub/deep/repoB", "wt/main", "wt/other"}
 
@@ -50,6 +45,20 @@ func mustOutput(t *testing.T, workingDir string, args ...string) string {
 	assert.NilError(t, err, "%v", args)
 
 	return strings.TrimSpace(string(b))
+}
+
+// output strips the command trace lines that XEXEC_VERBOSE adds to stderr,
+// leaving what the user would see.
+func output(stderr string) string {
+	var lines []string
+
+	for _, line := range strings.Split(stderr, "\n") {
+		if !strings.HasPrefix(line, "+ ") {
+			lines = append(lines, line)
+		}
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 // between returns the part of s from the start marker up to the end marker
@@ -190,14 +199,13 @@ func setupFixture(t *testing.T) fixture {
 
 // create runs "workyard create" for the fixture and returns the target path
 // and the result.
-func (f fixture) create(t *testing.T, mode string, args ...string) (string, *gocmdtester.Result) {
+func (f fixture) create(t *testing.T, args ...string) (string, *gocmdtester.Result) {
 	t.Helper()
 
 	target := filepath.Join(t.TempDir(), "yard")
 	allowCleanup(t, filepath.Join(target, "readonly"))
 
-	cli := newCLI(t, f.Source, "WORKYARD_COPY_MODE", mode)
-	result := cli.Run(append([]string{"create", "--source", f.Source, "--branch", "feature", target}, args...)...)
+	result := newCLI(t, f.Source).Run(append([]string{"create", "--source", f.Source, "--branch", "feature", target}, args...)...)
 
 	return target, result
 }
@@ -207,8 +215,19 @@ func (f fixture) create(t *testing.T, mode string, args ...string) (string, *goc
 func createYard(t *testing.T, f fixture, args ...string) string {
 	t.Helper()
 
-	target, result := f.create(t, "auto", args...)
+	target, result := f.create(t, args...)
 	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
 
 	return target
+}
+
+// yardMetadataFiles returns the metadata files the source holds for its
+// yards.
+func yardMetadataFiles(t *testing.T, source string) []string {
+	t.Helper()
+
+	matches, err := filepath.Glob(filepath.Join(source, ".workyard", "yards", "*.json"))
+	assert.NilError(t, err)
+
+	return matches
 }

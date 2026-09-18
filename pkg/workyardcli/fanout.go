@@ -20,12 +20,11 @@ func isFanOutCommand(name string) bool {
 const fanOutOptionsHelp = `
 Options workyard does not recognise are passed to git, as is everything after
 the first non-option argument. Use "--" to pass an option that workyard would
-otherwise interpret itself. The global --jobs, --unordered, --header, --quiet
-and --color options control how results are run and shown.
+otherwise interpret itself. The global --parallelism, --unordered and --color
+options control how results are run and shown.
 
-A header "==> <path> (<branch>)" is printed for each repository when stdout is
-a terminal or --header is given. The exit code is 1 when git failed in any
-repository.`
+A header "==> <path> (<branch>)" is printed for each repository that produced
+output. The exit code is 1 when git failed in any repository.`
 
 const (
 	statusLongHelp = `Runs "git status --short --branch" in every repository of the workyard.
@@ -69,7 +68,8 @@ func passthroughArgs(positional []string) []string {
 	return append(slices.Clone(current.passthrough), positional...)
 }
 
-// fanOut runs the git command in every repository and renders the results.
+// fanOut runs the git command in every repository and renders the results:
+// a header per repository that produced output, then its output.
 func fanOut(gitArgs []string) error {
 	cmd := current.cmd
 	isTTY := term.IsTerminal(int(os.Stdout.Fd()))
@@ -84,14 +84,13 @@ func fanOut(gitArgs []string) error {
 		color = isTTY && os.Getenv("NO_COLOR") == "" && !hasColorArg(gitArgs)
 	}
 
-	showHeader := isTTY || cmd.Header
 	failed := 0
 	skipped := 0
 
 	err := current.yard.Run(context.Background(), workyard.RunOptions{
-		Jobs:    cmd.Jobs,
-		Color:   color,
-		Ordered: !cmd.Unordered,
+		Parallelism: cmd.Parallelism,
+		Color:       color,
+		Ordered:     !cmd.Unordered,
 	}, gitArgs, func(r workyard.Result) {
 		if r.Err != nil {
 			fmt.Fprintf(os.Stderr, "warning: %s: %v\n", r.Repo.Path, r.Err)
@@ -105,16 +104,16 @@ func fanOut(gitArgs []string) error {
 			failed++
 		}
 
-		hasOutput := len(r.Stdout) > 0 || len(r.Stderr) > 0
-
-		if showHeader && (hasOutput || !cmd.Quiet) {
-			header := fmt.Sprintf("==> %s (%s)", r.Repo.Path, r.Branch)
-			if isTTY {
-				header = "\x1b[1m" + header + "\x1b[0m"
-			}
-
-			fmt.Println(header)
+		if len(r.Stdout) == 0 && len(r.Stderr) == 0 {
+			return
 		}
+
+		header := fmt.Sprintf("==> %s (%s)", r.Repo.Path, r.Branch)
+		if isTTY {
+			header = "\x1b[1m" + header + "\x1b[0m"
+		}
+
+		fmt.Println(header)
 
 		_, _ = os.Stdout.Write(r.Stdout)
 		_, _ = os.Stderr.Write(r.Stderr)

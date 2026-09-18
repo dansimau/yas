@@ -2,6 +2,10 @@
 // directory tree in which every git repository is replaced by a git worktree
 // checked out at a chosen branch, so a whole multi-repo workspace can be
 // duplicated in seconds and worked on in isolation.
+//
+// Like a git worktree, a workyard holds only a pointer back to its source (the
+// .workyard file at its root); the source keeps the metadata for each of its
+// workyards under .workyard/yards/, next to its optional config.yaml.
 package workyard
 
 import (
@@ -10,13 +14,13 @@ import (
 	"time"
 )
 
-// MetadataVersion is the current format version of .workyard/metadata.json.
+// MetadataVersion is the current format version of the metadata files.
 const MetadataVersion = 1
 
 // Repo describes one repository in a workyard.
 type Repo struct {
 	// Path is the repository's location relative to the yard root (and to the
-	// source directory). "." when the source itself is a repository.
+	// source directory).
 	Path string `json:"path"`
 	// Source is the absolute path of the source repository the worktree was
 	// created from.
@@ -37,13 +41,16 @@ type Repo struct {
 	Submodules int `json:"submodules"`
 }
 
-// Metadata is the content of a workyard's .workyard/metadata.json.
+// Metadata describes one workyard. It is stored in the source directory at
+// .workyard/yards/<id>.json.
 type Metadata struct {
 	Version    int       `json:"version"`
+	ID         string    `json:"id"`
 	CreatedAt  time.Time `json:"createdAt"`
 	YasVersion string    `json:"yasVersion"`
 	GitVersion string    `json:"gitVersion"`
 	Source     string    `json:"source"`
+	Target     string    `json:"target"`
 	Branch     string    `json:"branch"`
 	Complete   bool      `json:"complete"`
 	Repos      []Repo    `json:"repos"`
@@ -69,42 +76,12 @@ type RepoConfig struct {
 
 // Yard is an existing workyard.
 type Yard struct {
+	// Root is the yard directory (the one holding the .workyard pointer).
 	Root string
-	Meta Metadata
-}
-
-// CopyMode selects how non-repository files are copied.
-type CopyMode int
-
-const (
-	// CopyAuto clones subtrees where the filesystem supports it (APFS on
-	// macOS) and falls back to a plain copy otherwise.
-	CopyAuto CopyMode = iota
-	// CopyClone requires cloning and fails when it is not possible.
-	CopyClone
-	// CopyPlain never clones.
-	CopyPlain
-)
-
-// ParseCopyMode parses "auto", "clone" or "plain".
-func ParseCopyMode(s string) (CopyMode, error) {
-	switch s {
-	case "", "auto":
-		return CopyAuto, nil
-	case "clone":
-		return CopyClone, nil
-	case "plain":
-		return CopyPlain, nil
-	}
-
-	return CopyAuto, errors.New("invalid copy mode " + s + " (expected auto, clone or plain)")
-}
-
-// Runner executes named tasks concurrently and reports on them.
-// *progress.Runner satisfies it.
-type Runner interface {
-	Add(name string, fn func() error)
-	Start(printResults bool) error
+	// Source is the directory the yard was created from.
+	Source string
+	ID     string
+	Meta   Metadata
 }
 
 // CreateOptions configures Create.
@@ -114,42 +91,27 @@ type CreateOptions struct {
 	// Branch to check out in every repository; defaults to the basename of
 	// Target.
 	Branch string
-	// Jobs is the number of concurrent file copy operations (default
-	// NumCPU*4); GitJobs the number of concurrent git operations (default
-	// NumCPU).
-	Jobs     int
-	GitJobs  int
-	CopyMode CopyMode
-	// Detach creates detached worktrees for branches that are already checked
-	// out elsewhere instead of failing.
-	Detach bool
-	// KeepPartial leaves a partially created yard in place on failure instead
-	// of rolling it back.
-	KeepPartial bool
-	// AllowNested allows the source to be inside an existing workyard.
-	AllowNested bool
+	// Parallelism is the number of concurrent git operations (default: number
+	// of CPUs); file copies run with four times as many.
+	Parallelism int
 	// Log receives warnings and informational messages; nil discards them.
 	Log io.Writer
-	// NewRunner constructs the Runner used for the git phase; nil runs the
-	// tasks silently.
-	NewRunner func(maxGoroutines int, header string) Runner
 }
 
 // RemoveOptions configures Yard.Remove.
 type RemoveOptions struct {
 	// Force is passed to git worktree remove: 1 removes worktrees with
-	// uncommitted changes, 2 also removes locked worktrees.
+	// uncommitted changes (and deletes created branches even when unmerged),
+	// 2 also removes locked worktrees.
 	Force int
-	// DeleteBranch deletes the branches workyard created.
-	DeleteBranch bool
-	Log          io.Writer
+	Log   io.Writer
 }
 
 // RunOptions configures Yard.Run.
 type RunOptions struct {
-	// Jobs is the number of repositories to run in concurrently (default
-	// NumCPU*2).
-	Jobs int
+	// Parallelism is the number of repositories to run in concurrently
+	// (default: twice the number of CPUs).
+	Parallelism int
 	// Color forces git to emit color.
 	Color bool
 	// Ordered delivers results in repository path order instead of completion
@@ -176,4 +138,24 @@ var (
 	ErrPartialFailure = errors.New("workyard creation failed")
 	ErrTargetNotEmpty = errors.New("target directory exists and is not empty")
 	ErrDirty          = errors.New("worktrees have uncommitted changes (hint: use --force to remove them anyway)")
+	// ErrSourceIsRepo is returned when the source is, or is inside, a git
+	// repository: the point of a workyard is a root that is not one.
+	ErrSourceIsRepo = errors.New("Workyard cannot be a git repository. Create a git worktree instead") //nolint:staticcheck // user-facing sentence
+	// ErrNestedWorkyard is returned when the source is itself a workyard.
+	ErrNestedWorkyard = errors.New("source is inside a workyard")
+	// ErrUnresolvedBranch is returned by Create when the branch cannot be
+	// checked out in one or more repositories; nothing is created then.
+	ErrUnresolvedBranch = errors.New("cannot resolve branch in some repositories")
 )
+
+// SourceMissingError is returned by Open when the yard's source directory no
+// longer exists, so its metadata cannot be read. The yard can still be deleted
+// with RemoveOrphan.
+type SourceMissingError struct {
+	Root   string
+	Source string
+}
+
+func (e *SourceMissingError) Error() string {
+	return "source directory " + e.Source + " of workyard " + e.Root + " no longer exists"
+}

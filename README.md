@@ -164,37 +164,37 @@ go install github.com/dansimau/yas/cmd/workyard@latest
 ```console
 $ cd ~/code/workspace
 $ workyard create --branch feature-x ../workspace-feature-x
-✓ api
-✓ web
-✓ infra/terraform
-Created workyard at /Users/me/code/workspace-feature-x: 3 repositories, 12 cloned, 0 copied, 0 skipped, in 0.4s
+Created workyard in 0.42s
 
 $ cd ../workspace-feature-x/web
 $ workyard st                       # git status --short --branch in every repo
 $ workyard diff --stat              # git diff --stat in every repo
 $ workyard git log --oneline -3     # any git command
 $ workyard ls
-$ cd .. && workyard remove --yes ../workspace-feature-x
+$ cd .. && workyard remove workspace-feature-x
 ```
+
+Like a git worktree, a workyard only holds a pointer back to where it came from (the `.workyard`
+file at its root); the source keeps the bookkeeping under `.workyard/`. The source itself must not
+be a git repository (for that, use `git worktree`) or another workyard.
 
 When the branch does not exist in a repository it is created from that repository's trunk (`main`
 or `master`, or whatever `.workyard/config.yaml` says). A branch that exists only on a remote is
 created to track it; a tag or commit is checked out detached; a branch that is already checked out
-in the source fails unless you pass `--detach`.
+in the source is an error.
 
 | Command | Description |
 | --- | --- |
-| `workyard create [--source DIR] [--branch NAME] TARGET` | Create a workyard; `--dry-run` shows the plan, `--detach`, `--copy-mode=auto\|clone\|plain`, `--keep-partial`, `--allow-nested` |
+| `workyard create [--source DIR] [--branch NAME] TARGET` | Create a workyard; `--dry-run` shows the plan |
 | `workyard status` (`st`) `[git args]` | `git status --short --branch` in every repo (arguments replace the defaults) |
 | `workyard diff [git args]` | `git diff` in every repo |
 | `workyard git <args>` | Any git command in every repo; exit code 1 if it failed anywhere |
 | `workyard list` (`ls`) `[--json]` | Repositories with branch, commit and a `*` when dirty |
-| `workyard remove [PATH] [-f] [--delete-branch] [--yes]` | Remove the worktrees (dirty ones only with `-f`, locked with `-f -f`) and the directory |
+| `workyard remove [PATH] [-f] [--yes]` | Remove the worktrees (dirty ones only with `-f`, locked with `-f -f`), the directory, and the branches workyard created (unmerged ones only with `-f`) |
 
-The fan-out commands print a `==> path (branch)` header per repository on a terminal (or with
-`--header`); `--quiet` hides headers of repositories with no output, `--unordered` prints results
-as they finish, and `--jobs`/`--color` control concurrency and color. Run them from anywhere inside
-the workyard, or set `WORKYARD_ROOT`.
+The fan-out commands print a `==> path (branch)` header for each repository that produced output.
+`--unordered` prints results as they finish, `-p`/`--parallelism` and `--color` control concurrency
+and color. Run them from anywhere inside the workyard, or set `WORKYARD_ROOT`.
 
 Optional source configuration in `<source>/.workyard/config.yaml`:
 
@@ -204,7 +204,7 @@ Optional source configuration in `<source>/.workyard/config.yaml`:
 | `repos.<path>.trunk` | Per-repository override, keyed by path relative to the source |
 
 Things to know: files ignored by git (`node_modules`, build output) are not copied into worktrees;
-submodules are not initialised (a warning is printed); if you move a workyard with `mv`, run
+submodules are not initialised (`-v` reports both); if you move a workyard with `mv`, run
 `git worktree repair` in each repository; the copy-on-write fast path needs source and target on
 the same APFS volume, otherwise files are copied.
 

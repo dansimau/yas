@@ -31,21 +31,21 @@ func TestCopierCloneFallback(t *testing.T) {
 
 	tests := []struct {
 		name         string
-		mode         CopyMode
+		mode         copyMode
 		cloneErr     error
 		wantCloned   bool
 		wantErr      bool
 		wantDisabled bool
 		wantWarning  bool
 	}{
-		{name: "clone succeeds", mode: CopyAuto, cloneErr: nil, wantCloned: true},
-		{name: "EXDEV falls back and disables cloning", mode: CopyAuto, cloneErr: syscall.EXDEV, wantDisabled: true, wantWarning: true},
-		{name: "ENOTSUP falls back and disables cloning", mode: CopyAuto, cloneErr: syscall.ENOTSUP, wantDisabled: true, wantWarning: true},
-		{name: "unsupported platform falls back and disables cloning", mode: CopyAuto, cloneErr: errCloneUnsupported, wantDisabled: true, wantWarning: true},
-		{name: "other error falls back without disabling", mode: CopyAuto, cloneErr: syscall.EIO},
-		{name: "EEXIST is a hard error", mode: CopyAuto, cloneErr: syscall.EEXIST, wantErr: true},
-		{name: "clone mode does not fall back", mode: CopyClone, cloneErr: syscall.EXDEV, wantErr: true},
-		{name: "plain mode never clones", mode: CopyPlain, cloneErr: nil},
+		{name: "clone succeeds", mode: copyAuto, cloneErr: nil, wantCloned: true},
+		{name: "EXDEV falls back and disables cloning", mode: copyAuto, cloneErr: syscall.EXDEV, wantDisabled: true, wantWarning: true},
+		{name: "ENOTSUP falls back and disables cloning", mode: copyAuto, cloneErr: syscall.ENOTSUP, wantDisabled: true, wantWarning: true},
+		{name: "unsupported platform falls back and disables cloning", mode: copyAuto, cloneErr: errCloneUnsupported, wantDisabled: true, wantWarning: true},
+		{name: "other error falls back without disabling", mode: copyAuto, cloneErr: syscall.EIO},
+		{name: "EEXIST is a hard error", mode: copyAuto, cloneErr: syscall.EEXIST, wantErr: true},
+		{name: "clone mode does not fall back", mode: copyClone, cloneErr: syscall.EXDEV, wantErr: true},
+		{name: "plain mode never clones", mode: copyPlain, cloneErr: nil},
 	}
 
 	for _, tt := range tests {
@@ -61,9 +61,9 @@ func TestCopierCloneFallback(t *testing.T) {
 
 			assert.Equal(t, err != nil, tt.wantErr, "err: %v", err)
 			assert.Equal(t, cloned, tt.wantCloned)
-			assert.Equal(t, c.cloneDisabled.Load(), tt.wantDisabled || tt.mode == CopyPlain)
+			assert.Equal(t, c.cloneDisabled.Load(), tt.wantDisabled || tt.mode == copyPlain)
 			assert.Equal(t, warnings > 0, tt.wantWarning)
-			assert.Equal(t, fake.calls, boolToInt(tt.mode != CopyPlain), "plain mode must not call the cloner")
+			assert.Equal(t, fake.calls, boolToInt(tt.mode != copyPlain), "plain mode must not call the cloner")
 
 			if tt.wantDisabled {
 				// Once disabled, no further clone attempts are made and no
@@ -76,6 +76,13 @@ func TestCopierCloneFallback(t *testing.T) {
 			}
 		})
 	}
+}
+
+func assertNotExistsInternal(t *testing.T, path string) {
+	t.Helper()
+
+	_, err := os.Lstat(path)
+	assert.Assert(t, errors.Is(err, os.ErrNotExist), "%s should not exist", path)
 }
 
 func boolToInt(b bool) int {
@@ -106,10 +113,8 @@ func TestCopierPlainCopyPreservesTree(t *testing.T) {
 	info, err := os.Lstat(filepath.Join(src, "dir"))
 	assert.NilError(t, err)
 
-	c := newCopier(CopyPlain, nil)
+	c := newCopier(copyPlain, nil)
 	assert.NilError(t, c.CopyTree(filepath.Join(src, "dir"), dst, info))
-	assert.Equal(t, int(c.copied.Load()), 1)
-	assert.Equal(t, int(c.cloned.Load()), 0)
 
 	content, err := os.ReadFile(filepath.Join(dst, "inner", "file"))
 	assert.NilError(t, err)
@@ -152,8 +157,8 @@ func TestCopierSkipsSpecialFiles(t *testing.T) {
 
 	var warnings []string
 
-	c := newCopier(CopyPlain, func(msg string) { warnings = append(warnings, msg) })
+	c := newCopier(copyPlain, func(msg string) { warnings = append(warnings, msg) })
 	assert.NilError(t, c.CopyEntry(fifo, filepath.Join(t.TempDir(), "fifo"), info))
-	assert.Equal(t, int(c.skipped.Load()), 1)
 	assert.Equal(t, len(warnings), 1)
+	assertNotExistsInternal(t, filepath.Join(t.TempDir(), "fifo"))
 }

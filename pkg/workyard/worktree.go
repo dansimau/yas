@@ -55,13 +55,13 @@ func (p *RepoPlan) Describe() string {
 
 // resolveRefs decides, for every repository in the plan, how the branch will
 // be checked out. Repositories whose branch cannot be resolved get Err set.
-func resolveRefs(ctx context.Context, plan *Plan, cfg Config, detach bool, jobs int) {
+func resolveRefs(ctx context.Context, plan *Plan, cfg Config, jobs int) {
 	p := pool.New().WithMaxGoroutines(jobs).WithContext(ctx)
 
 	for _, repo := range plan.Repos {
 		p.Go(func(context.Context) error {
 			repo.Repo.Ref = plan.Branch
-			repo.Err = resolveRef(repo, cfg, detach)
+			repo.Err = resolveRef(repo, cfg)
 
 			return nil
 		})
@@ -96,7 +96,7 @@ func resolveRefs(ctx context.Context, plan *Plan, cfg Config, detach bool, jobs 
 	}
 }
 
-func resolveRef(repo *RepoPlan, cfg Config, detach bool) error {
+func resolveRef(repo *RepoPlan, cfg Config) error {
 	git := gitexec.WithRepo(repo.Repo.Source)
 	ref := repo.Repo.Ref
 
@@ -120,18 +120,9 @@ func resolveRef(repo *RepoPlan, cfg Config, detach bool) error {
 		}
 
 		for _, wt := range worktrees {
-			if wt.Branch != ref {
-				continue
+			if wt.Branch == ref {
+				return fmt.Errorf("branch %q is already checked out at %s (hint: use a new branch name)", ref, wt.Path)
 			}
-
-			if detach {
-				repo.Action = ActionDetach
-				repo.StartPoint = ref
-
-				return nil
-			}
-
-			return fmt.Errorf("branch %q is already checked out at %s (hint: use --detach or a new branch name)", ref, wt.Path)
 		}
 
 		repo.Action = ActionExisting

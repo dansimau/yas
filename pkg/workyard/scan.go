@@ -62,7 +62,6 @@ type Plan struct {
 	// individual files and symlinks copied.
 	Subtrees int
 	Files    int
-	Skipped  []string
 }
 
 // Describe writes a human-readable summary of the plan.
@@ -79,10 +78,6 @@ func (p *Plan) Describe(w io.Writer) {
 
 	for _, repo := range p.Repos {
 		_, _ = fmt.Fprintf(w, "  %s: %s\n", repo.Repo.Path, repo.Describe())
-	}
-
-	for _, skipped := range p.Skipped {
-		_, _ = fmt.Fprintf(w, "skipped: %s\n", skipped)
 	}
 }
 
@@ -129,14 +124,16 @@ func isRepoDir(names map[string]fs.DirEntry) bool {
 
 type scanner struct {
 	source string
-	// sem bounds concurrent directory reads.
-	sem chan struct{}
+	// slots bounds the number of goroutines scanning directories: a child
+	// directory is scanned in its own goroutine only when a slot is free, and
+	// inline otherwise, so the walk stays depth-first and never holds more
+	// than a few directories' worth of entries in memory.
+	slots chan struct{}
 
 	mu       sync.Mutex
 	repos    []*RepoPlan
 	subtrees int
 	files    int
-	skipped  []string
 }
 
 // Scan walks source (never following symlinks, never descending into
@@ -154,7 +151,7 @@ func Scan(ctx context.Context, source string) (*Plan, error) {
 
 	s := &scanner{
 		source: source,
-		sem:    make(chan struct{}, runtime.NumCPU()*4),
+		slots:  make(chan struct{}, runtime.NumCPU()),
 	}
 
 	root, rootRepo, err := s.scanDir(ctx, ".", info)
@@ -163,14 +160,12 @@ func Scan(ctx context.Context, source string) (*Plan, error) {
 	}
 
 	sort.Slice(s.repos, func(i, j int) bool { return s.repos[i].Repo.Path < s.repos[j].Repo.Path })
-	sort.Strings(s.skipped)
 
 	plan := &Plan{
 		Source:   source,
 		Repos:    s.repos,
 		Subtrees: s.subtrees,
 		Files:    s.files,
-		Skipped:  s.skipped,
 	}
 
 	if rootRepo == nil {
@@ -189,11 +184,7 @@ func (s *scanner) scanDir(ctx context.Context, rel string, info fs.FileInfo) (*d
 		return nil, nil, err
 	}
 
-	s.sem <- struct{}{}
-
 	entries, err := os.ReadDir(filepath.Join(s.source, rel))
-	<-s.sem
-
 	if err != nil {
 		return nil, nil, err
 	}
@@ -223,7 +214,8 @@ func (s *scanner) scanDir(ctx context.Context, rel string, info fs.FileInfo) (*d
 
 	for i, e := range entries {
 		if rel == "." && e.Name() == workyardDir {
-			// The source's own .workyard directory is handled separately.
+			// The source's own .workyard directory (config and yard metadata)
+			// is never copied: a yard only gets a pointer back to the source.
 			continue
 		}
 
@@ -252,11 +244,7 @@ func (s *scanner) scanDir(ctx context.Context, rel string, info fs.FileInfo) (*d
 
 		child.Kind = kindSubtree
 
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		scan := func() {
 			dir, repo, err := s.scanDir(ctx, childRel, childInfo)
 			errs[i] = err
 
@@ -269,7 +257,21 @@ func (s *scanner) scanDir(ctx context.Context, rel string, info fs.FileInfo) (*d
 				child.Kind = kindRepo
 				child.Repo = repo
 			}
-		}()
+		}
+
+		select {
+		case s.slots <- struct{}{}:
+			wg.Add(1)
+
+			go func() {
+				defer wg.Done()
+				defer func() { <-s.slots }()
+
+				scan()
+			}()
+		default:
+			scan()
+		}
 	}
 
 	wg.Wait()
@@ -310,9 +312,7 @@ func (s *scanner) scanDir(ctx context.Context, rel string, info fs.FileInfo) (*d
 			s.subtrees++
 		case kindFile, kindSymlink:
 			s.files++
-		case kindOther:
-			s.skipped = append(s.skipped, child.Rel)
-		case kindRepo, kindAncestor:
+		case kindRepo, kindAncestor, kindOther:
 		}
 
 		node.Children = append(node.Children, child)

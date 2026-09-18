@@ -2,6 +2,7 @@ package workyard
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -63,15 +64,25 @@ func writeConfig(t *testing.T, source string, content string) {
 }
 
 func TestFind(t *testing.T) {
+	source := t.TempDir()
 	root := t.TempDir()
 	nested := filepath.Join(root, "a", "b", "c")
 	assert.NilError(t, os.MkdirAll(nested, 0o755))
-	assert.NilError(t, writeMetadata(root, Metadata{Version: MetadataVersion, Branch: "feature", Complete: true}))
+
+	id := yardID(root)
+	assert.NilError(t, writeMetadata(Metadata{Version: MetadataVersion, ID: id, Source: source, Target: root, Branch: "feature", Complete: true}))
+	assert.NilError(t, writePointer(root, source, id))
 
 	yard, err := Find(nested)
 	assert.NilError(t, err)
 	assert.Equal(t, yard.Root, root)
+	assert.Equal(t, yard.Source, source)
+	assert.Equal(t, yard.ID, id)
 	assert.Equal(t, yard.Meta.Branch, "feature")
+
+	// The source's own .workyard directory does not make it a yard.
+	_, err = Find(filepath.Join(source, workyardDir))
+	assert.ErrorIs(t, err, ErrNotAWorkyard)
 
 	_, err = Find(t.TempDir())
 	assert.ErrorIs(t, err, ErrNotAWorkyard)
@@ -87,6 +98,20 @@ func TestFind(t *testing.T) {
 
 	_, err = Find(nested)
 	assert.ErrorIs(t, err, ErrNotAWorkyard)
+
+	// Removing the metadata leaves the yards directory empty, so it goes too.
+	assert.NilError(t, removeMetadata(source, id))
+	_, err = os.Stat(filepath.Join(source, workyardDir))
+	assert.Assert(t, os.IsNotExist(err))
+
+	// A yard whose source is gone is reported as such.
+	assert.NilError(t, os.RemoveAll(source))
+
+	_, err = Open(root)
+
+	missing := &SourceMissingError{}
+	assert.Assert(t, errors.As(err, &missing), err)
+	assert.Equal(t, missing.Source, source)
 }
 
 func TestIsWithinAndRealPath(t *testing.T) {

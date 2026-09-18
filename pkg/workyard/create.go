@@ -18,19 +18,9 @@ import (
 	"github.com/sourcegraph/conc/pool"
 )
 
-// ErrUnresolvedBranch is returned by Create when the branch cannot be checked
-// out in one or more repositories; nothing is created in that case.
-var ErrUnresolvedBranch = errors.New("cannot resolve branch in some repositories")
-
 // Created is the outcome of a successful Create.
 type Created struct {
-	Yard *Yard
-	// Cloned and Copied count the units (subtrees and files) that were cloned
-	// and copied respectively; Skipped counts special files that were not
-	// copied.
-	Cloned  int
-	Copied  int
-	Skipped int
+	Yard    *Yard
 	Elapsed time.Duration
 }
 
@@ -79,17 +69,35 @@ func isWithin(parent, child string) bool {
 }
 
 func (o *CreateOptions) applyDefaults() {
-	if o.Jobs <= 0 {
-		o.Jobs = runtime.NumCPU() * 4
-	}
-
-	if o.GitJobs <= 0 {
-		o.GitJobs = runtime.NumCPU()
+	if o.Parallelism <= 0 {
+		o.Parallelism = runtime.NumCPU()
 	}
 
 	if o.Log == nil {
 		o.Log = io.Discard
 	}
+}
+
+// isGitRepo reports whether dir is a git repository (working tree or bare) or
+// inside one's working tree.
+func isGitRepo(dir string) (bool, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false, err
+	}
+
+	names := make(map[string]os.DirEntry, len(entries))
+	for _, e := range entries {
+		names[e.Name()] = e
+	}
+
+	if isRepoDir(names) {
+		return true, nil
+	}
+
+	_, err = gitexec.WithRepo(dir).TopLevel()
+
+	return err == nil, nil
 }
 
 // PlanCreate validates the options, scans the source and decides how every
@@ -126,29 +134,25 @@ func PlanCreate(ctx context.Context, o CreateOptions) (*Plan, error) {
 		return nil, fmt.Errorf("target: %w", err)
 	}
 
-	if !o.AllowNested {
-		root, err := findRoot(source)
-		if err != nil {
-			return nil, err
-		}
-
-		if root != "" {
-			return nil, fmt.Errorf("source is inside the workyard %s (hint: use --allow-nested to copy a workyard)", root)
-		}
+	// A workyard's root is by definition not a repository: worktrees of a
+	// single repository are what git worktree is for.
+	inRepo, err := isGitRepo(source)
+	if err != nil {
+		return nil, err
 	}
 
-	// The source may be a repository root, but not a directory inside a
-	// repository's working tree: that would copy files git tracks without
-	// making them a worktree.
-	if top, err := gitexec.WithRepo(source).TopLevel(); err == nil {
-		realTop, err := filepath.EvalSymlinks(top)
-		if err != nil {
-			return nil, err
-		}
+	if inRepo {
+		return nil, ErrSourceIsRepo
+	}
 
-		if realTop != source {
-			return nil, fmt.Errorf("source %s is inside the git repository %s (hint: use the repository root or a directory outside it)", source, realTop)
-		}
+	// Nor is it another workyard: yards point back to a plain source.
+	root, err := findRoot(source)
+	if err != nil {
+		return nil, err
+	}
+
+	if root != "" {
+		return nil, fmt.Errorf("%w: %s", ErrNestedWorkyard, root)
 	}
 
 	branch := o.Branch
@@ -173,7 +177,7 @@ func PlanCreate(ctx context.Context, o CreateOptions) (*Plan, error) {
 	plan.Target = target
 	plan.Branch = branch
 
-	resolveRefs(ctx, plan, cfg, o.Detach, o.GitJobs)
+	resolveRefs(ctx, plan, cfg, o.Parallelism)
 
 	return plan, nil
 }
@@ -201,7 +205,7 @@ func Create(ctx context.Context, o CreateOptions) (*Created, error) {
 	c := &creator{
 		o:      o,
 		plan:   plan,
-		copier: newCopier(o.CopyMode, func(msg string) { _, _ = fmt.Fprintln(o.Log, "warning: "+msg) }),
+		copier: newCopier(copyAuto, func(msg string) { _, _ = fmt.Fprintln(o.Log, "warning: "+msg) }),
 		groups: map[string]*sync.Mutex{},
 	}
 
@@ -210,10 +214,7 @@ func Create(ctx context.Context, o CreateOptions) (*Created, error) {
 	}
 
 	return &Created{
-		Yard:    &Yard{Root: plan.Target, Meta: c.meta},
-		Cloned:  int(c.copier.cloned.Load()),
-		Copied:  int(c.copier.copied.Load()),
-		Skipped: int(c.copier.skipped.Load()),
+		Yard:    &Yard{Root: plan.Target, Source: plan.Source, ID: c.meta.ID, Meta: c.meta},
 		Elapsed: time.Since(start),
 	}, nil
 }
@@ -223,21 +224,48 @@ type creator struct {
 	plan   *Plan
 	copier *copier
 
-	createdTarget bool
-	// rootIsRepo is true when the source itself is a repository, so the target
-	// is a single worktree and metadata can only be written after it exists.
-	rootIsRepo bool
-
 	metaMu sync.Mutex
 	meta   Metadata
-	// added lists the worktrees created so far, for rollback.
-	added []*RepoPlan
+	// rollback undoes everything done so far when a later step fails.
+	rollback rollback
 	// groups serializes worktree operations on repositories that share a git
 	// directory, which would otherwise race on .git/config.
 	groups map[string]*sync.Mutex
 }
 
 func (c *creator) run(ctx context.Context) error {
+	if err := c.prepareTarget(); err != nil {
+		return c.fail(err)
+	}
+
+	ancestors, err := c.copyFiles(ctx)
+	if err != nil {
+		return c.fail(err)
+	}
+
+	if err := c.addWorktrees(ctx); err != nil {
+		return c.fail(err)
+	}
+
+	// Ancestor directories were created writable so that files and worktrees
+	// could be added underneath; only now do they get their source modes.
+	if err := c.finishDirs(ancestors); err != nil {
+		return c.fail(err)
+	}
+
+	c.meta.Complete = true
+
+	if err := writeMetadata(c.meta); err != nil {
+		return c.fail(err)
+	}
+
+	return nil
+}
+
+// prepareTarget creates the target directory, the pointer file in it and the
+// initial (incomplete) metadata in the source, registering the rollback of
+// each.
+func (c *creator) prepareTarget() error {
 	target := c.plan.Target
 
 	if _, err := os.Stat(target); errors.Is(err, os.ErrNotExist) {
@@ -245,47 +273,47 @@ func (c *creator) run(ctx context.Context) error {
 			return err
 		}
 
-		c.createdTarget = true
+		c.rollback.add("remove "+target, func() error { return removeAll(target) })
+	} else {
+		// The target existed (empty) before: empty it again but leave it in
+		// place.
+		c.rollback.add("empty "+target, func() error {
+			entries, err := os.ReadDir(target)
+			if err != nil {
+				return err
+			}
+
+			for _, e := range entries {
+				if err := removeAll(filepath.Join(target, e.Name())); err != nil {
+					return err
+				}
+			}
+
+			return nil
+		})
 	}
 
-	c.rootIsRepo = c.plan.Root == nil
 	c.meta = c.initialMetadata()
 
-	if !c.rootIsRepo {
-		if err := writeMetadata(target, c.meta); err != nil {
-			return c.fail(err)
-		}
+	if err := writeMetadata(c.meta); err != nil {
+		return err
 	}
 
-	if c.plan.Root != nil {
-		if err := c.copyFiles(ctx); err != nil {
-			return c.fail(err)
-		}
-	}
+	c.rollback.add("remove metadata "+metadataPath(c.meta.Source, c.meta.ID), func() error {
+		return removeMetadata(c.meta.Source, c.meta.ID)
+	})
 
-	if err := c.addWorktrees(ctx); err != nil {
-		return c.fail(err)
-	}
-
-	if err := c.copyConfig(); err != nil {
-		return c.fail(err)
-	}
-
-	c.meta.Complete = true
-
-	if err := writeMetadata(target, c.meta); err != nil {
-		return c.fail(err)
-	}
-
-	return nil
+	return writePointer(target, c.plan.Source, c.meta.ID)
 }
 
 func (c *creator) initialMetadata() Metadata {
 	meta := Metadata{
 		Version:    MetadataVersion,
+		ID:         yardID(c.plan.Target),
 		CreatedAt:  time.Now().UTC(),
 		YasVersion: buildVersion(),
 		Source:     c.plan.Source,
+		Target:     c.plan.Target,
 		Branch:     c.plan.Branch,
 	}
 
@@ -308,16 +336,15 @@ func buildVersion() string {
 	return "(devel)"
 }
 
-// copyFiles recreates the ancestor directories and copies everything that is
-// not a repository.
-func (c *creator) copyFiles(ctx context.Context) error {
+// copyFiles recreates the ancestor directories (writable, for now) and copies
+// everything that is not a repository. It returns the ancestors so their
+// modes can be applied once the worktrees exist.
+func (c *creator) copyFiles(ctx context.Context) ([]*dirNode, error) {
 	var (
 		ancestors []*dirNode
 		leaves    []*entry
 	)
 
-	// Ancestor directories are created top-down before their contents are
-	// copied, and have their final mode and mtime applied bottom-up after.
 	var collect func(dir *dirNode) error
 
 	collect = func(dir *dirNode) error {
@@ -347,10 +374,10 @@ func (c *creator) copyFiles(ctx context.Context) error {
 	}
 
 	if err := collect(c.plan.Root); err != nil {
-		return err
+		return nil, err
 	}
 
-	p := pool.New().WithMaxGoroutines(c.o.Jobs).WithErrors().WithContext(ctx)
+	p := pool.New().WithMaxGoroutines(c.o.Parallelism * 4).WithErrors().WithContext(ctx)
 
 	for _, leaf := range leaves {
 		p.Go(func(ctx context.Context) error {
@@ -370,9 +397,15 @@ func (c *creator) copyFiles(ctx context.Context) error {
 	}
 
 	if err := p.Wait(); err != nil {
-		return err
+		return nil, err
 	}
 
+	return ancestors, nil
+}
+
+// finishDirs applies the source modes (and, below the root, mtimes) to the
+// ancestor directories, deepest first.
+func (c *creator) finishDirs(ancestors []*dirNode) error {
 	for i := len(ancestors) - 1; i >= 0; i-- {
 		dir := ancestors[i]
 		if dir.Rel == "." {
@@ -413,40 +446,26 @@ func (c *creator) groupMutex(commonDir string) *sync.Mutex {
 // addWorktrees creates a worktree for every repository, recording each in
 // the metadata as it lands.
 func (c *creator) addWorktrees(ctx context.Context) error {
-	if len(c.plan.Repos) == 0 {
-		return nil
-	}
-
-	var runner Runner
-	if c.o.NewRunner != nil {
-		runner = c.o.NewRunner(c.o.GitJobs, "Creating worktrees")
-	} else {
-		runner = NewSilentRunner(c.o.GitJobs)
-	}
-
 	var (
 		errsMu sync.Mutex
 		errs   error
 	)
 
+	p := pool.New().WithMaxGoroutines(c.o.Parallelism)
+
 	for i, repo := range c.plan.Repos {
-		runner.Add(repo.Repo.Path, func() error {
-			err := c.addWorktree(ctx, i, repo)
-			if err != nil {
+		p.Go(func() {
+			if err := c.addWorktree(ctx, i, repo); err != nil {
 				errsMu.Lock()
 
 				errs = multierror.Append(errs, fmt.Errorf("%s: %w", repo.Repo.Path, err))
 
 				errsMu.Unlock()
 			}
-
-			return err
 		})
 	}
 
-	// The runner reports the same per-task errors we collect above, and adds
-	// its own display; the collected errors are the ones we return.
-	_ = runner.Start(true)
+	p.Wait()
 
 	return errs
 }
@@ -461,123 +480,86 @@ func (c *creator) addWorktree(ctx context.Context, index int, repo *RepoPlan) er
 	mu.Lock()
 	defer mu.Unlock()
 
-	if err := addWorktree(repo, c.dst(repo.Repo.Path)); err != nil {
+	dst := c.dst(repo.Repo.Path)
+
+	if err := addWorktree(repo, dst); err != nil {
 		return err
 	}
 
 	c.metaMu.Lock()
 	defer c.metaMu.Unlock()
 
-	c.added = append(c.added, repo)
+	c.rollback.add("remove worktree "+dst, func() error {
+		mu.Lock()
+		defer mu.Unlock()
+
+		git := gitexec.WithRepo(repo.Repo.Source)
+		if err := git.WorktreeRemoveForce(dst, 2); err != nil {
+			return err
+		}
+
+		// A branch workyard created would otherwise look pre-existing to the
+		// next attempt and never be cleaned up.
+		if repo.Repo.CreatedBranch {
+			return git.DeleteBranch(repo.Repo.Ref)
+		}
+
+		return nil
+	})
+
 	c.meta.Repos[index] = repo.Repo
 
-	if c.rootIsRepo {
+	return writeMetadata(c.meta)
+}
+
+// fail rolls back everything done so far and returns the combined error.
+func (c *creator) fail(cause error) error {
+	err := fmt.Errorf("%w: %w", ErrPartialFailure, cause)
+
+	if rollbackErr := c.rollback.run(); rollbackErr != nil {
+		return fmt.Errorf("%w\n%w", err, rollbackErr)
+	}
+
+	return err
+}
+
+// rollback is a list of undo operations, run in reverse order of registration.
+type rollback struct {
+	mu    sync.Mutex
+	steps []rollbackStep
+}
+
+type rollbackStep struct {
+	desc string
+	fn   func() error
+}
+
+func (r *rollback) add(desc string, fn func() error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.steps = append(r.steps, rollbackStep{desc: desc, fn: fn})
+}
+
+// run executes every step, most recent first, and reports all failures
+// together.
+func (r *rollback) run() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	var failures []string
+
+	for i := len(r.steps) - 1; i >= 0; i-- {
+		if err := r.steps[i].fn(); err != nil {
+			failures = append(failures, fmt.Sprintf("* %s: %v", r.steps[i].desc, err))
+		}
+	}
+
+	r.steps = nil
+
+	if len(failures) == 0 {
 		return nil
 	}
 
-	return writeMetadata(c.plan.Target, c.meta)
-}
-
-// copyConfig copies the source's .workyard/config.yaml, if any, so the yard
-// can itself be used as a source.
-func (c *creator) copyConfig() error {
-	src := filepath.Join(c.plan.Source, workyardDir, configFile)
-
-	info, err := os.Lstat(src)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-
-		return err
-	}
-
-	if err := os.MkdirAll(filepath.Join(c.plan.Target, workyardDir), 0o755); err != nil {
-		return err
-	}
-
-	return c.copier.copyFile(src, filepath.Join(c.plan.Target, workyardDir, configFile), info)
-}
-
-// fail handles a failure during creation: it keeps the partial yard (marked
-// incomplete) when requested, otherwise rolls everything back.
-func (c *creator) fail(cause error) error {
-	if c.o.KeepPartial {
-		c.meta.Complete = false
-
-		if err := writeMetadata(c.plan.Target, c.meta); err != nil {
-			cause = multierror.Append(cause, err)
-		}
-
-		_, _ = fmt.Fprintf(c.o.Log, "keeping partial workyard at %s\n", c.plan.Target)
-
-		return fmt.Errorf("%w: %w", ErrPartialFailure, cause)
-	}
-
-	_, _ = fmt.Fprintf(c.o.Log, "rolling back %s\n", c.plan.Target)
-
-	if err := c.rollback(); err != nil {
-		cause = multierror.Append(cause, fmt.Errorf("rollback: %w", err))
-	}
-
-	return fmt.Errorf("%w: %w", ErrPartialFailure, cause)
-}
-
-func (c *creator) rollback() error {
-	var errs error
-
-	for _, repo := range c.added {
-		dst := c.dst(repo.Repo.Path)
-		if err := gitexec.WithRepo(repo.Repo.Source).WorktreeRemoveForce(dst, 2); err != nil {
-			errs = multierror.Append(errs, err)
-		}
-	}
-
-	if c.createdTarget {
-		if err := removeAll(c.plan.Target); err != nil {
-			errs = multierror.Append(errs, err)
-		}
-
-		return errs
-	}
-
-	// The target existed (empty) before: empty it again but leave it in place.
-	entries, err := os.ReadDir(c.plan.Target)
-	if err != nil {
-		return multierror.Append(errs, err)
-	}
-
-	for _, e := range entries {
-		if err := removeAll(filepath.Join(c.plan.Target, e.Name())); err != nil {
-			errs = multierror.Append(errs, err)
-		}
-	}
-
-	return errs
-}
-
-// silentRunner runs tasks concurrently with no output.
-type silentRunner struct {
-	jobs  int
-	tasks []func() error
-}
-
-// NewSilentRunner returns a Runner that runs up to jobs tasks concurrently and
-// produces no output.
-func NewSilentRunner(jobs int) Runner {
-	return &silentRunner{jobs: jobs}
-}
-
-func (r *silentRunner) Add(_ string, fn func() error) {
-	r.tasks = append(r.tasks, fn)
-}
-
-func (r *silentRunner) Start(bool) error {
-	p := pool.New().WithMaxGoroutines(r.jobs).WithErrors()
-
-	for _, task := range r.tasks {
-		p.Go(task)
-	}
-
-	return p.Wait()
+	return errors.New("Errors while rolling back:\n" + strings.Join(failures, "\n"))
 }

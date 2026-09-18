@@ -18,9 +18,10 @@ import (
 )
 
 // Remove deletes the yard: every worktree is removed through its source
-// repository (so git's worktree metadata is cleaned up), then the directory
-// is deleted. Without force, nothing is removed if any worktree has
-// uncommitted changes.
+// repository (so git's worktree metadata is cleaned up), the directory is
+// deleted, and the branches workyard created are deleted where they are fully
+// merged (or unconditionally with force). Without force, nothing is removed
+// if any worktree has uncommitted changes.
 func (y *Yard) Remove(ctx context.Context, o RemoveOptions) error {
 	if o.Log == nil {
 		o.Log = io.Discard
@@ -87,7 +88,9 @@ func (y *Yard) Remove(ctx context.Context, o RemoveOptions) error {
 		return err
 	}
 
-	// Prune once per shared git directory, and delete created branches.
+	// Prune once per shared git directory, and delete the branches workyard
+	// created. Without force only fully merged branches go; the rest are
+	// reported, since deleting them would lose work.
 	pruned := map[string]bool{}
 
 	for _, repo := range y.Meta.Repos {
@@ -105,27 +108,42 @@ func (y *Yard) Remove(ctx context.Context, o RemoveOptions) error {
 			}
 		}
 
-		if !o.DeleteBranch || !repo.CreatedBranch {
+		if !repo.CreatedBranch {
 			continue
 		}
 
-		var err error
 		if o.Force > 0 {
-			err = git.DeleteBranch(repo.Ref)
-		} else {
-			err = git.DeleteBranchSafe(repo.Ref)
+			if err := git.DeleteBranch(repo.Ref); err != nil {
+				errs = multierror.Append(errs, fmt.Errorf("%s: delete branch %s: %w", repo.Path, repo.Ref, err))
+			}
+
+			continue
 		}
 
-		if err != nil {
-			errs = multierror.Append(errs, fmt.Errorf("%s: delete branch %s: %w", repo.Path, repo.Ref, err))
+		if err := git.DeleteBranchSafe(repo.Ref); err != nil {
+			_, _ = fmt.Fprintf(o.Log, "warning: %s: branch %s was not deleted because it is not fully merged (hint: use --force to delete it anyway)\n", repo.Path, repo.Ref)
 		}
+	}
+
+	if err := removeMetadata(y.Source, y.ID); err != nil {
+		errs = multierror.Append(errs, err)
 	}
 
 	return errs
 }
 
+// RemoveOrphan deletes a yard whose source directory (and with it the
+// metadata) no longer exists. Nothing but the directory can be cleaned up.
+func RemoveOrphan(root string) error {
+	if !isPointer(root) {
+		return fmt.Errorf("%w: %s", ErrNotAWorkyard, root)
+	}
+
+	return removeAll(root)
+}
+
 // dirtyRepos returns the paths of repositories with uncommitted changes or
-// untracked files (other than workyard's own metadata).
+// untracked files.
 func (y *Yard) dirtyRepos(ctx context.Context) ([]string, error) {
 	var (
 		mu    sync.Mutex
@@ -152,18 +170,12 @@ func (y *Yard) dirtyRepos(ctx context.Context) ([]string, error) {
 				return fmt.Errorf("%s: %w", repo.Path, err)
 			}
 
-			for path := range entries {
-				if repo.Path == "." && strings.HasPrefix(path, workyardDir+"/") {
-					continue
-				}
-
+			if len(entries) > 0 {
 				mu.Lock()
 
 				dirty = append(dirty, repo.Path)
 
 				mu.Unlock()
-
-				break
 			}
 
 			return nil
@@ -205,14 +217,6 @@ func (y *Yard) removeWorktree(repo Repo, force int) (string, error) {
 		}
 
 		return fmt.Sprintf("%s: source repository %s no longer exists; removed the directory but could not prune its git metadata", repo.Path, repo.Source), nil
-	}
-
-	if repo.Path == "." {
-		// The yard root is the worktree; workyard's metadata would otherwise
-		// count as untracked files.
-		if err := os.RemoveAll(filepath.Join(dir, workyardDir)); err != nil {
-			return "", err
-		}
 	}
 
 	return "", gitexec.WithRepo(repo.Source).WorktreeRemoveForce(dir, force)

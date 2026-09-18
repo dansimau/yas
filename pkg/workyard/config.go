@@ -9,12 +9,6 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-const (
-	workyardDir  = ".workyard"
-	configFile   = "config.yaml"
-	metadataFile = "metadata.json"
-)
-
 // LoadConfig reads <source>/.workyard/config.yaml. A missing file yields the
 // zero Config; unknown keys are an error.
 func LoadConfig(source string) (Config, error) {

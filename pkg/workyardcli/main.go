@@ -15,13 +15,11 @@ import (
 // diff, but live here so they can be given before or after the command name
 // without clashing with the git options those commands pass through.
 type Cmd struct {
-	Verbose bool `description:"Verbose output"                                                                   long:"verbose" short:"v"`
-	Jobs    int  `description:"Number of parallel jobs (default: depends on the command and the number of CPUs)" long:"jobs"    short:"j"`
+	Verbose     bool `description:"Verbose output"                                                        long:"verbose"     short:"v"`
+	Parallelism int  `description:"Number of operations to run in parallel (default: based on CPU count)" long:"parallelism" short:"p"`
 
-	Unordered bool   `description:"git/st/diff: print results as they complete instead of in path order"            long:"unordered"`
-	Header    bool   `description:"git/st/diff: always print a header per repository (default: only on a terminal)" long:"header"`
-	Quiet     bool   `description:"git/st/diff: omit the header for repositories with no output"                    long:"quiet"     short:"q"`
-	Color     string `choice:"auto"                                                                                 choice:"always"  choice:"never" default:"auto" description:"git/st/diff: when to ask git for colored output" long:"color"`
+	Unordered bool   `description:"git/st/diff: print results as they complete instead of in path order" long:"unordered"`
+	Color     string `choice:"auto"                                                                      choice:"always"  choice:"never" default:"auto" description:"git/st/diff: when to ask git for colored output" long:"color"`
 }
 
 // state is the per-invocation state shared by the commands.

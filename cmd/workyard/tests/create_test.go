@@ -4,11 +4,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
-	"github.com/dansimau/yas/pkg/testutil"
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/assert/cmp"
 )
@@ -16,99 +14,94 @@ import (
 func TestCreate_Tree(t *testing.T) {
 	t.Parallel()
 
-	for _, mode := range copyModes {
-		t.Run(mode, func(t *testing.T) {
-			t.Parallel()
+	f := setupFixture(t)
+	target, result := f.create(t)
+	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
 
-			f := setupFixture(t)
-			target, result := f.create(t, mode)
-			assert.Equal(t, result.ExitCode(), 0, result.Stderr())
+	// The only output is the final status line.
+	assert.Equal(t, result.Stdout(), "")
+	assert.Assert(t, strings.HasPrefix(output(result.Stderr()), "Created workyard in "), result.Stderr())
+	assert.Equal(t, strings.Count(output(result.Stderr()), "\n"), 1, result.Stderr())
 
-			// Plain files, nested directories and symlinks are copied as-is.
-			assertFileContent(t, filepath.Join(target, "top.txt"), "hello\n")
-			assertFileContent(t, filepath.Join(target, "plain", "nested", "n.txt"), "nested\n")
-			assertFileContent(t, filepath.Join(target, "readonly", "inside.txt"), "ro\n")
+	// Plain files, nested directories and symlinks are copied as-is.
+	assertFileContent(t, filepath.Join(target, "top.txt"), "hello\n")
+	assertFileContent(t, filepath.Join(target, "plain", "nested", "n.txt"), "nested\n")
+	assertFileContent(t, filepath.Join(target, "readonly", "inside.txt"), "ro\n")
 
-			linkInfo, err := os.Lstat(filepath.Join(target, "link"))
-			assert.NilError(t, err)
-			assert.Assert(t, linkInfo.Mode()&fs.ModeSymlink != 0, "link must stay a symlink")
+	linkInfo, err := os.Lstat(filepath.Join(target, "link"))
+	assert.NilError(t, err)
+	assert.Assert(t, linkInfo.Mode()&fs.ModeSymlink != 0, "link must stay a symlink")
 
-			linkTarget, err := os.Readlink(filepath.Join(target, "link"))
-			assert.NilError(t, err)
-			assert.Equal(t, linkTarget, "top.txt")
+	linkTarget, err := os.Readlink(filepath.Join(target, "link"))
+	assert.NilError(t, err)
+	assert.Equal(t, linkTarget, "top.txt")
 
-			// Modes are preserved.
-			readonlyInfo, err := os.Stat(filepath.Join(target, "readonly"))
-			assert.NilError(t, err)
-			assert.Equal(t, readonlyInfo.Mode().Perm(), fs.FileMode(0o555))
+	// Modes are preserved.
+	readonlyInfo, err := os.Stat(filepath.Join(target, "readonly"))
+	assert.NilError(t, err)
+	assert.Equal(t, readonlyInfo.Mode().Perm(), fs.FileMode(0o555))
 
-			execInfo, err := os.Stat(filepath.Join(target, "exec.sh"))
-			assert.NilError(t, err)
-			assert.Equal(t, execInfo.Mode().Perm(), fs.FileMode(0o755))
+	execInfo, err := os.Stat(filepath.Join(target, "exec.sh"))
+	assert.NilError(t, err)
+	assert.Equal(t, execInfo.Mode().Perm(), fs.FileMode(0o755))
 
-			// Repositories are worktrees: .git is a file, never a directory.
-			assert.NilError(t, filepath.WalkDir(target, func(path string, d fs.DirEntry, err error) error {
-				if err != nil {
-					return err
-				}
+	// Repositories are worktrees: .git is a file, never a directory.
+	assert.NilError(t, filepath.WalkDir(target, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
 
-				if d.Name() == ".git" {
-					assert.Assert(t, !d.IsDir(), "%s must be a worktree gitfile", path)
-				}
+		if d.Name() == ".git" {
+			assert.Assert(t, !d.IsDir(), "%s must be a worktree gitfile", path)
+		}
 
-				return nil
-			}))
+		return nil
+	}))
 
-			for _, repo := range []string{"repoA", "sub/deep/repoB", "wt/main"} {
-				assert.Equal(t, currentBranch(t, filepath.Join(target, repo)), "feature", repo)
-			}
-
-			// The second worktree sharing a git directory is detached at trunk.
-			assert.Equal(t, currentBranch(t, filepath.Join(target, "wt", "other")), "")
-			assert.Equal(t,
-				headHash(t, filepath.Join(target, "wt", "other"), "HEAD"),
-				headHash(t, filepath.Join(f.Source, "wt", "main"), "main"))
-
-			// Writing in the yard does not touch the source.
-			assert.NilError(t, os.WriteFile(filepath.Join(target, "plain", "nested", "n.txt"), []byte("changed\n"), 0o644))
-			assert.NilError(t, os.WriteFile(filepath.Join(target, "repoA", "new.txt"), []byte("new\n"), 0o644))
-			assertFileContent(t, filepath.Join(f.Source, "plain", "nested", "n.txt"), "nested\n")
-			assertNotExists(t, filepath.Join(f.Source, "repoA", "new.txt"))
-
-			// Metadata records every repository and that creation completed.
-			yard := openYard(t, target)
-			assert.Assert(t, yard.Meta.Complete)
-			assert.Equal(t, yard.Meta.Branch, "feature")
-
-			var paths []string
-			for _, repo := range yard.Meta.Repos {
-				paths = append(paths, repo.Path)
-			}
-
-			assert.DeepEqual(t, paths, fixtureRepos)
-			assert.Assert(t, yard.Meta.Repos[0].CreatedBranch)
-			assert.Assert(t, !yard.Meta.Repos[0].Detached)
-			assert.Assert(t, yard.Meta.Repos[3].Detached)
-
-			// Each source repository knows about its new worktree.
-			for _, repo := range []string{"repoA", "sub/deep/repoB"} {
-				list := mustOutput(t, filepath.Join(f.Source, repo), "git", "worktree", "list")
-				assert.Assert(t, cmp.Contains(list, filepath.Join(target, repo)))
-			}
-
-			assert.Equal(t, worktreeCount(t, filepath.Join(f.Source, "wt", "main")), 4, "main, other and their two yard copies")
-
-			// The footer reports what happened.
-			assert.Assert(t, cmp.Contains(result.Stderr(), "4 repositories"))
-			assert.Assert(t, cmp.Contains(result.Stderr(), "ignored by git are not copied"))
-
-			if mode == "plain" || runtime.GOOS != "darwin" {
-				assert.Assert(t, cmp.Contains(result.Stderr(), "0 cloned"))
-			} else {
-				assert.Assert(t, cmp.Contains(result.Stderr(), "0 copied"))
-			}
-		})
+	for _, repo := range []string{"repoA", "sub/deep/repoB", "wt/main"} {
+		assert.Equal(t, currentBranch(t, filepath.Join(target, repo)), "feature", repo)
 	}
+
+	// The second worktree sharing a git directory is detached at trunk.
+	assert.Equal(t, currentBranch(t, filepath.Join(target, "wt", "other")), "")
+	assert.Equal(t,
+		headHash(t, filepath.Join(target, "wt", "other"), "HEAD"),
+		headHash(t, filepath.Join(f.Source, "wt", "main"), "main"))
+
+	// Writing in the yard does not touch the source.
+	assert.NilError(t, os.WriteFile(filepath.Join(target, "plain", "nested", "n.txt"), []byte("changed\n"), 0o644))
+	assert.NilError(t, os.WriteFile(filepath.Join(target, "repoA", "new.txt"), []byte("new\n"), 0o644))
+	assertFileContent(t, filepath.Join(f.Source, "plain", "nested", "n.txt"), "nested\n")
+	assertNotExists(t, filepath.Join(f.Source, "repoA", "new.txt"))
+
+	// The yard holds only a pointer file; the metadata lives in the source.
+	pointer, err := os.Lstat(filepath.Join(target, ".workyard"))
+	assert.NilError(t, err)
+	assert.Assert(t, pointer.Mode().IsRegular(), ".workyard in the yard must be a file")
+	assert.Equal(t, len(yardMetadataFiles(t, f.Source)), 1)
+
+	yard := openYard(t, target)
+	assert.Assert(t, yard.Meta.Complete)
+	assert.Equal(t, yard.Meta.Branch, "feature")
+	assert.Assert(t, strings.HasSuffix(yard.Source, "/src"))
+
+	var paths []string
+	for _, repo := range yard.Meta.Repos {
+		paths = append(paths, repo.Path)
+	}
+
+	assert.DeepEqual(t, paths, fixtureRepos)
+	assert.Assert(t, yard.Meta.Repos[0].CreatedBranch)
+	assert.Assert(t, !yard.Meta.Repos[0].Detached)
+	assert.Assert(t, yard.Meta.Repos[3].Detached)
+
+	// Each source repository knows about its new worktree.
+	for _, repo := range []string{"repoA", "sub/deep/repoB"} {
+		list := mustOutput(t, filepath.Join(f.Source, repo), "git", "worktree", "list")
+		assert.Assert(t, cmp.Contains(list, filepath.Join(target, repo)))
+	}
+
+	assert.Equal(t, worktreeCount(t, filepath.Join(f.Source, "wt", "main")), 4, "main, other and their two yard copies")
 }
 
 func TestCreate_DefaultBranchAndSourceAreCwdAndTargetName(t *testing.T) {
@@ -123,6 +116,25 @@ func TestCreate_DefaultBranchAndSourceAreCwdAndTargetName(t *testing.T) {
 	assert.Equal(t, currentBranch(t, filepath.Join(target, "repoA")), "my-feature")
 }
 
+func TestCreate_SourceConfigIsNotCopied(t *testing.T) {
+	t.Parallel()
+
+	f := setupFixture(t)
+	assert.NilError(t, os.MkdirAll(filepath.Join(f.Source, ".workyard"), 0o755))
+	assert.NilError(t, os.WriteFile(filepath.Join(f.Source, ".workyard", "config.yaml"), []byte("trunk: main\n"), 0o644))
+
+	target := createYard(t, f)
+
+	// The yard's .workyard is the pointer file, nothing else came along.
+	info, err := os.Lstat(filepath.Join(target, ".workyard"))
+	assert.NilError(t, err)
+	assert.Assert(t, info.Mode().IsRegular())
+
+	// Config and metadata sit side by side in the source.
+	assertFileContent(t, filepath.Join(f.Source, ".workyard", "config.yaml"), "trunk: main\n")
+	assert.Equal(t, len(yardMetadataFiles(t, f.Source)), 1)
+}
+
 func TestCreate_BranchResolution(t *testing.T) {
 	t.Parallel()
 
@@ -131,7 +143,6 @@ func TestCreate_BranchResolution(t *testing.T) {
 		setup  string // extra git commands run in the repository
 		config string // contents of .workyard/config.yaml, if any
 		branch string
-		args   []string
 
 		wantExit     int
 		wantErr      string
@@ -149,17 +160,10 @@ func TestCreate_BranchResolution(t *testing.T) {
 			wantHeadRef: "existing",
 		},
 		{
-			name:     "checked out branch fails without --detach",
+			name:     "checked out branch fails",
 			branch:   "main",
 			wantExit: 1,
 			wantErr:  "already checked out",
-		},
-		{
-			name:         "checked out branch detaches with --detach",
-			branch:       "main",
-			args:         []string{"--detach"},
-			wantHeadRef:  "main",
-			wantDetached: true,
 		},
 		{
 			name: "remote-only branch is tracked",
@@ -261,8 +265,7 @@ func TestCreate_BranchResolution(t *testing.T) {
 			}
 
 			target := filepath.Join(t.TempDir(), "yard")
-			args := append([]string{"create", "--source", source, "--branch", tt.branch, target}, tt.args...)
-			result := newCLI(t, source).Run(args...)
+			result := newCLI(t, source).Run("create", "--source", source, "--branch", tt.branch, target)
 
 			assert.Equal(t, result.ExitCode(), tt.wantExit, result.Stderr())
 
@@ -270,6 +273,7 @@ func TestCreate_BranchResolution(t *testing.T) {
 				assert.Assert(t, cmp.Contains(result.Stderr(), tt.wantErr))
 				assertNotExists(t, target)
 				assert.Equal(t, worktreeCount(t, repo), 1, "no worktree may be left behind")
+				assert.Equal(t, len(yardMetadataFiles(t, source)), 0, "no metadata may be left behind")
 
 				return
 			}
@@ -341,6 +345,19 @@ func TestCreate_Guards(t *testing.T) {
 		assert.Assert(t, cmp.Contains(result.Stderr(), "must not contain each other"))
 	})
 
+	t.Run("source that is a repository", func(t *testing.T) {
+		t.Parallel()
+
+		f := setupFixture(t)
+		target := filepath.Join(t.TempDir(), "yard")
+
+		result := newCLI(t, f.Source).Run("create", "--source", filepath.Join(f.Source, "repoA"), "--branch", "feature", target)
+		assert.Equal(t, result.ExitCode(), 1)
+		assert.Assert(t, cmp.Contains(result.Stderr(), "Workyard cannot be a git repository. Create a git worktree instead"))
+		assertNotExists(t, target)
+		assert.Equal(t, worktreeCount(t, filepath.Join(f.Source, "repoA")), 1)
+	})
+
 	t.Run("source inside a repository working tree", func(t *testing.T) {
 		t.Parallel()
 
@@ -350,27 +367,19 @@ func TestCreate_Guards(t *testing.T) {
 
 		result := newCLI(t, f.Source).Run("create", "--source", inside, "--branch", "feature", filepath.Join(t.TempDir(), "yard"))
 		assert.Equal(t, result.ExitCode(), 1)
-		assert.Assert(t, cmp.Contains(result.Stderr(), "inside the git repository"))
+		assert.Assert(t, cmp.Contains(result.Stderr(), "Workyard cannot be a git repository"))
 	})
 
-	t.Run("source that is a repository root becomes a single worktree", func(t *testing.T) {
+	t.Run("source that is a bare repository", func(t *testing.T) {
 		t.Parallel()
 
-		f := setupFixture(t)
-		target := filepath.Join(t.TempDir(), "yard")
+		bare := filepath.Join(t.TempDir(), "bare.git")
+		assert.NilError(t, os.MkdirAll(bare, 0o755))
+		mustOutput(t, bare, "git", "init", "-q", "--bare")
 
-		result := newCLI(t, f.Source).Run("create", "--source", filepath.Join(f.Source, "repoA"), "--branch", "feature", target)
-		assert.Equal(t, result.ExitCode(), 0, result.Stderr())
-		assert.Equal(t, currentBranch(t, target), "feature")
-
-		yard := openYard(t, target)
-		assert.Equal(t, yard.Meta.Repos[0].Path, ".")
-
-		// And can be removed again, metadata and all.
-		result = newCLI(t, t.TempDir()).Run("remove", target)
-		assert.Equal(t, result.ExitCode(), 0, result.Stderr())
-		assertNotExists(t, target)
-		assert.Equal(t, worktreeCount(t, filepath.Join(f.Source, "repoA")), 1)
+		result := newCLI(t, bare).Run("create", "--source", bare, "--branch", "feature", filepath.Join(t.TempDir(), "yard"))
+		assert.Equal(t, result.ExitCode(), 1)
+		assert.Assert(t, cmp.Contains(result.Stderr(), "Workyard cannot be a git repository"))
 	})
 
 	t.Run("invalid branch name", func(t *testing.T) {
@@ -382,25 +391,19 @@ func TestCreate_Guards(t *testing.T) {
 		assert.Assert(t, cmp.Contains(result.Stderr(), "invalid branch name"))
 	})
 
-	t.Run("nested workyard needs --allow-nested", func(t *testing.T) {
+	t.Run("source that is a workyard", func(t *testing.T) {
 		t.Parallel()
 
 		f := setupFixture(t)
 		first := createYard(t, f)
 
-		second := filepath.Join(t.TempDir(), "second")
-		result := newCLI(t, first).Run("create", "--source", first, "--branch", "feature2", second)
-		assert.Equal(t, result.ExitCode(), 1)
-		assert.Assert(t, cmp.Contains(result.Stderr(), "--allow-nested"))
-		assertNotExists(t, second)
-
-		allowCleanup(t, filepath.Join(second, "readonly"))
-		result = newCLI(t, first).Run("create", "--allow-nested", "--source", first, "--branch", "feature2", second)
-		assert.Equal(t, result.ExitCode(), 0, result.Stderr())
-		assert.Equal(t, currentBranch(t, filepath.Join(second, "repoA")), "feature2")
-
-		// The nested yard's worktrees belong to the original source repos.
-		assert.Equal(t, worktreeCount(t, filepath.Join(f.Source, "repoA")), 3)
+		for _, source := range []string{first, filepath.Join(first, "plain")} {
+			second := filepath.Join(t.TempDir(), "second")
+			result := newCLI(t, first).Run("create", "--source", source, "--branch", "feature2", second)
+			assert.Equal(t, result.ExitCode(), 1)
+			assert.Assert(t, cmp.Contains(result.Stderr(), "inside a workyard"))
+			assertNotExists(t, second)
+		}
 	})
 
 	t.Run("dry run creates nothing", func(t *testing.T) {
@@ -416,6 +419,7 @@ func TestCreate_Guards(t *testing.T) {
 		assert.Assert(t, cmp.Contains(result.Stdout(), "wt/other: detached at main"))
 		assert.Assert(t, cmp.Contains(result.Stdout(), "plain/ (subtree)"))
 		assertNotExists(t, target)
+		assert.Equal(t, len(yardMetadataFiles(t, f.Source)), 0)
 
 		for _, repo := range []string{"repoA", "sub/deep/repoB"} {
 			assert.Equal(t, worktreeCount(t, filepath.Join(f.Source, repo)), 1)
@@ -437,60 +441,31 @@ func TestCreate_Guards(t *testing.T) {
 	})
 }
 
-func TestCreate_Rollback(t *testing.T) {
+func TestCreate_RollsBackOnFailure(t *testing.T) {
 	t.Parallel()
+
+	f := setupFixture(t)
 
 	// Making .git/worktrees a file makes "git worktree add" fail for that
 	// repository only, after planning has succeeded.
-	breakRepo := func(t *testing.T, f fixture) {
-		t.Helper()
+	assert.NilError(t, os.WriteFile(filepath.Join(f.Source, "sub", "deep", "repoB", ".git", "worktrees"), []byte("x"), 0o644))
 
-		assert.NilError(t, os.WriteFile(filepath.Join(f.Source, "sub", "deep", "repoB", ".git", "worktrees"), []byte("x"), 0o644))
+	target, result := f.create(t)
+	assert.Equal(t, result.ExitCode(), 1)
+	assert.Assert(t, cmp.Contains(result.Stderr(), "sub/deep/repoB"))
+	assert.Assert(t, !strings.Contains(result.Stderr(), "Created workyard"))
+	assertNotExists(t, target)
+
+	// No worktrees, created branches or metadata are left behind.
+	for _, repo := range []string{"repoA", "wt/main"} {
+		dir := filepath.Join(f.Source, repo)
+		assert.Assert(t, !strings.Contains(mustOutput(t, dir, "git", "worktree", "list"), target), "stale worktree left in %s", repo)
+		assert.Equal(t, mustOutput(t, dir, "git", "branch", "--list", "feature"), "", "created branch left in %s", repo)
 	}
 
-	t.Run("rolls back by default", func(t *testing.T) {
-		t.Parallel()
-
-		f := setupFixture(t)
-		breakRepo(t, f)
-
-		target, result := f.create(t, "auto")
-		assert.Equal(t, result.ExitCode(), 1)
-		assert.Assert(t, cmp.Contains(result.Stderr(), "sub/deep/repoB"))
-		assert.Assert(t, cmp.Contains(result.Stderr(), "rolling back"))
-		assertNotExists(t, target)
-
-		for _, repo := range []string{"repoA", "wt/main"} {
-			list := mustOutput(t, filepath.Join(f.Source, repo), "git", "worktree", "list")
-			assert.Assert(t, !strings.Contains(list, target), "stale worktree left in %s: %s", repo, list)
-		}
-	})
-
-	t.Run("keeps a partial yard with --keep-partial", func(t *testing.T) {
-		t.Parallel()
-
-		f := setupFixture(t)
-		breakRepo(t, f)
-
-		target, result := f.create(t, "auto", "--keep-partial")
-		assert.Equal(t, result.ExitCode(), 1)
-		assert.Assert(t, cmp.Contains(result.Stderr(), "keeping partial workyard"))
-		assertExists(t, target)
-
-		yard := openYard(t, target)
-		assert.Assert(t, !yard.Meta.Complete)
-		assert.Equal(t, currentBranch(t, filepath.Join(target, "repoA")), "feature")
-		assertNotExists(t, filepath.Join(target, "sub", "deep", "repoB", ".git"))
-
-		// An incomplete yard is still usable and removable.
-		result = newCLI(t, target).Run("ls")
-		assert.Equal(t, result.ExitCode(), 0, result.Stderr())
-		assert.Assert(t, cmp.Contains(result.Stdout(), "not completely created"))
-
-		result = newCLI(t, t.TempDir()).Run("remove", target)
-		assert.Equal(t, result.ExitCode(), 0, result.Stderr())
-		assertNotExists(t, target)
-	})
+	assert.Equal(t, mustOutput(t, filepath.Join(f.Source, "repoA"), "git", "branch", "--list", "existing"), "existing", "pre-existing branches are kept")
+	assert.Equal(t, len(yardMetadataFiles(t, f.Source)), 0)
+	assertNotExists(t, filepath.Join(f.Source, ".workyard"))
 }
 
 func TestCreate_VerboseListsIgnoredFilesAndSubmodules(t *testing.T) {
@@ -507,15 +482,21 @@ func TestCreate_VerboseListsIgnoredFilesAndSubmodules(t *testing.T) {
 		mkdir -p node_modules/pkg
 		touch node_modules/pkg/index.js
 	`)
-	testutil.ExecOrFail(t, source, "true")
 
 	target := filepath.Join(t.TempDir(), "yard")
-	result := newCLI(t, source).Run("-v", "create", "--source", source, "--branch", "feature", target)
+
+	// Without -v the notes are not shown.
+	result := newCLI(t, source).Run("create", "--source", source, "--branch", "feature", target)
+	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
+	assert.Assert(t, !strings.Contains(output(result.Stderr()), "submodule"), result.Stderr())
+
+	verboseTarget := filepath.Join(t.TempDir(), "yard-v")
+	result = newCLI(t, source).Run("-v", "create", "--source", source, "--branch", "feature-v", verboseTarget)
 	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
 	assert.Assert(t, cmp.Contains(result.Stderr(), "repo: ignored in source, not copied: node_modules/"))
 	assert.Assert(t, cmp.Contains(result.Stderr(), "repo has 1 submodule(s)"))
-	assertNotExists(t, filepath.Join(target, "repo", "node_modules"))
+	assertNotExists(t, filepath.Join(verboseTarget, "repo", "node_modules"))
 
-	yard := openYard(t, target)
+	yard := openYard(t, verboseTarget)
 	assert.Equal(t, yard.Meta.Repos[0].Submodules, 1)
 }

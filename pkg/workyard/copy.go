@@ -24,24 +24,34 @@ type cloner interface {
 	CloneTree(src, dst string) error
 }
 
+// copyMode selects how files are copied. Production always uses copyAuto;
+// the other modes exist for tests.
+type copyMode int
+
+const (
+	// copyAuto clones where the filesystem supports it (APFS on macOS) and
+	// falls back to a plain copy otherwise.
+	copyAuto copyMode = iota
+	// copyClone requires cloning and fails when it is not possible.
+	copyClone
+	// copyPlain never clones.
+	copyPlain
+)
+
 // copier copies files and directory trees, cloning them where possible.
 type copier struct {
 	cloner cloner
-	mode   CopyMode
+	mode   copyMode
 	// cloneDisabled is set once cloning has failed for a reason that will
 	// affect every further attempt (different volume, unsupported filesystem).
 	cloneDisabled atomic.Bool
 	warnOnce      sync.Once
 	warn          func(string)
-
-	cloned  atomic.Int64
-	copied  atomic.Int64
-	skipped atomic.Int64
 }
 
-func newCopier(mode CopyMode, warn func(string)) *copier {
+func newCopier(mode copyMode, warn func(string)) *copier {
 	c := &copier{cloner: newCloner(), mode: mode, warn: warn}
-	if mode == CopyPlain {
+	if mode == copyPlain {
 		c.cloneDisabled.Store(true)
 	}
 
@@ -57,8 +67,6 @@ func (c *copier) tryClone(src, dst string) (bool, error) {
 
 	err := c.cloner.CloneTree(src, dst)
 	if err == nil {
-		c.cloned.Add(1)
-
 		return true, nil
 	}
 
@@ -68,7 +76,7 @@ func (c *copier) tryClone(src, dst string) (bool, error) {
 		return false, fmt.Errorf("clone %s: %w", dst, err)
 	}
 
-	if c.mode == CopyClone {
+	if c.mode == copyClone {
 		return false, fmt.Errorf("clone %s: %w", dst, err)
 	}
 
@@ -91,8 +99,6 @@ func (c *copier) CopyTree(src, dst string, info fs.FileInfo) error {
 	if err != nil || cloned {
 		return err
 	}
-
-	c.copied.Add(1)
 
 	return c.copyDir(src, dst, info)
 }
@@ -166,8 +172,6 @@ func (c *copier) copyChild(src, dst string, info fs.FileInfo) error {
 	case info.Mode().IsRegular():
 		return c.copyFileData(src, dst, info)
 	default:
-		c.skipped.Add(1)
-
 		if c.warn != nil {
 			c.warn(fmt.Sprintf("skipping %s: not a regular file, directory or symlink", src))
 		}
@@ -183,8 +187,6 @@ func (c *copier) copyFile(src, dst string, info fs.FileInfo) error {
 	if err != nil || cloned {
 		return err
 	}
-
-	c.copied.Add(1)
 
 	return c.copyFileData(src, dst, info)
 }

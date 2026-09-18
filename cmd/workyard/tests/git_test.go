@@ -16,14 +16,14 @@ func TestGit_Passthrough(t *testing.T) {
 	target := createYard(t, f)
 
 	// Everything after the first non-option goes to git untouched.
-	result := newCLI(t, filepath.Join(target, "sub")).Run("git", "--header", "log", "--oneline", "-1")
+	result := newCLI(t, filepath.Join(target, "sub")).Run("git", "log", "--oneline", "-1")
 	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
 	assert.Equal(t, strings.Count(result.Stdout(), "==>"), 4)
 	assert.Equal(t, strings.Count(result.Stdout(), " initial"), 4)
 
 	// Options workyard does not know are passed through too, even before the
 	// git subcommand.
-	result = newCLI(t, target).Run("git", "--header", "--no-pager", "rev-parse", "--abbrev-ref", "HEAD")
+	result = newCLI(t, target).Run("git", "--no-pager", "rev-parse", "--abbrev-ref", "HEAD")
 	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
 	assert.Equal(t, strings.Count(result.Stdout(), "\nfeature\n"), 3)
 	assert.Assert(t, cmp.Contains(result.Stdout(), "\nHEAD\n"))
@@ -41,9 +41,10 @@ func TestGit_ExitCodeReflectsFailures(t *testing.T) {
 	target := createYard(t, f)
 
 	// The branch "existing" only exists in repoA, so git fails in the others.
-	result := newCLI(t, target).Run("git", "--header", "rev-parse", "--verify", "--quiet", "refs/heads/existing")
+	result := newCLI(t, target).Run("git", "rev-parse", "--verify", "--quiet", "refs/heads/existing")
 	assert.Equal(t, result.ExitCode(), 1)
 	assert.Assert(t, cmp.Contains(result.Stderr(), "3 of 4 repositories"))
+	assert.Equal(t, strings.Count(result.Stdout(), "==>"), 1, "only repoA printed anything")
 	assert.Assert(t, cmp.Contains(result.Stdout(), "==> repoA (feature)"))
 
 	// stderr from git is forwarded.

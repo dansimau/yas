@@ -18,21 +18,19 @@ func TestDiff_ShowsChangesInTheRightRepository(t *testing.T) {
 
 	assert.NilError(t, os.WriteFile(filepath.Join(target, "repoA", "file.txt"), []byte("changed\n"), 0o644))
 
-	result := newCLI(t, filepath.Join(target, "wt")).Run("diff", "--header")
+	result := newCLI(t, filepath.Join(target, "wt")).Run("diff")
 	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
 
+	// Only the repository with a diff gets a header.
 	stdout := result.Stdout()
-	assert.Equal(t, strings.Count(stdout, "==>"), 4, "every repository gets a header")
+	assert.Equal(t, strings.Count(stdout, "==>"), 1, stdout)
 
-	repoA := between(t, stdout, "==> repoA", "==> sub/deep/repoB")
+	repoA := between(t, stdout, "==> repoA (feature)", "")
 	assert.Assert(t, cmp.Contains(repoA, "-content"))
 	assert.Assert(t, cmp.Contains(repoA, "+changed"))
 
-	after := between(t, stdout, "==> sub/deep/repoB", "")
-	assert.Assert(t, !strings.Contains(after, "+changed"), "diff leaked into another repository")
-
-	// Options are passed to git diff; --quiet hides repositories without output.
-	result = newCLI(t, target).Run("diff", "--header", "--quiet", "--stat")
+	// Options are passed to git diff.
+	result = newCLI(t, target).Run("diff", "--stat")
 	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
 	assert.Equal(t, strings.Count(result.Stdout(), "==>"), 1)
 	assert.Assert(t, cmp.Contains(result.Stdout(), "1 file changed"))

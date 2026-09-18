@@ -28,15 +28,15 @@ func gitEnv() []string {
 // and in completion order otherwise. onResult is always called from the
 // calling goroutine.
 func (y *Yard) Run(ctx context.Context, o RunOptions, gitArgs []string, onResult func(Result)) error {
-	if o.Jobs <= 0 {
-		o.Jobs = runtime.NumCPU() * 2
+	if o.Parallelism <= 0 {
+		o.Parallelism = runtime.NumCPU() * 2
 	}
 
 	repos := y.Meta.Repos
 	results := make([]chan Result, len(repos))
 	completed := make(chan Result, len(repos))
 
-	p := pool.New().WithMaxGoroutines(o.Jobs)
+	p := pool.New().WithMaxGoroutines(o.Parallelism)
 
 	for i, repo := range repos {
 		results[i] = make(chan Result, 1)
