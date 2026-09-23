@@ -67,6 +67,16 @@ type Config struct {
 	// Repos holds per-repository overrides, keyed by path relative to the
 	// source directory.
 	Repos map[string]RepoConfig `yaml:"repos"`
+	// Exec configures the exec command.
+	Exec ExecConfig `yaml:"exec"`
+}
+
+// ExecConfig configures the exec command.
+type ExecConfig struct {
+	// Parallel runs the command in every repository at once with its output
+	// captured, instead of one repository at a time connected to the
+	// terminal. The --parallel and --no-parallel options override it.
+	Parallel bool `yaml:"parallel"`
 }
 
 // RepoConfig holds per-repository configuration.
@@ -112,14 +122,20 @@ type RunOptions struct {
 	// Parallelism is the number of repositories to run in concurrently
 	// (default: twice the number of CPUs).
 	Parallelism int
-	// Color forces git to emit color.
-	Color bool
 	// Ordered delivers results in repository path order instead of completion
 	// order.
 	Ordered bool
 }
 
-// Result is the outcome of running a git command in one repository.
+// StdIO is the set of standard streams a command is connected to. A nil
+// stream is connected to nothing (the command reads EOF or writes to /dev/null).
+type StdIO struct {
+	In  io.Reader
+	Out io.Writer
+	Err io.Writer
+}
+
+// Result is the outcome of running a command in one repository.
 type Result struct {
 	Repo Repo
 	// Branch is the branch checked out when the command ran ("HEAD" when
@@ -129,7 +145,8 @@ type Result struct {
 	Stderr   []byte
 	ExitCode int
 	// Err is set when the command could not be run at all (as opposed to
-	// exiting non-zero), e.g. because the repository directory is missing.
+	// exiting non-zero), e.g. because the repository directory is missing or
+	// the program was not found.
 	Err error
 }
 

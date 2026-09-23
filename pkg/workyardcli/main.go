@@ -11,15 +11,14 @@ import (
 	"github.com/jessevdk/go-flags"
 )
 
-// Cmd holds the global options. The fan-out options only affect git, st and
-// diff, but live here so they can be given before or after the command name
-// without clashing with the git options those commands pass through.
+// Cmd holds the global options. --unordered only affects st, diff and
+// exec --parallel, but lives here so it can be given before or after the
+// command name without clashing with the options those commands pass through.
 type Cmd struct {
 	Verbose     bool `description:"Verbose output"                                                        long:"verbose"     short:"v"`
 	Parallelism int  `description:"Number of operations to run in parallel (default: based on CPU count)" long:"parallelism" short:"p"`
 
-	Unordered bool   `description:"git/st/diff: print results as they complete instead of in path order" long:"unordered"`
-	Color     string `choice:"auto"                                                                      choice:"always"  choice:"never" default:"auto" description:"git/st/diff: when to ask git for colored output" long:"color"`
+	Unordered bool `description:"st/diff/exec --parallel: print results as they complete instead of in path order" long:"unordered"`
 }
 
 // state is the per-invocation state shared by the commands.
@@ -27,7 +26,7 @@ type state struct {
 	cmd  *Cmd
 	yard *workyard.Yard
 	// passthrough collects options that go-flags did not recognise while
-	// parsing a fan-out command; they are handed to git verbatim.
+	// parsing a fan-out command; they are handed to the command verbatim.
 	passthrough []string
 }
 
@@ -53,7 +52,7 @@ func Run(args ...string) int {
 
 	parser := flags.NewParser(current.cmd, flags.HelpFlag|flags.PassDoubleDash)
 	parser.LongDescription = "Create fast copies of a directory tree in which every git repository " +
-		"becomes a worktree on a chosen branch, and run git across all of them."
+		"becomes a worktree on a chosen branch, and run commands across all of them."
 
 	parser.CommandHandler = func(command flags.Commander, args []string) error {
 		if current.cmd.Verbose {
@@ -88,8 +87,8 @@ func Run(args ...string) int {
 		return command.Execute(args)
 	}
 
-	// Options that go-flags does not recognise are passed on to git when a
-	// fan-out command is active; anywhere else they are errors as usual.
+	// Options that go-flags does not recognise are passed on to the command
+	// when a fan-out command is active; anywhere else they are errors as usual.
 	seen := map[int]bool{}
 
 	parser.UnknownOptionHandler = func(option string, _ flags.SplitArgument, remaining []string) ([]string, error) {
@@ -112,7 +111,7 @@ func Run(args ...string) int {
 	mustAddCommand(parser.AddCommand("create", "Create a workyard", createLongHelp, &createCmd{}))
 	mustAddCommand(parser.AddCommand("status", "Run git status in every repository", statusLongHelp, &statusCmd{})).Aliases = []string{"st"}
 	mustAddCommand(parser.AddCommand("diff", "Run git diff in every repository", diffLongHelp, &diffCmd{}))
-	mustAddCommand(parser.AddCommand("git", "Run a git command in every repository", gitLongHelp, &gitCmd{}))
+	mustAddCommand(parser.AddCommand("exec", "Run a command in every repository", execLongHelp, &execCmd{}))
 	mustAddCommand(parser.AddCommand("list", "List the workyards created from a source directory", listLongHelp, &listCmd{})).Aliases = []string{"ls"}
 	mustAddCommand(parser.AddCommand("remove", "Remove a workyard and its worktrees", removeLongHelp, &removeCmd{})).Aliases = []string{"rm"}
 

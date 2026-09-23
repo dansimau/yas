@@ -47,18 +47,20 @@ func TestDiff_NoChangesNoOutput(t *testing.T) {
 	assert.Equal(t, result.Stdout(), "")
 }
 
-func TestDiff_ColorIsNotForcedWithoutTerminal(t *testing.T) {
+func TestDiff_GitDecidesColorItself(t *testing.T) {
 	t.Parallel()
 
 	f := setupFixture(t)
 	target := createYard(t, f)
 	assert.NilError(t, os.WriteFile(filepath.Join(target, "repoA", "file.txt"), []byte("changed\n"), 0o644))
 
+	// workyard does not touch git's color settings: git sees a pipe here and
+	// stays plain, and the user's own options are passed through.
 	result := newCLI(t, target).Run("diff")
 	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
 	assert.Assert(t, !strings.Contains(result.Stdout(), "\x1b["), "no escape codes when stdout is not a terminal")
 
-	result = newCLI(t, target).Run("--color=always", "diff")
+	result = newCLI(t, target).Run("diff", "--color=always")
 	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
 	assert.Assert(t, cmp.Contains(result.Stdout(), "\x1b["))
 }
