@@ -7,14 +7,18 @@ SRC = $(shell find cmd pkg \
 )
 
 .PHONY: out
-out: yas lint test
+out: yas workyard lint test
 
 yas: $(SRC)
 	go build -o yas cmd/yas/main.go
 
+workyard: $(SRC)
+	go build -o workyard cmd/workyard/main.go
+
 .PHONY: install
-install: yas
+install: yas workyard
 	sudo install -m 755 yas /usr/local/bin/yas
+	sudo install -m 755 workyard /usr/local/bin/workyard
 
 .PHONY: lint
 lint:
@@ -35,6 +39,6 @@ test:
 				tee test-results.json | \
 				python3 bin/colourise-go-test-output.py >/dev/null
 
-	go tool gocovmerge coverage/main.cov coverage/integration-tests.cov > coverage/combined.out
+	go tool gocovmerge coverage/main.cov coverage/integration-tests.cov coverage/workyard-tests.cov > coverage/combined.out
 	go tool cover -html=coverage/combined.out -o=coverage/cover.html
 	go run github.com/vladopajic/go-test-coverage/v2@latest --config=./.testcoverage.yaml

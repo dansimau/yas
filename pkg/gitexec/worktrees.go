@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/dansimau/yas/pkg/fsutil"
+	"github.com/dansimau/yas/pkg/xexec"
 )
 
 func (r *Repo) PrimaryWorktreePath() (string, error) {
@@ -226,22 +227,95 @@ func (r *Repo) IsLinkedWorktree() (bool, error) {
 	return gitDir != gitCommonDir, nil
 }
 
+// worktreeAdd runs `git worktree add` with git hooks disabled: creating a
+// worktree runs post-checkout hooks (husky and friends), which is unwanted
+// when worktrees are created programmatically, and slow when creating many.
+func (r *Repo) worktreeAdd(args ...string) error {
+	return r.run(append([]string{"git", "-c", "core.hooksPath=/dev/null", "worktree", "add", "--quiet"}, args...)...)
+}
+
 // WorktreeAdd creates a new worktree at the specified path with a new branch.
 func (r *Repo) WorktreeAdd(path, branchName, startPoint string) error {
-	return r.run("git", "worktree", "add", "-b", branchName, path, startPoint)
+	return r.worktreeAdd("-b", branchName, path, startPoint)
 }
 
 // WorktreeAddExisting creates a worktree for an existing branch.
 func (r *Repo) WorktreeAddExisting(path, branchName string) error {
-	return r.run("git", "worktree", "add", path, branchName)
+	return r.worktreeAdd(path, branchName)
+}
+
+// WorktreeAddDetached creates a worktree at path with a detached HEAD at the
+// given commit-ish.
+func (r *Repo) WorktreeAddDetached(path, commitish string) error {
+	return r.worktreeAdd("--detach", path, commitish)
+}
+
+// WorktreeAddTracking creates a worktree at path on a new local branch created
+// from remoteRef (e.g. "origin/feature") and set up to track it.
+func (r *Repo) WorktreeAddTracking(path, branchName, remoteRef string) error {
+	configWriteMu.Lock()
+	defer configWriteMu.Unlock()
+
+	return r.worktreeAdd("--track", "-b", branchName, path, remoteRef)
 }
 
 // WorktreeRemove removes a worktree at the specified path.
 // If force is true, it will remove the worktree even if it has uncommitted changes.
 func (r *Repo) WorktreeRemove(worktreePath string, force bool) error {
+	level := 0
 	if force {
-		return r.run("git", "worktree", "remove", worktreePath, "--force")
+		level = 1
 	}
 
-	return r.run("git", "worktree", "remove", worktreePath)
+	return r.WorktreeRemoveForce(worktreePath, level)
+}
+
+// WorktreeRemoveForce removes a worktree, passing --force the given number of
+// times: once removes a worktree with uncommitted changes, twice also removes
+// a locked worktree. Level 0 only removes clean worktrees.
+func (r *Repo) WorktreeRemoveForce(worktreePath string, level int) error {
+	args := []string{"git", "worktree", "remove", worktreePath}
+	for range min(level, 2) {
+		args = append(args, "--force")
+	}
+
+	return r.run(args...)
+}
+
+// WorktreePrune removes worktree administrative files for worktrees whose
+// directories no longer exist.
+func (r *Repo) WorktreePrune() error {
+	return r.run("git", "worktree", "prune")
+}
+
+// CommonDir returns the absolute, symlink-resolved path of the repository's
+// common git directory (the .git directory shared by all of its worktrees).
+func (r *Repo) CommonDir() (string, error) {
+	s, err := r.output("git", "rev-parse", "--git-common-dir")
+	if err != nil {
+		return "", err
+	}
+
+	if !filepath.IsAbs(s) {
+		s = filepath.Join(r.path, s)
+	}
+
+	return filepath.EvalSymlinks(s)
+}
+
+// TopLevel returns the absolute path of the root of the working tree, or an
+// error when the repository has no working tree (e.g. it is bare) or the
+// directory is not inside a repository.
+func (r *Repo) TopLevel() (string, error) {
+	b, err := xexec.Command("git", "rev-parse", "--show-toplevel").
+		WithEnvVars(CleanedGitEnv()).
+		WithWorkingDir(r.path).
+		WithStdout(nil).
+		WithStderr(nil).
+		Output()
+	if err != nil {
+		return "", err
+	}
+
+	return strings.TrimSpace(string(b)), nil
 }

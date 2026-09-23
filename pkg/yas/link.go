@@ -519,6 +519,10 @@ func (yas *YAS) forkPoint(branches []string) (parent string, children []string) 
 
 	for _, p := range slices.Sorted(maps.Keys(childrenOf)) {
 		if len(childrenOf[p]) > 1 {
+			// Branches arrive in submission (completion) order; keep the
+			// report stable.
+			slices.Sort(childrenOf[p])
+
 			return p, childrenOf[p]
 		}
 	}
