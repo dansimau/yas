@@ -176,7 +176,9 @@ $ cd .. && workyard remove workspace-feature-x
 
 Like a git worktree, a workyard only holds a pointer back to where it came from (the `.workyard`
 file at its root); the source keeps the bookkeeping under `.workyard/`. The source itself must not
-be a git repository (for that, use `git worktree`) or another workyard.
+be a git repository (for that, use `git worktree`) or another workyard. A yard may not overlap its
+source, except that it can live under the source's `.workyard/` directory (which is never copied),
+e.g. `workyard create .workyard/yards/feature-x`, much like yas keeps worktrees in `.yas/worktrees/`.
 
 When the branch does not exist in a repository it is created from that repository's trunk (`main`
 or `master`, or whatever `.workyard/config.yaml` says). A branch that exists only on a remote is
