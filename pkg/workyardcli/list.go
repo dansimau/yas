@@ -1,16 +1,27 @@
 package workyardcli
 
 import (
-	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"text/tabwriter"
+
+	"github.com/dansimau/yas/pkg/workyard"
 )
 
-type listCmd struct {
-	JSON bool `description:"Print the workyard metadata as JSON" long:"json"`
+const listLongHelp = `Lists the workyards created from the current source directory, with their
+branch, number of repositories and creation time. The current workyard is
+marked with "*"; one whose directory is gone is marked "(missing)" and one
+whose creation did not finish "(incomplete)".
+
+The source is that of the workyard containing the current directory, or else
+the current directory itself.`
+
+type listCmd struct{}
+
+func (c *listCmd) SkipYardCheck() bool {
+	return true
 }
 
 func (c *listCmd) Execute(args []string) error {
@@ -18,41 +29,54 @@ func (c *listCmd) Execute(args []string) error {
 		return NewUsageError("unexpected arguments: " + strings.Join(args, " "))
 	}
 
-	yard := current.yard
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
 
-	if c.JSON {
-		b, err := json.MarshalIndent(yard.Meta, "", "  ")
-		if err != nil {
-			return err
-		}
+	// The yard we are in, if any: it provides the source and is marked in
+	// the output.
+	current, err := workyard.Find(cwd)
+	if err != nil && !errors.Is(err, workyard.ErrNotAWorkyard) {
+		return WrapError(err, ExitUsage)
+	}
 
-		fmt.Println(string(b))
+	source := cwd
+	if current != nil {
+		source = current.Source
+	}
+
+	yards, err := workyard.List(source)
+	if err != nil {
+		return WrapError(err, ExitFailure)
+	}
+
+	if len(yards) == 0 {
+		fmt.Fprintf(os.Stderr, "No workyards created from %s\n", source)
 
 		return nil
 	}
 
-	fmt.Printf("workyard %s (source %s, branch %s)\n", yard.Root, yard.Meta.Source, yard.Meta.Branch)
-
-	if !yard.Meta.Complete {
-		fmt.Println("warning: this workyard was not completely created")
-	}
-
 	w := tabwriter.NewWriter(os.Stdout, 0, 8, 2, ' ', 0)
 
-	for _, status := range yard.Status(context.Background()) {
-		switch {
-		case status.Missing:
-			_, _ = fmt.Fprintf(w, "%s\t(missing)\t\t\n", status.Repo.Path)
-		case status.Err != nil:
-			_, _ = fmt.Fprintf(w, "%s\t(error: %v)\t\t\n", status.Repo.Path, status.Err)
-		default:
-			dirty := ""
-			if status.Dirty {
-				dirty = "*"
-			}
-
-			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", status.Repo.Path, status.Branch, status.Head, dirty)
+	for _, meta := range yards {
+		marker := " "
+		if current != nil && current.ID == meta.ID {
+			marker = "*"
 		}
+
+		notes := ""
+		if !meta.Exists() {
+			notes += "  (missing)"
+		}
+
+		if !meta.Complete {
+			notes += "  (incomplete)"
+		}
+
+		_, _ = fmt.Fprintf(w, "%s %s\t%s\t%d repos\t%s%s\n",
+			marker, meta.Target, meta.Branch, len(meta.Repos),
+			meta.CreatedAt.Local().Format("2006-01-02 15:04"), notes)
 	}
 
 	return w.Flush()
