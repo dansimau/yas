@@ -213,10 +213,14 @@ func TestRemove_NotAWorkyard(t *testing.T) {
 	assert.Equal(t, result.ExitCode(), 2)
 	assert.Assert(t, cmp.Contains(result.Stderr(), "not inside a workyard"))
 
-	// Options may follow the path.
-	result = newCLI(t, t.TempDir()).Run("remove", "some/path", "--yes")
+	// A name that is not a yard of the current source; options may follow it.
+	result = newCLI(t, t.TempDir()).Run("remove", "some/name", "--yes")
 	assert.Equal(t, result.ExitCode(), 2)
-	assert.Assert(t, cmp.Contains(result.Stderr(), "not inside a workyard"))
+	assert.Assert(t, cmp.Contains(result.Stderr(), "no such workyard: some/name"))
+
+	result = newCLI(t, t.TempDir()).Run("remove", "../name")
+	assert.Equal(t, result.ExitCode(), 2)
+	assert.Assert(t, cmp.Contains(result.Stderr(), "must be a relative path"))
 
 	result = newCLI(t, t.TempDir()).Run("remove", "some/path", "another")
 	assert.Equal(t, result.ExitCode(), 2)
@@ -229,4 +233,43 @@ func TestRemove_NotAWorkyard(t *testing.T) {
 	result = newCLI(t, t.TempDir()).Run("remove", f.Source)
 	assert.Equal(t, result.ExitCode(), 2)
 	assert.Assert(t, cmp.Contains(result.Stderr(), "not inside a workyard"))
+}
+
+func TestRemove_ByName(t *testing.T) {
+	t.Parallel()
+
+	f := setupFixture(t)
+
+	for _, name := range []string{"team/feature", "second"} {
+		result := newCLI(t, f.Source).Run("create", name)
+		assert.Equal(t, result.ExitCode(), 0, result.Stderr())
+		allowCleanup(t, filepath.Join(f.Source, ".workyard", "yards", name, "readonly"))
+	}
+
+	team := filepath.Join(f.Source, ".workyard", "yards", "team")
+	second := filepath.Join(f.Source, ".workyard", "yards", "second")
+
+	// From inside another yard of the same source, without confirmation.
+	result := newCLI(t, filepath.Join(second, "plain")).Run("remove", "team/feature")
+	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
+	assertNotExists(t, team)
+	assert.Equal(t, mustOutput(t, filepath.Join(f.Source, "repoA"), "git", "branch", "--list", "team/feature"), "")
+
+	// From below the source.
+	result = newCLI(t, filepath.Join(f.Source, "plain", "nested")).Run("rm", "second")
+	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
+	assertNotExists(t, filepath.Join(f.Source, ".workyard"))
+}
+
+func TestRemove_ExistingPathWinsOverName(t *testing.T) {
+	t.Parallel()
+
+	f := setupFixture(t)
+	target := createYard(t, f)
+
+	// "yard" names nothing in the source, but is a path relative to the
+	// current directory.
+	result := newCLI(t, filepath.Dir(target)).Run("remove", filepath.Base(target))
+	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
+	assertNotExists(t, target)
 }

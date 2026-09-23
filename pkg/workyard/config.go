@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v2"
 )
@@ -32,6 +33,28 @@ func LoadConfig(source string) (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// yardsDir returns the absolute directory in which new yards of source are
+// created.
+func (c Config) yardsDir(source string) (string, error) {
+	dir := c.YardsDir
+
+	switch {
+	case dir == "":
+		return filepath.Join(source, workyardDir, yardsDir), nil
+	case dir == "~" || strings.HasPrefix(dir, "~/"):
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+
+		dir = filepath.Join(home, dir[1:])
+	case !filepath.IsAbs(dir):
+		dir = filepath.Join(source, dir)
+	}
+
+	return filepath.Clean(dir), nil
 }
 
 // trunkFor returns the configured trunk for a repository path, falling back

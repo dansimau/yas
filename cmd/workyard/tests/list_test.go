@@ -51,6 +51,12 @@ func TestList_Plain(t *testing.T) {
 	assert.Assert(t, cmp.Contains(result.Stdout(), secondPath))
 	assert.Assert(t, !strings.Contains(result.Stdout(), "*"))
 
+	// So they are from below the source.
+	result = newCLI(t, filepath.Join(f.Source, "plain", "nested")).Run("list")
+	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
+	assert.Assert(t, cmp.Contains(result.Stdout(), firstPath))
+	assert.Assert(t, cmp.Contains(result.Stdout(), secondPath))
+
 	// A yard whose directory was deleted by hand is flagged.
 	assert.NilError(t, os.Chmod(filepath.Join(first, "readonly"), 0o755))
 	assert.NilError(t, os.RemoveAll(first))

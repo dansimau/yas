@@ -13,28 +13,39 @@ import (
 	"github.com/dansimau/yas/pkg/workyard"
 )
 
-const createLongHelp = `Copies the source directory tree to the target. Every git repository found
-along the way becomes a git worktree of the source repository, checked out at
-the branch (default: the basename of the target). Everything else is cloned
+const createLongHelp = `Creates the workyard <name>: a copy of the source directory tree in which
+every git repository becomes a git worktree of the source repository, checked
+out at the branch (default: the name). Everything else is cloned
 (copy-on-write, on APFS) or copied.
+
+The workyard is created at --dest if given, else in <yards-dir>/<name>, where
+yards-dir is set in the source's .workyard/config.yaml (relative to the
+source, "~" for your home directory; default: .workyard/yards). The name may
+contain slashes, like a branch name. With --dest the name is optional: the
+branch then defaults to the basename of the destination.
 
 When the branch does not exist in a repository it is created from the
 repository's trunk (main or master, or "trunk" in the source's
 .workyard/config.yaml). A branch that exists only on a remote is created to
 track it, and a tag or commit is checked out detached.
 
+The source defaults to that of the workyard containing the current directory,
+else the nearest ancestor of the current directory with a .workyard directory
+(which the first workyard created from a source adds), else the current
+directory itself.
+
 The source must not be (or be inside) a git repository or another workyard.
 Files ignored by git are not copied into worktrees, and submodules are not
 initialised.`
 
 type createCmd struct {
-	Source string `default:"."                                                                             description:"Directory to copy" long:"source" short:"s"`
-	Target string `description:"Directory to create (alternatively give it as the positional argument)"    long:"target"                   short:"t"`
-	Branch string `description:"Branch to check out in every repository (default: basename of the target)" long:"branch"                   short:"b"`
-	DryRun bool   `description:"Show what would be done without creating anything"                         long:"dry-run"`
+	Source string `description:"Directory to copy (default: the current workyard's source, see above)" long:"source"  short:"s"`
+	Dest   string `description:"Directory to create (default: <yards-dir>/<name>)"                     long:"dest"    short:"d"`
+	Branch string `description:"Branch to check out in every repository (default: the name)"           long:"branch"  short:"b"`
+	DryRun bool   `description:"Show what would be done without creating anything"                     long:"dry-run"`
 
 	Args struct {
-		Target string `description:"Directory to create" positional-arg-name:"target"`
+		Name string `description:"Name of the workyard, and default branch" positional-arg-name:"name"`
 	} `positional-args:"yes"`
 }
 
@@ -47,15 +58,8 @@ func (c *createCmd) Execute(args []string) error {
 		return NewUsageError("unexpected arguments: " + strings.Join(args, " "))
 	}
 
-	target := c.Target
-
-	switch {
-	case target != "" && c.Args.Target != "":
-		return NewUsageError("target given both as --target and as an argument")
-	case target == "" && c.Args.Target == "":
-		return NewUsageError("no target given (hint: workyard create --branch <branch> <target>)")
-	case target == "":
-		target = c.Args.Target
+	if c.Args.Name == "" && c.Dest == "" {
+		return NewUsageError("no name given (hint: workyard create <name>)")
 	}
 
 	// Warnings are only shown in verbose mode; the default output is just the
@@ -65,9 +69,23 @@ func (c *createCmd) Execute(args []string) error {
 		log = os.Stderr
 	}
 
+	source := c.Source
+	if source == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+
+		source, err = workyard.FindSource(cwd)
+		if err != nil {
+			return WrapError(err, ExitUsage)
+		}
+	}
+
 	opts := workyard.CreateOptions{
-		Source:      c.Source,
-		Target:      target,
+		Source:      source,
+		Name:        c.Args.Name,
+		Target:      c.Dest,
 		Branch:      c.Branch,
 		Parallelism: current.cmd.Parallelism,
 		Log:         log,

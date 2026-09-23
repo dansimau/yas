@@ -15,8 +15,9 @@ branch, number of repositories and creation time. The current workyard is
 marked with "*"; one whose directory is gone is marked "(missing)" and one
 whose creation did not finish "(incomplete)".
 
-The source is that of the workyard containing the current directory, or else
-the current directory itself.`
+The source is that of the workyard containing the current directory, else the
+nearest ancestor of the current directory with a .workyard directory, else the
+current directory itself.`
 
 type listCmd struct{}
 
@@ -41,9 +42,9 @@ func (c *listCmd) Execute(args []string) error {
 		return WrapError(err, ExitUsage)
 	}
 
-	source := cwd
-	if current != nil {
-		source = current.Source
+	source, err := workyard.FindSource(cwd)
+	if err != nil {
+		return WrapError(err, ExitUsage)
 	}
 
 	yards, err := workyard.List(source)
