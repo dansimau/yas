@@ -11,15 +11,14 @@ import (
 	"github.com/jessevdk/go-flags"
 )
 
-// Cmd holds the global options. The fan-out options only affect st, diff and
-// exec --parallel, but live here so they can be given before or after the
+// Cmd holds the global options. --unordered only affects st, diff and
+// exec --parallel, but lives here so it can be given before or after the
 // command name without clashing with the options those commands pass through.
 type Cmd struct {
 	Verbose     bool `description:"Verbose output"                                                        long:"verbose"     short:"v"`
 	Parallelism int  `description:"Number of operations to run in parallel (default: based on CPU count)" long:"parallelism" short:"p"`
 
-	Unordered bool   `description:"st/diff/exec --parallel: print results as they complete instead of in path order" long:"unordered"`
-	Color     string `choice:"auto"                                                                                  choice:"always"  choice:"never" default:"auto" description:"st/diff/exec --parallel: when to ask git for colored output" long:"color"`
+	Unordered bool `description:"st/diff/exec --parallel: print results as they complete instead of in path order" long:"unordered"`
 }
 
 // state is the per-invocation state shared by the commands.

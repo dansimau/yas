@@ -11,29 +11,18 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/dansimau/yas/pkg/gitexec"
 	"github.com/dansimau/yas/pkg/xexec"
 	"github.com/sourcegraph/conc/pool"
 )
-
-// runEnv is the environment fan-out commands run in: cleaned of inherited
-// GIT_* variables, which would point git at the wrong repository. Commands
-// whose output is captured additionally never prompt for credentials, since
-// there is no terminal to answer on when many repositories run at once.
-func runEnv(captured bool) []string {
-	env := gitexec.CleanedGitEnv()
-	if captured {
-		env = append(env, "GIT_TERMINAL_PROMPT=0")
-	}
-
-	return env
-}
 
 // Run executes command (a program and its arguments) in every repository of
 // the yard concurrently, with the repository directory as the working
 // directory and its output captured, and calls onResult with each outcome: in
 // path order when o.Ordered is set and in completion order otherwise.
 // onResult is always called from the calling goroutine.
+//
+// The command inherits the environment unchanged (with PWD set to the
+// repository), exactly as if the user had run it there.
 func (y *Yard) Run(ctx context.Context, o RunOptions, command []string, onResult func(Result)) error {
 	if len(command) == 0 {
 		return errors.New("no command given")
@@ -55,7 +44,7 @@ func (y *Yard) Run(ctx context.Context, o RunOptions, command []string, onResult
 		p.Go(func() {
 			var stdout, stderr bytes.Buffer
 
-			result := y.runOne(ctx, repo, command, StdIO{Out: &stdout, Err: &stderr}, true)
+			result := y.runOne(ctx, repo, command, StdIO{Out: &stdout, Err: &stderr})
 			result.Stdout = stdout.Bytes()
 			result.Stderr = stderr.Bytes()
 
@@ -96,13 +85,13 @@ func (y *Yard) RunSerial(ctx context.Context, stdio StdIO, command []string, onS
 		}
 
 		onStart(repo, currentBranch(ctx, y.RepoDir(repo)))
-		onResult(y.runOne(ctx, repo, command, stdio, false))
+		onResult(y.runOne(ctx, repo, command, stdio))
 	}
 
 	return nil
 }
 
-func (y *Yard) runOne(ctx context.Context, repo Repo, command []string, stdio StdIO, captured bool) Result {
+func (y *Yard) runOne(ctx context.Context, repo Repo, command []string, stdio StdIO) Result {
 	result := Result{Repo: repo}
 	dir := y.RepoDir(repo)
 
@@ -118,9 +107,10 @@ func (y *Yard) runOne(ctx context.Context, repo Repo, command []string, stdio St
 
 	result.Branch = currentBranch(ctx, dir)
 
+	// No explicit environment: the command inherits ours, and os/exec then
+	// sets PWD to the working directory as a shell would.
 	err := xexec.CommandContext(ctx, command...).
 		WithWorkingDir(dir).
-		WithEnvVars(runEnv(captured)).
 		WithStdin(stdio.In).
 		WithStdout(stdio.Out).
 		WithStderr(stdio.Err).
@@ -141,7 +131,6 @@ func (y *Yard) runOne(ctx context.Context, repo Repo, command []string, stdio St
 // or unknown.
 func currentBranch(ctx context.Context, dir string) string {
 	out, err := xexec.CommandContext(ctx, "git", "-C", dir, "symbolic-ref", "--short", "-q", "HEAD").
-		WithEnvVars(runEnv(true)).
 		WithStdin(nil).
 		WithStdout(nil).
 		WithStderr(nil).

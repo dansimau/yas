@@ -196,10 +196,11 @@ in the source is an error.
 
 `status` and `diff` run in every repository at once and print a `==> path (branch)` header for each
 one that produced output. `exec` runs one repository at a time by default, with the command connected
-to the terminal so it can be interactive, and a header before each; `--parallel` (or `exec.parallel`
-in the config) makes it run them at once like `status` and `diff`. For the parallel runs `--unordered`
-prints results as they finish, `-p`/`--parallelism` controls concurrency, and `--color` controls whether
-git is asked for colored output. Run them from anywhere inside the workyard, or set `WORKYARD_ROOT`.
+to the terminal so it can be interactive (and colored, as if you had run it there), and a header
+before each; `--parallel` (or `exec.parallel` in the config) makes it run them at once like `status`
+and `diff`, with output captured. For the parallel runs `--unordered` prints results as they finish
+and `-p`/`--parallelism` controls concurrency. Commands see the environment unchanged. Run them from
+anywhere inside the workyard, or set `WORKYARD_ROOT`.
 
 Optional source configuration in `<source>/.workyard/config.yaml`:
 

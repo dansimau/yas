@@ -200,28 +200,34 @@ func TestExec_UnknownOptionOutsideFanOutIsAnError(t *testing.T) {
 	assert.Assert(t, cmp.Contains(result.Stderr(), "unknown flag"))
 }
 
-func TestExec_GitColorFollowsColorOption(t *testing.T) {
+func TestExec_CommandRunsAsTheUserWould(t *testing.T) {
 	t.Parallel()
 
 	f := setupFixture(t)
 	target := createYard(t, f)
 
-	// Without a terminal, "auto" means no color.
-	result := newCLI(t, target).Run("exec", "--parallel", "git", "log", "--oneline", "-1")
-	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
-	assert.Assert(t, !strings.Contains(result.Stdout(), "\x1b["))
+	realTarget, err := filepath.EvalSymlinks(target)
+	assert.NilError(t, err)
 
-	result = newCLI(t, target).Run("--color=always", "exec", "--parallel", "git", "log", "--oneline", "-1")
-	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
-	assert.Equal(t, strings.Count(result.Stdout(), "\x1b[33m"), 4, "every hash is colored")
+	for _, mode := range []string{"--parallel", "--no-parallel"} {
+		// PWD follows the working directory, and the environment is inherited
+		// as is, GIT_* variables included.
+		cli := newCLI(t, target, "GIT_AUTHOR_NAME", "Someone Else", "MY_VAR", "kept")
+		result := cli.Run("exec", mode, "sh", "-c", "echo $PWD $GIT_AUTHOR_NAME $MY_VAR")
+		assert.Equal(t, result.ExitCode(), 0, result.Stderr())
 
-	// Programs other than git are run exactly as given.
-	result = newCLI(t, target).Run("--color=always", "exec", "--parallel", "echo", "-c")
-	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
-	assert.Equal(t, strings.Count(result.Stdout(), "\n-c\n"), 4)
+		for _, repo := range fixtureRepos {
+			assert.Assert(t, cmp.Contains(result.Stdout(), "\n"+filepath.Join(realTarget, repo)+" Someone Else kept\n"), "%s %s", mode, repo)
+		}
 
-	// In serial mode the command sees the terminal and decides for itself.
-	result = newCLI(t, target).Run("--color=always", "exec", "git", "log", "--oneline", "-1")
-	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
-	assert.Assert(t, !strings.Contains(result.Stdout(), "\x1b["))
+		// git's color settings are left alone: with a pipe on stdout it stays
+		// plain unless the user asks otherwise.
+		result = newCLI(t, target).Run("exec", mode, "git", "log", "--oneline", "-1")
+		assert.Equal(t, result.ExitCode(), 0, result.Stderr())
+		assert.Assert(t, !strings.Contains(result.Stdout(), "\x1b["), mode)
+
+		result = newCLI(t, target).Run("exec", mode, "git", "log", "--color=always", "--oneline", "-1")
+		assert.Equal(t, result.ExitCode(), 0, result.Stderr())
+		assert.Equal(t, strings.Count(result.Stdout(), "\x1b[33m"), 4, mode)
+	}
 }

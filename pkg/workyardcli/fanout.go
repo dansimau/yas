@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"slices"
-	"strings"
 
 	"github.com/dansimau/yas/pkg/workyard"
 	"golang.org/x/term"
@@ -25,7 +24,7 @@ that workyard would otherwise interpret itself.`
 const capturedHelp = `
 
 The repositories run at once, with the command's output captured; the global
---parallelism, --unordered and --color options control how. A header
+--parallelism and --unordered options control how. A header
 "==> <path> (<branch>)" is printed for each repository that produced output.
 The exit code is 1 when the command failed in any repository.`
 
@@ -39,14 +38,14 @@ repository as the working directory, e.g. "workyard exec make test" or
 a shell; use "workyard exec sh -c '...'" for shell syntax.` + passthroughHelp + `
 
 By default the repositories run one at a time, in path order, with the command
-connected to the terminal so that it can be interactive; a header
-"==> <path> (<branch>)" precedes each. With --parallel the repositories run at
-once with the command's output captured; then the global --parallelism,
---unordered and --color options apply, the header is printed only for
-repositories that produced output, and git is asked for colored output
-according to --color. Set "exec: {parallel: true}" in the source's
-.workyard/config.yaml to make --parallel the default; --no-parallel overrides
-it. Either way the exit code is 1 when the command failed in any repository.`
+connected to the terminal so that it can be interactive (and color its output
+as it would for you); a header "==> <path> (<branch>)" precedes each. With
+--parallel the repositories run at once with the command's output captured;
+then the global --parallelism and --unordered options apply and the header is
+printed only for repositories that produced output. Set
+"exec: {parallel: true}" in the source's .workyard/config.yaml to make
+--parallel the default; --no-parallel overrides it. Either way the exit code is
+1 when the command failed in any repository.`
 )
 
 type statusCmd struct{}
@@ -107,48 +106,10 @@ func passthroughArgs(positional []string) []string {
 	return append(slices.Clone(current.passthrough), positional...)
 }
 
-// gitColorSlots are the color.<slot> settings that accept "always". Since git
-// 2.14.2, color.ui=always is treated as "auto" (so it never colors output
-// that is captured, as fan-out output is), but the per-slot settings still
-// force color.
-var gitColorSlots = []string{"advice", "branch", "diff", "grep", "interactive", "push", "remote", "showBranch", "status", "transport"}
-
-// withGitColor returns command with git asked for colored output, when the
-// command is git and the global --color option (or, for "auto", a terminal
-// on stdout) calls for it. Other commands are returned unchanged.
-func withGitColor(command []string) []string {
-	if command[0] != "git" || !useColor(command[1:]) {
-		return command
-	}
-
-	colored := []string{"git"}
-	for _, slot := range gitColorSlots {
-		colored = append(colored, "-c", "color."+slot+"=always")
-	}
-
-	return append(colored, command[1:]...)
-}
-
-// useColor reports whether git should be asked for colored output: as the
-// global --color option says, or when "auto" and stdout is a terminal (unless
-// the user set a color option themselves).
-func useColor(gitArgs []string) bool {
-	switch current.cmd.Color {
-	case "always":
-		return true
-	case "never":
-		return false
-	default:
-		return term.IsTerminal(int(os.Stdout.Fd())) && os.Getenv("NO_COLOR") == "" && !hasColorArg(gitArgs)
-	}
-}
-
 // fanOut runs the command in every repository at once, capturing its output,
 // and renders the results: a header per repository that produced output,
 // then its output.
 func fanOut(command []string) error {
-	command = withGitColor(command)
-
 	var failures failureCount
 
 	err := current.yard.Run(context.Background(), workyard.RunOptions{
@@ -217,14 +178,4 @@ func (c failureCount) err(command []string) error {
 	}
 
 	return NewError(fmt.Sprintf("%s failed in %d of %d repositories", command[0], int(c), len(current.yard.Meta.Repos)))
-}
-
-func hasColorArg(args []string) bool {
-	for _, arg := range args {
-		if arg == "--no-color" || arg == "--color" || strings.HasPrefix(arg, "--color=") {
-			return true
-		}
-	}
-
-	return false
 }
