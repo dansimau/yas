@@ -11,14 +11,14 @@ import (
 	"github.com/jessevdk/go-flags"
 )
 
-// Cmd holds the global options. --unordered only affects st, diff and
+// Cmd holds the global options. --unordered only affects git --parallel and
 // exec --parallel, but lives here so it can be given before or after the
 // command name without clashing with the options those commands pass through.
 type Cmd struct {
 	Verbose     bool `description:"Verbose output"                                                        long:"verbose"     short:"v"`
 	Parallelism int  `description:"Number of operations to run in parallel (default: based on CPU count)" long:"parallelism" short:"p"`
 
-	Unordered bool `description:"st/diff/exec --parallel: print results as they complete instead of in path order" long:"unordered"`
+	Unordered bool `description:"git/exec --parallel: print results as they complete instead of in path order" long:"unordered"`
 }
 
 // state is the per-invocation state shared by the commands.
@@ -109,8 +109,7 @@ func Run(args ...string) int {
 	}
 
 	mustAddCommand(parser.AddCommand("create", "Create a workyard", createLongHelp, &createCmd{}))
-	mustAddCommand(parser.AddCommand("status", "Run git status in every repository", statusLongHelp, &statusCmd{})).Aliases = []string{"st"}
-	mustAddCommand(parser.AddCommand("diff", "Run git diff in every repository", diffLongHelp, &diffCmd{}))
+	mustAddCommand(parser.AddCommand("git", "Run git in every repository", gitLongHelp, &gitCmd{}))
 	mustAddCommand(parser.AddCommand("exec", "Run a command in every repository", execLongHelp, &execCmd{}))
 	mustAddCommand(parser.AddCommand("list", "List the workyards created from a source directory", listLongHelp, &listCmd{})).Aliases = []string{"ls"}
 	mustAddCommand(parser.AddCommand("remove", "Remove a workyard and its worktrees", removeLongHelp, &removeCmd{})).Aliases = []string{"rm"}

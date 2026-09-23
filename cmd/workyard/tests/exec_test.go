@@ -73,12 +73,17 @@ func TestExec_SerialIsTheDefault(t *testing.T) {
 
 	// Repositories run one after another in path order, each preceded by a
 	// header, which is printed even when the command produces no output.
+	// Headers after the first are separated from the previous output by a
+	// blank line.
 	result := newCLI(t, target).Run("exec", "true")
 	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
 	assert.Equal(t, result.Stdout(), strings.Join([]string{
 		"==> repoA (feature)",
+		"",
 		"==> sub/deep/repoB (feature)",
+		"",
 		"==> wt/main (feature)",
+		"",
 		"==> wt/other (HEAD)",
 		"",
 	}, "\n"))
@@ -86,7 +91,7 @@ func TestExec_SerialIsTheDefault(t *testing.T) {
 	// Output is interleaved with the headers as it happens.
 	result = newCLI(t, target).Run("exec", "sh", "-c", "basename \"$PWD\"")
 	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
-	assert.Assert(t, cmp.Contains(result.Stdout(), "==> repoA (feature)\nrepoA\n==> sub/deep/repoB (feature)\nrepoB\n"))
+	assert.Assert(t, cmp.Contains(result.Stdout(), "==> repoA (feature)\nrepoA\n\n==> sub/deep/repoB (feature)\nrepoB\n"))
 
 	// stdin is connected to the command, so it can be interactive.
 	cli := gocmdtester.FromPath(t, mainGo, gocmdtester.WithWorkingDir(target), gocmdtester.WithStdin(strings.NewReader("typed\n")))
@@ -114,7 +119,7 @@ func TestExec_ParallelCapturesOutput(t *testing.T) {
 
 	result = newCLI(t, target).Run("exec", "--parallel", "sh", "-c", "basename \"$PWD\"")
 	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
-	assert.Assert(t, cmp.Contains(result.Stdout(), "==> repoA (feature)\nrepoA\n==> sub/deep/repoB (feature)\nrepoB\n"))
+	assert.Assert(t, cmp.Contains(result.Stdout(), "==> repoA (feature)\nrepoA\n\n==> sub/deep/repoB (feature)\nrepoB\n"))
 
 	// stdin is not connected.
 	cli := gocmdtester.FromPath(t, mainGo, gocmdtester.WithWorkingDir(target), gocmdtester.WithStdin(strings.NewReader("typed\n")))

@@ -373,7 +373,7 @@ func TestCreate_Guards(t *testing.T) {
 		assert.Equal(t, len(yardMetadataFiles(t, f.Source)), 2)
 
 		// Commands find the yard from inside it, and remove cleans up only it.
-		result = newCLI(t, filepath.Join(target, "plain")).Run("st")
+		result = newCLI(t, filepath.Join(target, "plain")).Run("git", "status")
 		assert.Equal(t, result.ExitCode(), 0, result.Stderr())
 		assert.Assert(t, cmp.Contains(result.Stdout(), "repoA"))
 
