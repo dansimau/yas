@@ -1,13 +1,11 @@
 package tests
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/dansimau/yas/pkg/workyard"
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/assert/cmp"
 )
@@ -57,7 +55,7 @@ func TestList_Plain(t *testing.T) {
 	assert.NilError(t, os.Chmod(filepath.Join(first, "readonly"), 0o755))
 	assert.NilError(t, os.RemoveAll(first))
 
-	result = newCLI(t, t.TempDir()).Run("ls", "--source", f.Source)
+	result = newCLI(t, f.Source).Run("ls")
 	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
 	lines = strings.Split(strings.TrimSpace(result.Stdout()), "\n")
 	assert.Equal(t, len(lines), 2, result.Stdout())
@@ -75,27 +73,4 @@ func TestList_NoYards(t *testing.T) {
 	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
 	assert.Equal(t, result.Stdout(), "")
 	assert.Assert(t, cmp.Contains(result.Stderr(), "No workyards created from "))
-}
-
-func TestList_JSON(t *testing.T) {
-	t.Parallel()
-
-	f := setupFixture(t)
-	target := createYard(t, f)
-
-	result := newCLI(t, target).Run("list", "--json")
-	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
-
-	var yards []workyard.Metadata
-	assert.NilError(t, json.Unmarshal([]byte(result.Stdout()), &yards))
-	assert.Equal(t, len(yards), 1)
-
-	meta := yards[0]
-	assert.Equal(t, meta.Version, workyard.MetadataVersion)
-	assert.Equal(t, meta.Branch, "feature")
-	assert.Assert(t, meta.Complete)
-	assert.Equal(t, len(meta.Repos), 4)
-	assert.Equal(t, meta.Repos[0].Path, "repoA")
-	assert.Assert(t, strings.HasSuffix(meta.Source, "/src"))
-	assert.Assert(t, meta.GitVersion != "")
 }

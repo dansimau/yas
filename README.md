@@ -191,7 +191,7 @@ in the source is an error.
 | `workyard status` (`st`) `[git args]` | `git status --short --branch` in every repo (arguments replace the defaults) |
 | `workyard diff [git args]` | `git diff` in every repo |
 | `workyard git <args>` | Any git command in every repo; exit code 1 if it failed anywhere |
-| `workyard list` (`ls`) `[--source DIR] [--json]` | Workyards created from the source (default: the current workyard's source, or the current directory) with branch, repository count and creation time |
+| `workyard list` (`ls`) | Workyards created from the current source (or the source of the current workyard) with branch, repository count and creation time |
 | `workyard remove [PATH] [-f] [--yes]` | Remove the worktrees (dirty ones only with `-f`, locked with `-f -f`), the directory, and the branches workyard created (unmerged ones only with `-f`) |
 
 The fan-out commands print a `==> path (branch)` header for each repository that produced output.
