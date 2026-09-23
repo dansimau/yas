@@ -58,8 +58,8 @@ type yardListing struct {
 	yards   []workyard.Metadata
 }
 
-// listYards lists the yards of the source of the workyard containing the
-// current directory, or else of the current directory itself.
+// listYards lists the yards of the source found from the current directory
+// (see workyard.FindSource).
 func listYards() (*yardListing, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -73,7 +73,7 @@ func listYards() (*yardListing, error) {
 
 	source, err := workyard.FindSource(cwd)
 	if err != nil {
-		return WrapError(err, ExitUsage)
+		return nil, WrapError(err, ExitUsage)
 	}
 
 	yards, err := workyard.List(source)
