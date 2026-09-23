@@ -1,4 +1,4 @@
-package yas
+package cliutil
 
 import (
 	"errors"

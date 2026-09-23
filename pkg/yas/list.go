@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/dansimau/yas/pkg/cliutil"
 	"github.com/fatih/color"
 	"github.com/heimdalr/dag"
 )
@@ -77,7 +78,7 @@ func (yas *YAS) augmentGraphWithAllBranches(graph *dag.DAG) error {
 
 // GetBranchList returns a list of SelectionItems representing all branches
 // Each item contains the branch name (ID) and the formatted display line.
-func (yas *YAS) GetBranchList(currentStackOnly bool, showStatus bool, showAll bool) ([]SelectionItem, error) {
+func (yas *YAS) GetBranchList(currentStackOnly bool, showStatus bool, showAll bool) ([]cliutil.SelectionItem, error) {
 	graph, err := yas.graph()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get graph: %w", err)
@@ -114,7 +115,7 @@ func (yas *YAS) GetBranchList(currentStackOnly bool, showStatus bool, showAll bo
 	}
 
 	// Build list of SelectionItems
-	var items []SelectionItem
+	var items []cliutil.SelectionItem
 
 	// Add trunk branch first
 	rootLabel := formatBranchName(yas.cfg.TrunkBranch)
@@ -123,7 +124,7 @@ func (yas *YAS) GetBranchList(currentStackOnly bool, showStatus bool, showAll bo
 		rootLabel = fmt.Sprintf("%s %s", rootLabel, darkGray("*"))
 	}
 
-	items = append(items, SelectionItem{
+	items = append(items, cliutil.SelectionItem{
 		ID:   yas.cfg.TrunkBranch,
 		Line: rootLabel,
 	})
@@ -137,7 +138,7 @@ func (yas *YAS) GetBranchList(currentStackOnly bool, showStatus bool, showAll bo
 }
 
 // collectBranchItems recursively collects branch items with tree formatting.
-func (yas *YAS) collectBranchItems(items *[]SelectionItem, graph *dag.DAG, parentID string, currentBranch string, showStatus bool, prefix string) error {
+func (yas *YAS) collectBranchItems(items *[]cliutil.SelectionItem, graph *dag.DAG, parentID string, currentBranch string, showStatus bool, prefix string) error {
 	children, err := graph.GetChildren(parentID)
 	if err != nil {
 		return err
@@ -262,7 +263,7 @@ func (yas *YAS) collectBranchItems(items *[]SelectionItem, graph *dag.DAG, paren
 
 		line := prefix + treeChar + branchLabel
 
-		*items = append(*items, SelectionItem{
+		*items = append(*items, cliutil.SelectionItem{
 			ID:   childID,
 			Line: line,
 		})
