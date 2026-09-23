@@ -141,16 +141,18 @@ func TestStatus_OutsideWorkyard(t *testing.T) {
 	headerIndexes(t, result.Stdout(), "feature")
 }
 
-func TestStatus_MissingRepositoryIsReportedAndSkipped(t *testing.T) {
+func TestStatus_MissingRepositoryIsReportedAsFailure(t *testing.T) {
 	t.Parallel()
 
 	f := setupFixture(t)
 	target := createYard(t, f)
 	assert.NilError(t, os.RemoveAll(filepath.Join(target, "sub", "deep", "repoB")))
 
+	// The other repositories still run; the missing one is a failure.
 	result := newCLI(t, target).Run("st")
-	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
+	assert.Equal(t, result.ExitCode(), 1)
 	assert.Assert(t, cmp.Contains(result.Stderr(), "warning: sub/deep/repoB"))
 	assert.Assert(t, cmp.Contains(result.Stderr(), "missing"))
+	assert.Assert(t, cmp.Contains(result.Stderr(), "git failed in 1 of 4 repositories"))
 	assert.Equal(t, strings.Count(result.Stdout(), "==>"), 3)
 }

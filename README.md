@@ -169,8 +169,8 @@ Created workyard in 0.42s
 $ cd ../workspace-feature-x/web
 $ workyard st                       # git status --short --branch in every repo
 $ workyard diff --stat              # git diff --stat in every repo
-$ workyard git log --oneline -3     # any git command
-$ workyard ls                       # workyards created from ~/code/workspace
+$ workyard exec git log --oneline -3   # any command, in every repo (add --parallel to run them at once)
+$ workyard ls                          # workyards created from ~/code/workspace
 $ cd .. && workyard remove workspace-feature-x
 ```
 
@@ -190,13 +190,16 @@ in the source is an error.
 | `workyard create [--source DIR] [--branch NAME] TARGET` | Create a workyard; `--dry-run` shows the plan |
 | `workyard status` (`st`) `[git args]` | `git status --short --branch` in every repo (arguments replace the defaults) |
 | `workyard diff [git args]` | `git diff` in every repo |
-| `workyard git <args>` | Any git command in every repo; exit code 1 if it failed anywhere |
+| `workyard exec [--parallel] <command> [args]` | Any command in every repo, with the repo as working directory; exit code 1 if it failed anywhere |
 | `workyard list` (`ls`) | Workyards created from the current source (or the source of the current workyard) with branch, repository count and creation time |
 | `workyard remove [PATH] [-f] [--yes]` | Remove the worktrees (dirty ones only with `-f`, locked with `-f -f`), the directory, and the branches workyard created (unmerged ones only with `-f`) |
 
-The fan-out commands print a `==> path (branch)` header for each repository that produced output.
-`--unordered` prints results as they finish, `-p`/`--parallelism` and `--color` control concurrency
-and color. Run them from anywhere inside the workyard, or set `WORKYARD_ROOT`.
+`status` and `diff` run in every repository at once and print a `==> path (branch)` header for each
+one that produced output. `exec` runs one repository at a time by default, with the command connected
+to the terminal so it can be interactive, and a header before each; `--parallel` (or `exec.parallel`
+in the config) makes it run them at once like `status` and `diff`. For the parallel runs `--unordered`
+prints results as they finish, `-p`/`--parallelism` controls concurrency, and `--color` controls whether
+git is asked for colored output. Run them from anywhere inside the workyard, or set `WORKYARD_ROOT`.
 
 Optional source configuration in `<source>/.workyard/config.yaml`:
 
@@ -204,6 +207,7 @@ Optional source configuration in `<source>/.workyard/config.yaml`:
 | --- | --- |
 | `trunk` | Branch to create new branches from when the requested branch does not exist (default: autodetect `main`, then `master`) |
 | `repos.<path>.trunk` | Per-repository override, keyed by path relative to the source |
+| `exec.parallel` | Make `workyard exec` run the repositories at once by default (`--no-parallel` overrides) |
 
 Things to know: files ignored by git (`node_modules`, build output) are not copied into worktrees;
 submodules are not initialised (`-v` reports both); if you move a workyard with `mv`, run
