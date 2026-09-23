@@ -161,6 +161,13 @@ copy-on-write, so a workspace of many repos and gigabytes of dependencies is rea
 go install github.com/dansimau/yas/cmd/workyard@latest
 ```
 
+Install the shell hook so `workyard switch` can change directory (it is separate from the yas
+hook, which only wraps `yas`):
+
+```sh
+eval "$(workyard hook zsh)"    # or: eval "$(workyard hook bash)"
+```
+
 ```console
 $ cd ~/code/workspace
 $ workyard create feature-x          # in .workyard/yards/feature-x, on branch feature-x
@@ -172,6 +179,7 @@ $ workyard git diff --stat
 $ workyard exec make test           # any command, in every repo (add --parallel to run them at once)
 $ workyard create feature-y         # from inside a yard: another yard of ~/code/workspace
 $ workyard ls                       # workyards created from ~/code/workspace
+$ workyard switch                   # pick a workyard of ~/code/workspace and cd to it
 $ workyard remove feature-x         # by name (or path), from anywhere in the source or its yards
 ```
 
@@ -197,6 +205,8 @@ in the source is an error.
 | `workyard git [--parallel] [git args]` | `git` with the given arguments in every repo; shorthand for `workyard exec git ...` |
 | `workyard exec [--parallel] <command> [args]` | Any command in every repo, with the repo as working directory; exit code 1 if it failed anywhere |
 | `workyard list` (`ls`) | Workyards created from the current source (or the source of the current workyard) with branch, repository count and creation time |
+| `workyard switch` (`sw`) | Interactively choose one of the workyards `list` shows and change directory to it (needs the shell hook) |
+| `workyard hook <bash\|zsh>` | Print the shell integration hook |
 | `workyard remove [NAME\|PATH] [-f] [--yes]` | Remove a workyard by name or path (an existing path wins), or the one you are in after confirmation: the worktrees (dirty ones only with `-f`, locked with `-f -f`), the directory, and the branches workyard created (unmerged ones only with `-f`) |
 
 `git` and `exec` run one repository at a time by default, with the command connected to the terminal

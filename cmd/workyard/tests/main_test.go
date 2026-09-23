@@ -21,6 +21,11 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 
+	// Nor should a WORKYARD_SHELL_EXEC from the shell hook receive commands.
+	if err := os.Unsetenv("WORKYARD_SHELL_EXEC"); err != nil {
+		panic(err)
+	}
+
 	exitCode := m.Run()
 
 	if err := os.MkdirAll("../../../coverage", 0o755); err != nil {

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dansimau/yas/pkg/cliutil"
 	"github.com/dansimau/yas/pkg/fsutil"
 	"github.com/dansimau/yas/pkg/gitexec"
 	"github.com/dansimau/yas/pkg/log"
@@ -213,7 +214,7 @@ func (yas *YAS) deleteWorktreeBranch(worktreePath string, branchName string, for
 
 	// Verify shell exec is available before any destructive operations
 	if deletingCurrentWorktree {
-		if err := errIfShellHookNotInstalled(); err != nil {
+		if err := ShellHook.ErrIfNotInstalled(); err != nil {
 			return err
 		}
 	}
@@ -241,10 +242,10 @@ func (yas *YAS) deleteWorktreeBranch(worktreePath string, branchName string, for
 	return nil
 }
 
-// switchDirectoryAfterDeletion uses ShellExecWriter to change the shell's
+// switchDirectoryAfterDeletion uses the shell hook to change the shell's
 // working directory after a worktree has been deleted.
 func (yas *YAS) switchDirectoryAfterDeletion(targetDir string) error {
-	shellExec, err := NewShellExecWriter()
+	shellExec, err := ShellHook.NewWriter()
 	if err != nil {
 		return err
 	}
@@ -411,7 +412,7 @@ func (yas *YAS) SwitchBranchInteractive() error {
 	}
 
 	// Show interactive selector
-	selected, err := InteractiveSelect(items, initialCursor, "Choose branch to switch to:")
+	selected, err := cliutil.InteractiveSelect(items, initialCursor, "Choose branch to switch to:")
 	if err != nil {
 		return fmt.Errorf("selection failed: %w", err)
 	}
@@ -438,7 +439,7 @@ func (yas *YAS) SwitchBranch(branchName string) error {
 
 	if worktreePath != "" {
 		// Branch has a worktree - switch to it using shell exec
-		shellExec, err := NewShellExecWriter()
+		shellExec, err := ShellHook.NewWriter()
 		if err != nil {
 			return err
 		}
@@ -471,7 +472,7 @@ func (yas *YAS) SwitchBranch(branchName string) error {
 	if inWorktree {
 		// We're in a worktree but target branch doesn't have one
 		// Switch back to primary repo and run checkout there
-		shellExec, err := NewShellExecWriter()
+		shellExec, err := ShellHook.NewWriter()
 		if err != nil {
 			return err
 		}

@@ -113,6 +113,11 @@ func Run(args ...string) int {
 	mustAddCommand(parser.AddCommand("exec", "Run a command in every repository", execLongHelp, &execCmd{}))
 	mustAddCommand(parser.AddCommand("list", "List the workyards created from a source directory", listLongHelp, &listCmd{})).Aliases = []string{"ls"}
 	mustAddCommand(parser.AddCommand("remove", "Remove a workyard and its worktrees", removeLongHelp, &removeCmd{})).Aliases = []string{"rm"}
+	mustAddCommand(parser.AddCommand("switch", "Interactively choose a workyard and change directory to it", switchLongHelp, &switchCmd{})).Aliases = []string{"sw"}
+	mustAddCommand(parser.AddCommand("hook", "Print shell integration hook for bash or zsh", "", &hookCmd{
+		Bash: &hookShellCmd{shell: "bash"},
+		Zsh:  &hookShellCmd{shell: "zsh"},
+	}))
 
 	for _, name := range fanOutCommands {
 		parser.Find(name).PassAfterNonOption = true
