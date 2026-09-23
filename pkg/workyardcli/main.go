@@ -113,7 +113,7 @@ func Run(args ...string) int {
 	mustAddCommand(parser.AddCommand("status", "Run git status in every repository", statusLongHelp, &statusCmd{})).Aliases = []string{"st"}
 	mustAddCommand(parser.AddCommand("diff", "Run git diff in every repository", diffLongHelp, &diffCmd{}))
 	mustAddCommand(parser.AddCommand("git", "Run a git command in every repository", gitLongHelp, &gitCmd{}))
-	mustAddCommand(parser.AddCommand("list", "List the repositories in the workyard", "", &listCmd{})).Aliases = []string{"ls"}
+	mustAddCommand(parser.AddCommand("list", "List the workyards created from a source directory", listLongHelp, &listCmd{})).Aliases = []string{"ls"}
 	mustAddCommand(parser.AddCommand("remove", "Remove a workyard and its worktrees", removeLongHelp, &removeCmd{})).Aliases = []string{"rm"}
 
 	for _, name := range fanOutCommands {
