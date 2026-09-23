@@ -100,6 +100,29 @@ func isGitRepo(dir string) (bool, error) {
 	return err == nil, nil
 }
 
+// resolveTarget returns the real path of the directory to create: o.Target,
+// or else o.Name under the configured yards directory.
+func resolveTarget(o CreateOptions, source string, cfg Config) (string, error) {
+	if o.Target != "" {
+		return realPath(o.Target)
+	}
+
+	if o.Name == "" {
+		return "", ErrNoName
+	}
+
+	if !filepath.IsLocal(o.Name) {
+		return "", fmt.Errorf("%w: %q", ErrInvalidName, o.Name)
+	}
+
+	dir, err := cfg.yardsDir(source)
+	if err != nil {
+		return "", err
+	}
+
+	return realPath(filepath.Join(dir, o.Name))
+}
+
 // PlanCreate validates the options, scans the source and decides how every
 // repository will be checked out, without touching the target.
 func PlanCreate(ctx context.Context, o CreateOptions) (*Plan, error) {
@@ -117,27 +140,6 @@ func PlanCreate(ctx context.Context, o CreateOptions) (*Plan, error) {
 
 	if !info.IsDir() {
 		return nil, fmt.Errorf("source %s is not a directory", source)
-	}
-
-	target, err := realPath(o.Target)
-	if err != nil {
-		return nil, err
-	}
-
-	// The target and the source must not contain each other, with one
-	// exception: a yard may live inside the source's .workyard directory
-	// (which is never copied), as long as it does not swallow the yard
-	// metadata kept in .workyard/yards.
-	metaDir := filepath.Join(source, workyardDir, yardsDir)
-	if isWithin(target, metaDir) || (isWithin(source, target) && !isWithin(filepath.Join(source, workyardDir), target)) {
-		return nil, fmt.Errorf("target %s and source %s must not contain each other (a yard may live under %s, but not at %s)",
-			target, source, filepath.Join(source, workyardDir), metaDir)
-	}
-
-	if entries, err := os.ReadDir(target); err == nil && len(entries) > 0 {
-		return nil, fmt.Errorf("%w: %s", ErrTargetNotEmpty, target)
-	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("target: %w", err)
 	}
 
 	// A workyard's root is by definition not a repository: worktrees of a
@@ -161,17 +163,43 @@ func PlanCreate(ctx context.Context, o CreateOptions) (*Plan, error) {
 		return nil, fmt.Errorf("%w: %s", ErrNestedWorkyard, root)
 	}
 
+	cfg, err := LoadConfig(source)
+	if err != nil {
+		return nil, err
+	}
+
+	target, err := resolveTarget(o, source, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	// The target and the source must not contain each other, with one
+	// exception: a yard may live inside the source's .workyard directory
+	// (which is never copied), as long as it does not swallow the yard
+	// metadata kept in .workyard/yards.
+	metaDir := filepath.Join(source, workyardDir, yardsDir)
+	if isWithin(target, metaDir) || (isWithin(source, target) && !isWithin(filepath.Join(source, workyardDir), target)) {
+		return nil, fmt.Errorf("destination %s and source %s must not contain each other (a yard may live under %s, but not at %s)",
+			target, source, filepath.Join(source, workyardDir), metaDir)
+	}
+
+	if entries, err := os.ReadDir(target); err == nil && len(entries) > 0 {
+		return nil, fmt.Errorf("%w: %s", ErrTargetNotEmpty, target)
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("destination: %w", err)
+	}
+
 	branch := o.Branch
-	if branch == "" {
+
+	switch {
+	case branch != "":
+	case o.Name != "":
+		branch = o.Name
+	default:
 		branch = filepath.Base(target)
 	}
 
 	if err := gitexec.WithRepo(source).CheckBranchName(branch); err != nil {
-		return nil, err
-	}
-
-	cfg, err := LoadConfig(source)
-	if err != nil {
 		return nil, err
 	}
 
@@ -275,11 +303,22 @@ func (c *creator) prepareTarget() error {
 	target := c.plan.Target
 
 	if _, err := os.Stat(target); errors.Is(err, os.ErrNotExist) {
+		// Undoing removes the missing ancestors created along with it, too
+		// (e.g. the yards directory, or "a" for a yard named "a/b").
+		created := target
+		for parent := filepath.Dir(created); parent != created; parent = filepath.Dir(created) {
+			if _, err := os.Lstat(parent); err == nil {
+				break
+			}
+
+			created = parent
+		}
+
 		if err := os.MkdirAll(target, 0o755); err != nil {
 			return err
 		}
 
-		c.rollback.add("remove "+target, func() error { return removeAll(target) })
+		c.rollback.add("remove "+created, func() error { return removeAll(created) })
 	} else {
 		// The target existed (empty) before: empty it again but leave it in
 		// place.

@@ -205,7 +205,7 @@ func (f fixture) create(t *testing.T, args ...string) (string, *gocmdtester.Resu
 	target := filepath.Join(t.TempDir(), "yard")
 	allowCleanup(t, filepath.Join(target, "readonly"))
 
-	result := newCLI(t, f.Source).Run(append([]string{"create", "--source", f.Source, "--branch", "feature", target}, args...)...)
+	result := newCLI(t, f.Source).Run(append([]string{"create", "--source", f.Source, "--branch", "feature", "--dest", target}, args...)...)
 
 	return target, result
 }

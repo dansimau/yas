@@ -69,6 +69,11 @@ type Config struct {
 	Repos map[string]RepoConfig `yaml:"repos"`
 	// Exec configures the exec command.
 	Exec ExecConfig `yaml:"exec"`
+	// YardsDir is the directory new workyards are created in, as
+	// <yards-dir>/<name>, when no destination is given. A relative path is
+	// relative to the source directory and a leading "~" is the home
+	// directory. Default: .workyard/yards.
+	YardsDir string `yaml:"yards-dir"`
 }
 
 // ExecConfig configures the exec command.
@@ -97,9 +102,14 @@ type Yard struct {
 // CreateOptions configures Create.
 type CreateOptions struct {
 	Source string
+	// Name of the workyard: the directory created under the configured yards
+	// directory when Target is empty, and the default branch. It may contain
+	// slashes (like a branch name) but must stay below the yards directory.
+	Name string
+	// Target is the directory to create; defaults to <yards-dir>/<Name>.
 	Target string
-	// Branch to check out in every repository; defaults to the basename of
-	// Target.
+	// Branch to check out in every repository; defaults to Name, or else the
+	// basename of Target.
 	Branch string
 	// Parallelism is the number of concurrent git operations (default: number
 	// of CPUs); file copies run with four times as many.
@@ -153,13 +163,22 @@ type Result struct {
 var (
 	ErrNotAWorkyard   = errors.New("not inside a workyard (hint: run from inside a workyard or set WORKYARD_ROOT)")
 	ErrPartialFailure = errors.New("workyard creation failed")
-	ErrTargetNotEmpty = errors.New("target directory exists and is not empty")
+	ErrTargetNotEmpty = errors.New("destination directory exists and is not empty")
 	ErrDirty          = errors.New("worktrees have uncommitted changes (hint: use --force to remove them anyway)")
 	// ErrSourceIsRepo is returned when the source is, or is inside, a git
 	// repository: the point of a workyard is a root that is not one.
 	ErrSourceIsRepo = errors.New("Workyard cannot be a git repository. Create a git worktree instead") //nolint:staticcheck // user-facing sentence
 	// ErrNestedWorkyard is returned when the source is itself a workyard.
 	ErrNestedWorkyard = errors.New("source is inside a workyard")
+	// ErrNoName is returned by Create when neither a name nor a destination
+	// is given.
+	ErrNoName = errors.New("no workyard name given")
+	// ErrInvalidName is returned for a name that would leave the yards
+	// directory (absolute, or containing "..").
+	ErrInvalidName = errors.New("workyard name must be a relative path without \"..\"")
+	// ErrNoSuchWorkyard is returned by FindNamed when the source has no yard
+	// of that name.
+	ErrNoSuchWorkyard = errors.New("no such workyard")
 	// ErrUnresolvedBranch is returned by Create when the branch cannot be
 	// checked out in one or more repositories; nothing is created then.
 	ErrUnresolvedBranch = errors.New("cannot resolve branch in some repositories")

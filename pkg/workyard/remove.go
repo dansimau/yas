@@ -88,6 +88,8 @@ func (y *Yard) Remove(ctx context.Context, o RemoveOptions) error {
 		return err
 	}
 
+	y.pruneParents()
+
 	// Prune once per shared git directory, and delete the branches workyard
 	// created. Without force only fully merged branches go; the rest are
 	// reported, since deleting them would lose work.
@@ -130,6 +132,32 @@ func (y *Yard) Remove(ctx context.Context, o RemoveOptions) error {
 	}
 
 	return errs
+}
+
+// pruneParents deletes the directories between the yards directory and the
+// yard's root that its removal left empty (e.g. "a" for a yard named "a/b").
+// Best effort: removing a non-empty directory fails, which is fine.
+func (y *Yard) pruneParents() {
+	cfg, err := LoadConfig(y.Source)
+	if err != nil {
+		return
+	}
+
+	dir, err := cfg.yardsDir(y.Source)
+	if err != nil {
+		return
+	}
+
+	root, err := realPath(y.Root)
+	if err != nil {
+		return
+	}
+
+	for parent := filepath.Dir(root); parent != dir && isWithin(dir, parent); parent = filepath.Dir(parent) {
+		if os.Remove(parent) != nil {
+			return
+		}
+	}
 }
 
 // RemoveOrphan deletes a yard whose source directory (and with it the

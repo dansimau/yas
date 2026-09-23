@@ -18,15 +18,18 @@ forgets about them), deletes the directory, and deletes the branches that
 is removed when any worktree has uncommitted changes or untracked files; with
 it, dirty worktrees and unmerged created branches are deleted too.
 
-Without a path, the workyard containing the current directory is removed after
-confirmation (or immediately with --yes).`
+The workyard is given by name (as for "workyard create": <yards-dir>/<name>
+of the source the current directory belongs to) or by path; an argument that
+exists as a file or directory is a path. Without either, the workyard
+containing the current directory is removed after confirmation (or
+immediately with --yes).`
 
 type removeCmd struct {
 	Force []bool `description:"Remove worktrees with uncommitted changes and delete unmerged branches; give twice to also remove locked worktrees" long:"force" short:"f"`
 	Yes   bool   `description:"Do not ask for confirmation"                                                                                        long:"yes"   short:"y"`
 
 	Args struct {
-		Path string `description:"Workyard to remove (default: the one containing the current directory)" positional-arg-name:"path"`
+		Yard string `description:"Name or path of the workyard to remove (default: the one containing the current directory)" positional-arg-name:"name|path"`
 	} `positional-args:"yes"`
 }
 
@@ -46,10 +49,13 @@ func (c *removeCmd) Execute(args []string) error {
 
 	var yard *workyard.Yard
 
-	if c.Args.Path != "" {
-		yard, err = workyard.Open(c.Args.Path)
-	} else {
+	switch {
+	case c.Args.Yard == "":
 		yard, err = workyard.Find(cwd)
+	case exists(c.Args.Yard):
+		yard, err = workyard.Open(c.Args.Yard)
+	default:
+		yard, err = workyard.FindNamed(cwd, c.Args.Yard)
 	}
 
 	// A yard whose source is gone can only be deleted outright.
@@ -104,11 +110,17 @@ func (c *removeCmd) confirm(cwd, root, prompt string) error {
 		return NewUsageError(fmt.Sprintf("current directory is inside %s (hint: cd out of the workyard first)", root))
 	}
 
-	if c.Args.Path == "" && !c.Yes && !cliutil.Confirm(prompt) {
+	if c.Args.Yard == "" && !c.Yes && !cliutil.Confirm(prompt) {
 		return NewError("aborted")
 	}
 
 	return nil
+}
+
+func exists(path string) bool {
+	_, err := os.Stat(path)
+
+	return err == nil
 }
 
 // isInside reports whether dir is root or inside it, comparing real paths.

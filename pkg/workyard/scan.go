@@ -66,7 +66,7 @@ type Plan struct {
 
 // Describe writes a human-readable summary of the plan.
 func (p *Plan) Describe(w io.Writer) {
-	_, _ = fmt.Fprintf(w, "source: %s\ntarget: %s\nbranch: %s\n\n", p.Source, p.Target, p.Branch)
+	_, _ = fmt.Fprintf(w, "source: %s\ndestination: %s\nbranch: %s\n\n", p.Source, p.Target, p.Branch)
 
 	if p.Root != nil {
 		_, _ = fmt.Fprintf(w, "copy: %d subtree(s), %d file(s)\n", p.Subtrees, p.Files)

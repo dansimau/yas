@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -111,9 +112,100 @@ func TestCreate_DefaultBranchAndSourceAreCwdAndTargetName(t *testing.T) {
 	target := filepath.Join(t.TempDir(), "my-feature")
 	allowCleanup(t, filepath.Join(target, "readonly"))
 
-	result := newCLI(t, f.Source).Run("create", "--target", target)
+	result := newCLI(t, f.Source).Run("create", "--dest", target)
 	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
 	assert.Equal(t, currentBranch(t, filepath.Join(target, "repoA")), "my-feature")
+}
+
+func TestCreate_NameIsDestinationUnderYardsDirAndBranch(t *testing.T) {
+	t.Parallel()
+
+	f := setupFixture(t)
+	target := filepath.Join(f.Source, ".workyard", "yards", "team", "feature")
+	allowCleanup(t, filepath.Join(target, "readonly"))
+
+	result := newCLI(t, f.Source).Run("create", "team/feature")
+	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
+	assert.Equal(t, currentBranch(t, filepath.Join(target, "repoA")), "team/feature")
+	assert.Equal(t, openYard(t, target).Meta.Branch, "team/feature")
+
+	// Removing it also removes the directory the slash in the name created,
+	// and with it the (then empty) .workyard directory.
+	result = newCLI(t, f.Source).Run("remove", target)
+	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
+	assertNotExists(t, filepath.Join(f.Source, ".workyard"))
+}
+
+func TestCreate_NameWithDestIsTheBranch(t *testing.T) {
+	t.Parallel()
+
+	f := setupFixture(t)
+	target := filepath.Join(t.TempDir(), "elsewhere")
+	allowCleanup(t, filepath.Join(target, "readonly"))
+
+	result := newCLI(t, f.Source).Run("create", "--dest", target, "feature")
+	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
+	assert.Equal(t, currentBranch(t, filepath.Join(target, "repoA")), "feature")
+}
+
+func TestCreate_YardsDirFromConfig(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+
+	for _, tt := range []struct {
+		yardsDir string
+		want     func(source string) string
+	}{
+		{"../yards", func(source string) string { return filepath.Join(filepath.Dir(source), "yards") }},
+		{"~/yards", func(string) string { return filepath.Join(home, "yards") }},
+	} {
+		t.Run(tt.yardsDir, func(t *testing.T) {
+			t.Parallel()
+
+			f := setupFixture(t)
+			assert.NilError(t, os.MkdirAll(filepath.Join(f.Source, ".workyard"), 0o755))
+			assert.NilError(t, os.WriteFile(filepath.Join(f.Source, ".workyard", "config.yaml"), []byte("yards-dir: "+tt.yardsDir+"\n"), 0o644))
+
+			// Unique per subtest, since they share the home directory.
+			name := filepath.Base(filepath.Dir(f.Source))
+			target := filepath.Join(tt.want(f.Source), name)
+			allowCleanup(t, filepath.Join(target, "readonly"))
+
+			result := newCLI(t, f.Source, "HOME", home).Run("create", "--branch", "feature", name)
+			assert.Equal(t, result.ExitCode(), 0, result.Stderr())
+			assert.Equal(t, currentBranch(t, filepath.Join(target, "repoA")), "feature")
+			assertNotExists(t, filepath.Join(f.Source, ".workyard", "yards", name))
+		})
+	}
+}
+
+func TestCreate_DefaultSourceIsFoundFromYardOrSourceSubdirectory(t *testing.T) {
+	t.Parallel()
+
+	f := setupFixture(t)
+	first := createYard(t, f)
+
+	// From anywhere inside a yard, or below a source that has a .workyard
+	// directory (the first yard created it), the source is the yard's source.
+	for i, dir := range []string{
+		first,
+		filepath.Join(first, "plain", "nested"),
+		filepath.Join(first, "repoA"),
+		filepath.Join(f.Source, "plain", "nested"),
+		filepath.Join(f.Source, "repoA"),
+	} {
+		target := filepath.Join(t.TempDir(), "yard")
+		allowCleanup(t, filepath.Join(target, "readonly"))
+
+		branch := fmt.Sprintf("feature%d", i)
+		result := newCLI(t, dir).Run("create", "--branch", branch, "--dest", target)
+		assert.Equal(t, result.ExitCode(), 0, "%s: %s", dir, result.Stderr())
+		assert.Equal(t, openYard(t, target).Source, openYard(t, first).Source, dir)
+		assert.Equal(t, currentBranch(t, filepath.Join(target, "repoA")), branch)
+	}
+
+	assert.Equal(t, len(yardMetadataFiles(t, f.Source)), 6)
 }
 
 func TestCreate_SourceConfigIsNotCopied(t *testing.T) {
@@ -265,7 +357,7 @@ func TestCreate_BranchResolution(t *testing.T) {
 			}
 
 			target := filepath.Join(t.TempDir(), "yard")
-			result := newCLI(t, source).Run("create", "--source", source, "--branch", tt.branch, target)
+			result := newCLI(t, source).Run("create", "--source", source, "--branch", tt.branch, "--dest", target)
 
 			assert.Equal(t, result.ExitCode(), tt.wantExit, result.Stderr())
 
@@ -308,7 +400,7 @@ func TestCreate_Guards(t *testing.T) {
 		assert.NilError(t, os.MkdirAll(target, 0o755))
 		assert.NilError(t, os.WriteFile(filepath.Join(target, "existing"), []byte("x"), 0o644))
 
-		result := newCLI(t, f.Source).Run("create", "--source", f.Source, "--branch", "feature", target)
+		result := newCLI(t, f.Source).Run("create", "--source", f.Source, "--branch", "feature", "--dest", target)
 		assert.Equal(t, result.ExitCode(), 1)
 		assert.Assert(t, cmp.Contains(result.Stderr(), "not empty"))
 		assertNotExists(t, filepath.Join(target, ".workyard"))
@@ -322,7 +414,7 @@ func TestCreate_Guards(t *testing.T) {
 		assert.NilError(t, os.MkdirAll(target, 0o755))
 		allowCleanup(t, filepath.Join(target, "readonly"))
 
-		result := newCLI(t, f.Source).Run("create", "--source", f.Source, "--branch", "feature", target)
+		result := newCLI(t, f.Source).Run("create", "--source", f.Source, "--branch", "feature", "--dest", target)
 		assert.Equal(t, result.ExitCode(), 0, result.Stderr())
 	})
 
@@ -330,7 +422,7 @@ func TestCreate_Guards(t *testing.T) {
 		t.Parallel()
 
 		f := setupFixture(t)
-		result := newCLI(t, f.Source).Run("create", "--source", f.Source, "--branch", "feature", filepath.Join(f.Source, "yard"))
+		result := newCLI(t, f.Source).Run("create", "--source", f.Source, "--branch", "feature", "--dest", filepath.Join(f.Source, "yard"))
 		assert.Equal(t, result.ExitCode(), 1)
 		assert.Assert(t, cmp.Contains(result.Stderr(), "must not contain each other"))
 		assertNotExists(t, filepath.Join(f.Source, "yard"))
@@ -340,7 +432,7 @@ func TestCreate_Guards(t *testing.T) {
 		t.Parallel()
 
 		f := setupFixture(t)
-		result := newCLI(t, f.Source).Run("create", "--source", f.Source, "--branch", "feature", filepath.Dir(f.Source))
+		result := newCLI(t, f.Source).Run("create", "--source", f.Source, "--branch", "feature", "--dest", filepath.Dir(f.Source))
 		assert.Equal(t, result.ExitCode(), 1)
 		assert.Assert(t, cmp.Contains(result.Stderr(), "must not contain each other"))
 	})
@@ -348,12 +440,12 @@ func TestCreate_Guards(t *testing.T) {
 	t.Run("target inside the source's .workyard directory", func(t *testing.T) {
 		t.Parallel()
 
-		// The conventional place for yards, mirroring yas' .yas/worktrees.
+		// The default place for yards, mirroring yas' .yas/worktrees.
 		f := setupFixture(t)
 		target := filepath.Join(f.Source, ".workyard", "yards", "feature")
 		allowCleanup(t, filepath.Join(target, "readonly"))
 
-		result := newCLI(t, f.Source).Run("create", "--source", f.Source, target)
+		result := newCLI(t, f.Source).Run("create", "--source", f.Source, "feature")
 		assert.Equal(t, result.ExitCode(), 0, result.Stderr())
 		assertExists(t, filepath.Join(target, "repoA"))
 		// The source's .workyard directory is not copied into the yard, whose
@@ -368,7 +460,7 @@ func TestCreate_Guards(t *testing.T) {
 		second := filepath.Join(f.Source, ".workyard", "yards", "feature2")
 		allowCleanup(t, filepath.Join(second, "readonly"))
 
-		result = newCLI(t, f.Source).Run("create", "--source", f.Source, second)
+		result = newCLI(t, f.Source).Run("create", "--source", f.Source, "--dest", second)
 		assert.Equal(t, result.ExitCode(), 0, result.Stderr())
 		assert.Equal(t, len(yardMetadataFiles(t, f.Source)), 2)
 
@@ -393,7 +485,7 @@ func TestCreate_Guards(t *testing.T) {
 			filepath.Join(f.Source, ".workyard"),
 			filepath.Join(f.Source, ".workyard", "yards"),
 		} {
-			result := newCLI(t, f.Source).Run("create", "--source", f.Source, "--branch", "feature", target)
+			result := newCLI(t, f.Source).Run("create", "--source", f.Source, "--branch", "feature", "--dest", target)
 			assert.Equal(t, result.ExitCode(), 1, target)
 			assert.Assert(t, cmp.Contains(result.Stderr(), "must not contain each other"))
 			assertNotExists(t, target)
@@ -406,7 +498,7 @@ func TestCreate_Guards(t *testing.T) {
 		f := setupFixture(t)
 		target := filepath.Join(t.TempDir(), "yard")
 
-		result := newCLI(t, f.Source).Run("create", "--source", filepath.Join(f.Source, "repoA"), "--branch", "feature", target)
+		result := newCLI(t, f.Source).Run("create", "--source", filepath.Join(f.Source, "repoA"), "--branch", "feature", "--dest", target)
 		assert.Equal(t, result.ExitCode(), 1)
 		assert.Assert(t, cmp.Contains(result.Stderr(), "Workyard cannot be a git repository. Create a git worktree instead"))
 		assertNotExists(t, target)
@@ -420,7 +512,7 @@ func TestCreate_Guards(t *testing.T) {
 		inside := filepath.Join(f.Source, "repoA", "dir")
 		assert.NilError(t, os.MkdirAll(inside, 0o755))
 
-		result := newCLI(t, f.Source).Run("create", "--source", inside, "--branch", "feature", filepath.Join(t.TempDir(), "yard"))
+		result := newCLI(t, f.Source).Run("create", "--source", inside, "--branch", "feature", "--dest", filepath.Join(t.TempDir(), "yard"))
 		assert.Equal(t, result.ExitCode(), 1)
 		assert.Assert(t, cmp.Contains(result.Stderr(), "Workyard cannot be a git repository"))
 	})
@@ -432,7 +524,7 @@ func TestCreate_Guards(t *testing.T) {
 		assert.NilError(t, os.MkdirAll(bare, 0o755))
 		mustOutput(t, bare, "git", "init", "-q", "--bare")
 
-		result := newCLI(t, bare).Run("create", "--source", bare, "--branch", "feature", filepath.Join(t.TempDir(), "yard"))
+		result := newCLI(t, bare).Run("create", "--source", bare, "--branch", "feature", "--dest", filepath.Join(t.TempDir(), "yard"))
 		assert.Equal(t, result.ExitCode(), 1)
 		assert.Assert(t, cmp.Contains(result.Stderr(), "Workyard cannot be a git repository"))
 	})
@@ -441,7 +533,7 @@ func TestCreate_Guards(t *testing.T) {
 		t.Parallel()
 
 		f := setupFixture(t)
-		result := newCLI(t, f.Source).Run("create", "--source", f.Source, "--branch", "bad..name", filepath.Join(t.TempDir(), "yard"))
+		result := newCLI(t, f.Source).Run("create", "--source", f.Source, "--branch", "bad..name", "--dest", filepath.Join(t.TempDir(), "yard"))
 		assert.Equal(t, result.ExitCode(), 1)
 		assert.Assert(t, cmp.Contains(result.Stderr(), "invalid branch name"))
 	})
@@ -454,7 +546,7 @@ func TestCreate_Guards(t *testing.T) {
 
 		for _, source := range []string{first, filepath.Join(first, "plain")} {
 			second := filepath.Join(t.TempDir(), "second")
-			result := newCLI(t, first).Run("create", "--source", source, "--branch", "feature2", second)
+			result := newCLI(t, first).Run("create", "--source", source, "--branch", "feature2", "--dest", second)
 			assert.Equal(t, result.ExitCode(), 1)
 			assert.Assert(t, cmp.Contains(result.Stderr(), "inside a workyard"))
 			assertNotExists(t, second)
@@ -467,7 +559,7 @@ func TestCreate_Guards(t *testing.T) {
 		f := setupFixture(t)
 		target := filepath.Join(t.TempDir(), "yard")
 
-		result := newCLI(t, f.Source).Run("create", "--dry-run", "--source", f.Source, "--branch", "feature", target)
+		result := newCLI(t, f.Source).Run("create", "--dry-run", "--source", f.Source, "--branch", "feature", "--dest", target)
 		assert.Equal(t, result.ExitCode(), 0, result.Stderr())
 		assert.Assert(t, cmp.Contains(result.Stdout(), "repositories: 4"))
 		assert.Assert(t, cmp.Contains(result.Stdout(), "repoA: create branch feature from main"))
@@ -481,7 +573,7 @@ func TestCreate_Guards(t *testing.T) {
 		}
 	})
 
-	t.Run("target given twice or not at all", func(t *testing.T) {
+	t.Run("no name or destination", func(t *testing.T) {
 		t.Parallel()
 
 		f := setupFixture(t)
@@ -489,10 +581,24 @@ func TestCreate_Guards(t *testing.T) {
 
 		result := cli.Run("create", "--source", f.Source)
 		assert.Equal(t, result.ExitCode(), 2)
-		assert.Assert(t, cmp.Contains(result.Stderr(), "no target"))
+		assert.Assert(t, cmp.Contains(result.Stderr(), "no name given"))
 
-		result = cli.Run("create", "--source", f.Source, "--target", "a", "b")
+		result = cli.Run("create", "--source", f.Source, "a", "b")
 		assert.Equal(t, result.ExitCode(), 2)
+	})
+
+	t.Run("name that leaves the yards directory", func(t *testing.T) {
+		t.Parallel()
+
+		f := setupFixture(t)
+
+		for _, name := range []string{"../escape", "/abs/path", "a/../../b"} {
+			result := newCLI(t, f.Source).Run("create", "--source", f.Source, "--branch", "feature", name)
+			assert.Equal(t, result.ExitCode(), 1, name)
+			assert.Assert(t, cmp.Contains(result.Stderr(), "must be a relative path"), name)
+		}
+
+		assertNotExists(t, filepath.Join(f.Source, ".workyard"))
 	})
 }
 
@@ -521,6 +627,11 @@ func TestCreate_RollsBackOnFailure(t *testing.T) {
 	assert.Equal(t, mustOutput(t, filepath.Join(f.Source, "repoA"), "git", "branch", "--list", "existing"), "existing", "pre-existing branches are kept")
 	assert.Equal(t, len(yardMetadataFiles(t, f.Source)), 0)
 	assertNotExists(t, filepath.Join(f.Source, ".workyard"))
+
+	// Directories created on the way to the default destination go too.
+	result = newCLI(t, f.Source).Run("create", "--branch", "feature", "team/feature")
+	assert.Equal(t, result.ExitCode(), 1)
+	assertNotExists(t, filepath.Join(f.Source, ".workyard"))
 }
 
 func TestCreate_VerboseListsIgnoredFilesAndSubmodules(t *testing.T) {
@@ -541,12 +652,12 @@ func TestCreate_VerboseListsIgnoredFilesAndSubmodules(t *testing.T) {
 	target := filepath.Join(t.TempDir(), "yard")
 
 	// Without -v the notes are not shown.
-	result := newCLI(t, source).Run("create", "--source", source, "--branch", "feature", target)
+	result := newCLI(t, source).Run("create", "--source", source, "--branch", "feature", "--dest", target)
 	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
 	assert.Assert(t, !strings.Contains(output(result.Stderr()), "submodule"), result.Stderr())
 
 	verboseTarget := filepath.Join(t.TempDir(), "yard-v")
-	result = newCLI(t, source).Run("-v", "create", "--source", source, "--branch", "feature-v", verboseTarget)
+	result = newCLI(t, source).Run("-v", "create", "--source", source, "--branch", "feature-v", "--dest", verboseTarget)
 	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
 	assert.Assert(t, cmp.Contains(result.Stderr(), "repo: ignored in source, not copied: node_modules/"))
 	assert.Assert(t, cmp.Contains(result.Stderr(), "repo has 1 submodule(s)"))

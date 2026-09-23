@@ -163,22 +163,28 @@ go install github.com/dansimau/yas/cmd/workyard@latest
 
 ```console
 $ cd ~/code/workspace
-$ workyard create --branch feature-x ../workspace-feature-x
+$ workyard create feature-x          # in .workyard/yards/feature-x, on branch feature-x
 Created workyard in 0.42s
 
-$ cd ../workspace-feature-x/web
+$ cd .workyard/yards/feature-x/web
 $ workyard git status               # git with your arguments, in every repo
 $ workyard git diff --stat
 $ workyard exec make test           # any command, in every repo (add --parallel to run them at once)
+$ workyard create feature-y         # from inside a yard: another yard of ~/code/workspace
 $ workyard ls                       # workyards created from ~/code/workspace
-$ cd .. && workyard remove workspace-feature-x
+$ workyard remove feature-x         # by name (or path), from anywhere in the source or its yards
 ```
 
 Like a git worktree, a workyard only holds a pointer back to where it came from (the `.workyard`
 file at its root); the source keeps the bookkeeping under `.workyard/`. The source itself must not
-be a git repository (for that, use `git worktree`) or another workyard. A yard may not overlap its
-source, except that it can live under the source's `.workyard/` directory (which is never copied),
-e.g. `workyard create .workyard/yards/feature-x`, much like yas keeps worktrees in `.yas/worktrees/`.
+be a git repository (for that, use `git worktree`) or another workyard. By default a yard lives in
+the source's `.workyard/yards/<name>` (which is never copied), much like yas keeps worktrees in
+`.yas/worktrees/`; set `yards-dir` in the config to put them elsewhere, or give `--dest`. A yard may
+not otherwise overlap its source. The name may contain slashes, like a branch name.
+
+Without `--source`, the source is that of the workyard you are in, else the nearest ancestor with a
+`.workyard/` directory, else the current directory, so `workyard create` works from anywhere inside
+the source or one of its yards.
 
 When the branch does not exist in a repository it is created from that repository's trunk (`main`
 or `master`, or whatever `.workyard/config.yaml` says). A branch that exists only on a remote is
@@ -187,11 +193,11 @@ in the source is an error.
 
 | Command | Description |
 | --- | --- |
-| `workyard create [--source DIR] [--branch NAME] TARGET` | Create a workyard; `--dry-run` shows the plan |
+| `workyard create [--source DIR] [--dest DIR] [--branch BRANCH] NAME` | Create a workyard, on branch NAME unless `--branch` says otherwise; `--dry-run` shows the plan |
 | `workyard git [--parallel] [git args]` | `git` with the given arguments in every repo; shorthand for `workyard exec git ...` |
 | `workyard exec [--parallel] <command> [args]` | Any command in every repo, with the repo as working directory; exit code 1 if it failed anywhere |
 | `workyard list` (`ls`) | Workyards created from the current source (or the source of the current workyard) with branch, repository count and creation time |
-| `workyard remove [PATH] [-f] [--yes]` | Remove the worktrees (dirty ones only with `-f`, locked with `-f -f`), the directory, and the branches workyard created (unmerged ones only with `-f`) |
+| `workyard remove [NAME\|PATH] [-f] [--yes]` | Remove a workyard by name or path (an existing path wins), or the one you are in after confirmation: the worktrees (dirty ones only with `-f`, locked with `-f -f`), the directory, and the branches workyard created (unmerged ones only with `-f`) |
 
 `git` and `exec` run one repository at a time by default, with the command connected to the terminal
 so it can be interactive (and colored, as if you had run it there), and a `==> path (branch)` header
@@ -208,10 +214,11 @@ Optional source configuration in `<source>/.workyard/config.yaml`:
 | `trunk` | Branch to create new branches from when the requested branch does not exist (default: autodetect `main`, then `master`) |
 | `repos.<path>.trunk` | Per-repository override, keyed by path relative to the source |
 | `exec.parallel` | Make `workyard exec` and `workyard git` run the repositories at once by default (`--no-parallel` overrides) |
+| `yards-dir` | Directory new workyards are created in, as `<yards-dir>/<name>`; relative to the source, `~` is your home (default: `.workyard/yards`) |
 
 Things to know: files ignored by git (`node_modules`, build output) are not copied into worktrees;
 submodules are not initialised (`-v` reports both); if you move a workyard with `mv`, run
-`git worktree repair` in each repository; the copy-on-write fast path needs source and target on
+`git worktree repair` in each repository; the copy-on-write fast path needs source and destination on
 the same APFS volume, otherwise files are copied.
 
 ## Configuration
