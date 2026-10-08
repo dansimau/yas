@@ -120,9 +120,9 @@ type CreateOptions struct {
 
 // RemoveOptions configures Yard.Remove.
 type RemoveOptions struct {
-	// Force is passed to git worktree remove: 1 removes worktrees with
-	// uncommitted changes (and deletes created branches even when unmerged),
-	// 2 also removes locked worktrees.
+	// Force follows git worktree remove: 1 removes worktrees with uncommitted
+	// changes (and deletes created branches even when unmerged), 2 also
+	// removes locked worktrees.
 	Force int
 	Log   io.Writer
 }
@@ -165,6 +165,7 @@ var (
 	ErrPartialFailure = errors.New("workyard creation failed")
 	ErrTargetNotEmpty = errors.New("destination directory exists and is not empty")
 	ErrDirty          = errors.New("worktrees have uncommitted changes (hint: use --force to remove them anyway)")
+	ErrLocked         = errors.New("worktrees are locked (hint: use --force twice to remove them anyway)")
 	// ErrSourceIsRepo is returned when the source is, or is inside, a git
 	// repository: the point of a workyard is a root that is not one.
 	ErrSourceIsRepo = errors.New("Workyard cannot be a git repository. Create a git worktree instead") //nolint:staticcheck // user-facing sentence

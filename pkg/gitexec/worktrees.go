@@ -31,6 +31,7 @@ type WorktreeEntry struct {
 	Path   string
 	Head   string
 	Branch string
+	Locked bool
 }
 
 // Worktrees returns all worktrees for the repository.
@@ -66,6 +67,8 @@ func (r *Repo) Worktrees() ([]WorktreeEntry, error) {
 			branchRef := strings.TrimPrefix(line, "branch ")
 			// Extract branch name from refs/heads/branch-name
 			current.Branch = strings.TrimPrefix(branchRef, "refs/heads/")
+		case line == "locked" || strings.HasPrefix(line, "locked "):
+			current.Locked = true
 		}
 	}
 
@@ -283,9 +286,14 @@ func (r *Repo) WorktreeRemoveForce(worktreePath string, level int) error {
 }
 
 // WorktreePrune removes worktree administrative files for worktrees whose
-// directories no longer exist.
+// directories no longer exist. Locked worktrees are left alone.
 func (r *Repo) WorktreePrune() error {
 	return r.run("git", "worktree", "prune")
+}
+
+// WorktreeUnlock unlocks a locked worktree.
+func (r *Repo) WorktreeUnlock(worktreePath string) error {
+	return r.run("git", "worktree", "unlock", worktreePath)
 }
 
 // CommonDir returns the absolute, symlink-resolved path of the repository's

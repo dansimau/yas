@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -13,16 +14,20 @@ import (
 	"sync"
 
 	"github.com/dansimau/yas/pkg/gitexec"
+	"github.com/dansimau/yas/pkg/xexec"
 	"github.com/hashicorp/go-multierror"
 	"github.com/sourcegraph/conc/pool"
 )
 
-// Remove deletes the yard: every worktree is removed through its source
-// repository (so git's worktree metadata is cleaned up), the directory is
-// deleted, and the branches workyard created are deleted where they are fully
-// merged (or unconditionally with force). Without force, nothing is removed
-// if any worktree has uncommitted changes.
-func (y *Yard) Remove(ctx context.Context, o RemoveOptions) error {
+// Remove removes the yard and reports whether its directory went to the
+// operating system's trash. Without force, nothing is removed if any worktree
+// has uncommitted changes; locked worktrees need force twice (they are
+// unlocked first). The directory is moved to the trash when a "trash" command
+// is available (macOS has one built in), which takes a moment however big the
+// yard is, and deleted in place otherwise. Git's records of the worktrees are
+// pruned, the branches workyard created are deleted where they are fully
+// merged (or unconditionally with force), and the metadata is removed.
+func (y *Yard) Remove(ctx context.Context, o RemoveOptions) (bool, error) {
 	if o.Log == nil {
 		o.Log = io.Discard
 	}
@@ -30,70 +35,59 @@ func (y *Yard) Remove(ctx context.Context, o RemoveOptions) error {
 	if o.Force == 0 {
 		dirty, err := y.dirtyRepos(ctx)
 		if err != nil {
-			return err
+			return false, err
 		}
 
 		if len(dirty) > 0 {
-			return fmt.Errorf("%w:\n  %s", ErrDirty, strings.Join(dirty, "\n  "))
+			return false, fmt.Errorf("%w:\n  %s", ErrDirty, strings.Join(dirty, "\n  "))
 		}
 	}
 
-	groups := map[string]*sync.Mutex{}
-	for _, repo := range y.Meta.Repos {
-		if _, ok := groups[repo.CommonDir]; !ok {
-			groups[repo.CommonDir] = &sync.Mutex{}
+	locked, err := y.lockedRepos()
+	if err != nil {
+		return false, err
+	}
+
+	if len(locked) > 0 && o.Force < 2 {
+		paths := make([]string, len(locked))
+		for i, repo := range locked {
+			paths[i] = repo.Path
+		}
+
+		return false, fmt.Errorf("%w:\n  %s", ErrLocked, strings.Join(paths, "\n  "))
+	}
+
+	for _, repo := range locked {
+		if err := gitexec.WithRepo(repo.Source).WorktreeUnlock(y.RepoDir(repo)); err != nil {
+			return false, fmt.Errorf("%s: unlock: %w", repo.Path, err)
 		}
 	}
 
-	var (
-		logMu sync.Mutex
-		errs  error
-	)
-
-	p := pool.New().WithMaxGoroutines(runtime.NumCPU()).WithErrors().WithContext(ctx)
-
 	for _, repo := range y.Meta.Repos {
-		p.Go(func(context.Context) error {
-			mu := groups[repo.CommonDir]
-
-			mu.Lock()
-			defer mu.Unlock()
-
-			warning, err := y.removeWorktree(repo, o.Force)
-
-			logMu.Lock()
-			defer logMu.Unlock()
-
-			if warning != "" {
-				_, _ = fmt.Fprintln(o.Log, "warning: "+warning)
-			}
-
-			if err != nil {
-				errs = multierror.Append(errs, fmt.Errorf("%s: %w", repo.Path, err))
-			}
-
-			return nil
-		})
+		if !sourceExists(repo) {
+			_, _ = fmt.Fprintf(o.Log, "warning: %s: source repository %s no longer exists; the directory is removed but git's record of the worktree cannot be pruned\n", repo.Path, repo.Source)
+		}
 	}
 
-	if err := p.Wait(); err != nil {
-		return err
+	root, err := realPath(y.Root)
+	if err != nil {
+		return false, err
 	}
 
-	if errs != nil {
-		return errs
+	trashed, err := trashOrRemove(root)
+	if err != nil {
+		return false, err
 	}
 
-	if err := removeAll(y.Root); err != nil {
-		return err
-	}
-
-	y.pruneParents()
+	y.pruneParents(root)
 
 	// Prune once per shared git directory, and delete the branches workyard
 	// created. Without force only fully merged branches go; the rest are
 	// reported, since deleting them would lose work.
-	pruned := map[string]bool{}
+	var (
+		errs   error
+		pruned = map[string]bool{}
+	)
 
 	for _, repo := range y.Meta.Repos {
 		if !sourceExists(repo) {
@@ -131,24 +125,39 @@ func (y *Yard) Remove(ctx context.Context, o RemoveOptions) error {
 		errs = multierror.Append(errs, err)
 	}
 
-	return errs
+	return trashed, errs
+}
+
+// trashOrRemove moves the directory root to the operating system's trash
+// with the "trash" command, if there is one on the PATH, and reports whether
+// it did. Whenever root is still there afterwards (no command, or it failed)
+// the directory is deleted in place instead.
+func trashOrRemove(root string) (bool, error) {
+	if _, err := os.Lstat(root); errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+
+	if _, err := exec.LookPath("trash"); err == nil {
+		_ = xexec.Command("trash", root).WithStdout(nil).WithStderr(nil).Run()
+
+		if _, err := os.Lstat(root); errors.Is(err, os.ErrNotExist) {
+			return true, nil
+		}
+	}
+
+	return false, removeAll(root)
 }
 
 // pruneParents deletes the directories between the yards directory and the
-// yard's root that its removal left empty (e.g. "a" for a yard named "a/b").
-// Best effort: removing a non-empty directory fails, which is fine.
-func (y *Yard) pruneParents() {
+// yard's (real) root that its removal left empty (e.g. "a" for a yard named
+// "a/b"). Best effort: removing a non-empty directory fails, which is fine.
+func (y *Yard) pruneParents(root string) {
 	cfg, err := LoadConfig(y.Source)
 	if err != nil {
 		return
 	}
 
 	dir, err := cfg.yardsDir(y.Source)
-	if err != nil {
-		return
-	}
-
-	root, err := realPath(y.Root)
 	if err != nil {
 		return
 	}
@@ -160,14 +169,15 @@ func (y *Yard) pruneParents() {
 	}
 }
 
-// RemoveOrphan deletes a yard whose source directory (and with it the
-// metadata) no longer exists. Nothing but the directory can be cleaned up.
-func RemoveOrphan(root string) error {
+// RemoveOrphan removes a yard whose source directory (and with it the
+// metadata) no longer exists, reporting whether it went to the trash.
+// Nothing but the directory can be cleaned up.
+func RemoveOrphan(root string) (bool, error) {
 	if !isPointer(root) {
-		return fmt.Errorf("%w: %s", ErrNotAWorkyard, root)
+		return false, fmt.Errorf("%w: %s", ErrNotAWorkyard, root)
 	}
 
-	return removeAll(root)
+	return trashOrRemove(root)
 }
 
 // dirtyRepos returns the paths of repositories with uncommitted changes or
@@ -219,6 +229,49 @@ func (y *Yard) dirtyRepos(ctx context.Context) ([]string, error) {
 	return dirty, nil
 }
 
+// lockedRepos returns the repositories whose worktree is locked. Git records
+// worktree paths as real paths, so the yard's are compared the same way.
+func (y *Yard) lockedRepos() ([]Repo, error) {
+	var (
+		locked = map[string]bool{}
+		listed = map[string]bool{}
+	)
+
+	for _, repo := range y.Meta.Repos {
+		if listed[repo.CommonDir] || !sourceExists(repo) {
+			continue
+		}
+
+		listed[repo.CommonDir] = true
+
+		worktrees, err := gitexec.WithRepo(repo.Source).Worktrees()
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", repo.Path, err)
+		}
+
+		for _, wt := range worktrees {
+			if wt.Locked {
+				locked[wt.Path] = true
+			}
+		}
+	}
+
+	var repos []Repo
+
+	for _, repo := range y.Meta.Repos {
+		dir, err := realPath(y.RepoDir(repo))
+		if err != nil {
+			return nil, err
+		}
+
+		if locked[dir] {
+			repos = append(repos, repo)
+		}
+	}
+
+	return repos, nil
+}
+
 func sourceExists(repo Repo) bool {
 	_, err := os.Stat(repo.Source)
 	if err != nil {
@@ -228,51 +281,4 @@ func sourceExists(repo Repo) bool {
 	_, err = os.Stat(repo.CommonDir)
 
 	return err == nil
-}
-
-// removeWorktree removes one worktree, returning a warning when it had to fall
-// back to deleting the directory because the source repository is gone.
-func (y *Yard) removeWorktree(repo Repo, force int) (string, error) {
-	dir := y.RepoDir(repo)
-
-	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
-		return "", nil
-	}
-
-	if !sourceExists(repo) {
-		if err := removeAll(dir); err != nil {
-			return "", err
-		}
-
-		return fmt.Sprintf("%s: source repository %s no longer exists; removed the directory but could not prune its git metadata", repo.Path, repo.Source), nil
-	}
-
-	return "", gitexec.WithRepo(repo.Source).WorktreeRemoveForce(dir, force)
-}
-
-// removeAll deletes a directory tree, including read-only directories (whose
-// entries cannot otherwise be unlinked), which a copied source tree may well
-// contain.
-func removeAll(path string) error {
-	err := filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
-		if err != nil || !d.IsDir() {
-			return nil //nolint:nilerr // unreadable entries are left to RemoveAll to report
-		}
-
-		info, err := d.Info()
-		if err != nil {
-			return nil //nolint:nilerr // see above
-		}
-
-		if info.Mode().Perm()&0o700 != 0o700 {
-			_ = os.Chmod(p, info.Mode().Perm()|0o700)
-		}
-
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-
-	return os.RemoveAll(path)
 }

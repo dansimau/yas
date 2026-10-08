@@ -30,7 +30,14 @@ func newCLI(t *testing.T, workingDir string, env ...string) *gocmdtester.CmdTest
 		opts = append(opts, gocmdtester.WithEnv(env[i], env[i+1]))
 	}
 
-	return gocmdtester.FromPath(t, mainGo, opts...)
+	cli := gocmdtester.FromPath(t, mainGo, opts...)
+
+	// "remove" would otherwise move the fixtures to the developer's real
+	// trash on macOS; a failing trash command makes it delete them instead.
+	cli.Mock("trash", gocmdtester.AnyFurtherArgs).WithCode(1)
+	cli.SkipMockVerification()
+
+	return cli
 }
 
 // mustOutput runs a command and returns its trimmed stdout.

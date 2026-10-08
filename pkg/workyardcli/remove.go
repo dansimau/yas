@@ -12,11 +12,13 @@ import (
 	"github.com/dansimau/yas/pkg/workyard"
 )
 
-const removeLongHelp = `Removes every worktree of the workyard through its source repository (so git
-forgets about them), deletes the directory, and deletes the branches that
-"workyard create" created where they are fully merged. Without --force nothing
-is removed when any worktree has uncommitted changes or untracked files; with
-it, dirty worktrees and unmerged created branches are deleted too.
+const removeLongHelp = `Removes the workyard: its directory is moved to the operating system's trash
+(when a "trash" command is available, as on macOS; otherwise it is deleted),
+git forgets its worktrees, and the branches that "workyard create" created are
+deleted where they are fully merged. Without --force nothing is removed when
+any worktree has uncommitted changes or untracked files; with it, dirty
+worktrees and unmerged created branches are deleted too. Locked worktrees need
+--force twice.
 
 The workyard is given by name (as for "workyard create": <yards-dir>/<name>
 of the source the current directory belongs to) or by path; an argument that
@@ -72,7 +74,7 @@ func (c *removeCmd) Execute(args []string) error {
 		return err
 	}
 
-	err = yard.Remove(context.Background(), workyard.RemoveOptions{
+	trashed, err := yard.Remove(context.Background(), workyard.RemoveOptions{
 		Force: len(c.Force),
 		Log:   os.Stderr,
 	})
@@ -80,9 +82,19 @@ func (c *removeCmd) Execute(args []string) error {
 		return WrapError(err, ExitFailure)
 	}
 
-	fmt.Fprintf(os.Stderr, "Removed workyard %s\n", yard.Root)
+	fmt.Fprintf(os.Stderr, "Removed workyard %s%s\n", yard.Root, trashedNote(trashed))
 
 	return nil
+}
+
+// trashedNote tells the user where the files went, since the trash has to be
+// emptied before the space is free again.
+func trashedNote(trashed bool) string {
+	if trashed {
+		return " (moved to the trash)"
+	}
+
+	return ""
 }
 
 func (c *removeCmd) removeOrphan(cwd string, missing *workyard.SourceMissingError) error {
@@ -92,11 +104,12 @@ func (c *removeCmd) removeOrphan(cwd string, missing *workyard.SourceMissingErro
 		return err
 	}
 
-	if err := workyard.RemoveOrphan(missing.Root); err != nil {
+	trashed, err := workyard.RemoveOrphan(missing.Root)
+	if err != nil {
 		return WrapError(err, ExitFailure)
 	}
 
-	fmt.Fprintf(os.Stderr, "Removed workyard %s\n", missing.Root)
+	fmt.Fprintf(os.Stderr, "Removed workyard %s%s\n", missing.Root, trashedNote(trashed))
 
 	return nil
 }

@@ -35,6 +35,27 @@ func TestRemove_CleanYard(t *testing.T) {
 	assertNotExists(t, filepath.Join(f.Source, ".workyard"))
 }
 
+func TestRemove_MovesTheYardToTheTrash(t *testing.T) {
+	t.Parallel()
+
+	f := setupFixture(t)
+	target := createYard(t, f)
+
+	// The trash command is given the yard's real path. This one claims
+	// success without moving anything, so the yard is deleted after all.
+	cli := newCLI(t, t.TempDir())
+	trash := cli.Mock("trash", gocmdtester.Any)
+
+	result := cli.Run("remove", target)
+	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
+
+	real, err := filepath.EvalSymlinks(filepath.Dir(target))
+	assert.NilError(t, err)
+	assert.Assert(t, trash.CalledWithArgs(filepath.Join(real, "yard")), "%v", trash.Calls())
+	assertNotExists(t, target)
+	assert.Equal(t, worktreeCount(t, filepath.Join(f.Source, "repoA")), 1)
+}
+
 func TestRemove_KeepsPreExistingBranches(t *testing.T) {
 	t.Parallel()
 
@@ -258,6 +279,7 @@ func TestRemove_ByName(t *testing.T) {
 	// From below the source.
 	result = newCLI(t, filepath.Join(f.Source, "plain", "nested")).Run("rm", "second")
 	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
+	assertNotExists(t, second)
 	assertNotExists(t, filepath.Join(f.Source, ".workyard"))
 }
 
