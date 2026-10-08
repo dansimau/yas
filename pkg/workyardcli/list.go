@@ -56,6 +56,9 @@ type yardListing struct {
 	// current is the yard containing the current directory, or nil.
 	current *workyard.Yard
 	yards   []workyard.Metadata
+	// names holds the name of each yard (see workyard.Metadata.Name), in
+	// the order of yards.
+	names []string
 }
 
 // listYards lists the yards of the source found from the current directory
@@ -81,7 +84,51 @@ func listYards() (*yardListing, error) {
 		return nil, WrapError(err, ExitFailure)
 	}
 
-	return &yardListing{source: source, current: current, yards: yards}, nil
+	yardsDir, err := workyard.YardsDir(source)
+	if err != nil {
+		return nil, WrapError(err, ExitFailure)
+	}
+
+	names := make([]string, len(yards))
+	for i, meta := range yards {
+		names[i] = meta.Name(yardsDir)
+	}
+
+	return &yardListing{source: source, current: current, yards: yards, names: names}, nil
+}
+
+// find returns the yard whose name is query, else the only yard whose name
+// contains query. It is an error when no yard matches or several do.
+func (l *yardListing) find(query string) (*workyard.Metadata, error) {
+	var exact, partial []int
+
+	for i, meta := range l.yards {
+		switch {
+		case l.names[i] == query || meta.Target == query:
+			exact = append(exact, i)
+		case strings.Contains(l.names[i], query):
+			partial = append(partial, i)
+		}
+	}
+
+	matches := exact
+	if len(matches) == 0 {
+		matches = partial
+	}
+
+	switch len(matches) {
+	case 0:
+		return nil, NewUsageError(fmt.Sprintf("no workyard of %s matches %q", l.source, query))
+	case 1:
+		return &l.yards[matches[0]], nil
+	}
+
+	names := make([]string, len(matches))
+	for i, index := range matches {
+		names[i] = l.names[index]
+	}
+
+	return nil, NewUsageError(fmt.Sprintf("%q matches several workyards: %s", query, strings.Join(names, ", ")))
 }
 
 // isCurrent reports whether meta is the yard containing the current directory.

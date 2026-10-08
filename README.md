@@ -180,6 +180,7 @@ $ workyard exec make test           # any command, in every repo (add --parallel
 $ workyard create feature-y         # from inside a yard: another yard of ~/code/workspace
 $ workyard ls                       # workyards created from ~/code/workspace
 $ workyard switch                   # pick a workyard of ~/code/workspace and cd to it
+$ workyard sw feature-y             # by name (or an unambiguous part of it), keeping the relative directory
 $ workyard remove feature-x         # by name (or path), from anywhere in the source or its yards
 ```
 
@@ -205,7 +206,7 @@ in the source is an error.
 | `workyard git [--parallel] [git args]` | `git` with the given arguments in every repo; shorthand for `workyard exec git ...` |
 | `workyard exec [--parallel] <command> [args]` | Any command in every repo, with the repo as working directory; exit code 1 if it failed anywhere |
 | `workyard list` (`ls`) | Workyards created from the current source (or the source of the current workyard) with branch, repository count and creation time |
-| `workyard switch` (`sw`) | Interactively choose one of the workyards `list` shows and change directory to it (needs the shell hook) |
+| `workyard switch [NAME]` (`sw`) | Change directory to the workyard named NAME (a part of the name is enough when it matches only one), or interactively choose one of the workyards `list` shows; from inside a workyard, the same relative directory is entered when it exists in the other one (needs the shell hook) |
 | `workyard hook <bash\|zsh>` | Print the shell integration hook |
 | `workyard remove [NAME\|PATH] [-f] [--yes]` | Remove a workyard by name or path (an existing path wins), or the one you are in after confirmation: the worktrees (dirty ones only with `-f`, locked with `-f -f`), the directory (moved to the operating system's trash where there is a `trash` command, deleted otherwise), and the branches workyard created (unmerged ones only with `-f`) |
 
