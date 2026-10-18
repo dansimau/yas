@@ -138,20 +138,32 @@ func exists(path string) bool {
 
 // isInside reports whether dir is root or inside it, comparing real paths.
 func isInside(root, dir string) (bool, error) {
+	_, inside, err := relativeTo(root, dir)
+
+	return inside, err
+}
+
+// relativeTo returns dir relative to root ("." for root itself), comparing
+// real paths, and whether dir is root or inside it at all.
+func relativeTo(root, dir string) (rel string, inside bool, err error) {
 	realRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
-		return false, err
+		return "", false, err
 	}
 
 	realDir, err := filepath.EvalSymlinks(dir)
 	if err != nil {
-		return false, err
+		return "", false, err
 	}
 
-	rel, err := filepath.Rel(realRoot, realDir)
+	rel, err = filepath.Rel(realRoot, realDir)
 	if err != nil {
-		return false, nil //nolint:nilerr // different volumes: not inside
+		return "", false, nil //nolint:nilerr // different volumes: not inside
 	}
 
-	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, "../")), nil
+	if rel != "." && (rel == ".." || strings.HasPrefix(rel, "../")) {
+		return "", false, nil
+	}
+
+	return rel, true, nil
 }

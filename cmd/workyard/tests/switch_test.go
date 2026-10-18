@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/dansimau/yas/pkg/gocmdtester"
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/assert/cmp"
 )
@@ -129,11 +130,82 @@ func TestSwitch_ChangesDirectory(t *testing.T) {
 	assert.Assert(t, cmp.Contains(out, targets[1]))
 	assertFileContent(t, shellExec, "cd "+targets[1]+"\necho 'Switched to workyard: "+targets[1]+"'\n")
 
-	// From inside a yard the cursor starts on it.
+	// From inside a yard the cursor starts on it, and the same directory in
+	// the chosen yard is entered when it exists.
 	shellExec = filepath.Join(t.TempDir(), "shell-exec")
 	exitCode, out = runSwitch(t, filepath.Join(targets[1], "repoA"), shellExec, keyUp, keyEnter)
 	assert.Equal(t, exitCode, 0, out)
+	assertFileContent(t, shellExec, "cd "+filepath.Join(targets[0], "repoA")+"\necho 'Switched to workyard: "+targets[0]+"'\n")
+
+	// Otherwise its root.
+	onlyHere := filepath.Join(targets[1], "only-here")
+	assert.NilError(t, os.Mkdir(onlyHere, 0o755))
+
+	shellExec = filepath.Join(t.TempDir(), "shell-exec")
+	exitCode, out = runSwitch(t, onlyHere, shellExec, keyUp, keyEnter)
+	assert.Equal(t, exitCode, 0, out)
 	assertFileContent(t, shellExec, "cd "+targets[0]+"\necho 'Switched to workyard: "+targets[0]+"'\n")
+}
+
+func TestSwitch_ByName(t *testing.T) {
+	t.Parallel()
+
+	f := setupFixture(t)
+
+	for _, name := range []string{"alpha", "alpha-two", "team/beta"} {
+		result := newCLI(t, f.Source).Run("create", name)
+		assert.Equal(t, result.ExitCode(), 0, result.Stderr())
+		allowCleanup(t, filepath.Join(f.Source, ".workyard", "yards", name, "readonly"))
+	}
+
+	elsewhere := createYard(t, f)
+	elsewhereTarget := openYard(t, elsewhere).Meta.Target
+
+	yardsDir := filepath.Join(f.Source, ".workyard", "yards")
+	alpha := openYard(t, filepath.Join(yardsDir, "alpha")).Meta.Target
+	alphaTwo := openYard(t, filepath.Join(yardsDir, "alpha-two")).Meta.Target
+	beta := openYard(t, filepath.Join(yardsDir, "team", "beta")).Meta.Target
+
+	switchTo := func(workingDir string, name string) (*gocmdtester.Result, string) {
+		shellExec := filepath.Join(t.TempDir(), "shell-exec")
+
+		return newCLI(t, workingDir, "WORKYARD_SHELL_EXEC", shellExec).Run("sw", name), shellExec
+	}
+
+	// An exact name wins over the names it is part of.
+	result, shellExec := switchTo(f.Source, "alpha")
+	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
+	assertFileContent(t, shellExec, "cd "+alpha+"\necho 'Switched to workyard: "+alpha+"'\n")
+
+	// A part of a name is enough when only one name contains it.
+	result, shellExec = switchTo(f.Source, "two")
+	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
+	assertFileContent(t, shellExec, "cd "+alphaTwo+"\necho 'Switched to workyard: "+alphaTwo+"'\n")
+
+	// A yard created with --dest is named by its path.
+	result, shellExec = switchTo(f.Source, elsewhereTarget)
+	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
+	assertFileContent(t, shellExec, "cd "+elsewhereTarget+"\necho 'Switched to workyard: "+elsewhereTarget+"'\n")
+
+	// From inside a yard, the same directory is entered in the other one.
+	result, shellExec = switchTo(filepath.Join(alpha, "sub", "deep", "repoB"), "team/beta")
+	assert.Equal(t, result.ExitCode(), 0, result.Stderr())
+	assertFileContent(t, shellExec, "cd "+filepath.Join(beta, "sub", "deep", "repoB")+"\necho 'Switched to workyard: "+beta+"'\n")
+
+	// Several matches are an error naming them.
+	result, shellExec = switchTo(f.Source, "alph")
+	assert.Equal(t, result.ExitCode(), 2, result.Stderr())
+	assert.Assert(t, cmp.Contains(result.Stderr(), `ERROR: "alph" matches several workyards: alpha, alpha-two`+"\n"))
+	assertNotExists(t, shellExec)
+
+	// As is none.
+	source, err := filepath.EvalSymlinks(f.Source)
+	assert.NilError(t, err)
+
+	result, shellExec = switchTo(f.Source, "nope")
+	assert.Equal(t, result.ExitCode(), 2, result.Stderr())
+	assert.Assert(t, cmp.Contains(result.Stderr(), `ERROR: no workyard of `+source+` matches "nope"`))
+	assertNotExists(t, shellExec)
 }
 
 func TestSwitch_Cancel(t *testing.T) {
@@ -195,9 +267,9 @@ func TestSwitch_UnexpectedArguments(t *testing.T) {
 
 	dir := t.TempDir()
 
-	result := newCLI(t, dir, "WORKYARD_SHELL_EXEC", filepath.Join(dir, "shell-exec")).Run("switch", "foo")
+	result := newCLI(t, dir, "WORKYARD_SHELL_EXEC", filepath.Join(dir, "shell-exec")).Run("switch", "foo", "bar")
 	assert.Equal(t, result.ExitCode(), 2, result.Stderr())
-	assert.Assert(t, cmp.Contains(result.Stderr(), "unexpected arguments: foo"))
+	assert.Assert(t, cmp.Contains(result.Stderr(), "unexpected arguments: bar"))
 }
 
 func TestHook(t *testing.T) {

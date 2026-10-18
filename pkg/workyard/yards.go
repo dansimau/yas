@@ -48,6 +48,18 @@ func List(source string) ([]Metadata, error) {
 	return yards, nil
 }
 
+// Name returns the name of the yard described by m: its target relative to
+// yardsDir (the source's yards directory, see YardsDir) when it is inside it,
+// else the target path itself.
+func (m Metadata) Name(yardsDir string) string {
+	rel, err := filepath.Rel(yardsDir, m.Target)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, "../") {
+		return m.Target
+	}
+
+	return rel
+}
+
 // Exists reports whether the workyard described by meta is still in place,
 // i.e. its target directory holds the .workyard pointer.
 func (m Metadata) Exists() bool {

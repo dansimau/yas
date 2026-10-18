@@ -35,6 +35,22 @@ func LoadConfig(source string) (Config, error) {
 	return cfg, nil
 }
 
+// YardsDir returns the real path of the directory in which the yards of
+// source are created by default (see Config.YardsDir).
+func YardsDir(source string) (string, error) {
+	cfg, err := LoadConfig(source)
+	if err != nil {
+		return "", err
+	}
+
+	dir, err := cfg.yardsDir(source)
+	if err != nil {
+		return "", err
+	}
+
+	return realPath(dir)
+}
+
 // yardsDir returns the absolute directory in which new yards of source are
 // created.
 func (c Config) yardsDir(source string) (string, error) {
