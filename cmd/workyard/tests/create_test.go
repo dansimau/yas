@@ -235,6 +235,7 @@ func TestCreate_BranchResolution(t *testing.T) {
 		setup  string // extra git commands run in the repository
 		config string // contents of .workyard/config.yaml, if any
 		branch string
+		parent string // --parent, if any
 
 		wantExit     int
 		wantErr      string
@@ -327,6 +328,32 @@ func TestCreate_BranchResolution(t *testing.T) {
 			wantCreated: true,
 		},
 		{
+			name:        "missing branch is created from parent instead of trunk",
+			setup:       "git branch develop\ngit checkout -q develop\ngit commit -q --allow-empty -m dev\ngit checkout -q main",
+			config:      "trunk: main\n",
+			branch:      "feature",
+			parent:      "develop",
+			wantBranch:  "feature",
+			wantHeadRef: "develop",
+			wantCreated: true,
+		},
+		{
+			name:        "existing branch is checked out regardless of parent",
+			setup:       "git branch existing\ngit branch develop\ngit commit -q --allow-empty -m more",
+			branch:      "existing",
+			parent:      "develop",
+			wantBranch:  "existing",
+			wantHeadRef: "existing",
+		},
+		{
+			name:     "parent that does not exist fails",
+			config:   "trunk: main\n",
+			branch:   "feature",
+			parent:   "nope",
+			wantExit: 1,
+			wantErr:  `parent "nope" does not exist`,
+		},
+		{
 			name:     "no trunk to create from fails with a hint",
 			setup:    "git branch -m main trunk-only",
 			branch:   "feature",
@@ -357,7 +384,13 @@ func TestCreate_BranchResolution(t *testing.T) {
 			}
 
 			target := filepath.Join(t.TempDir(), "yard")
-			result := newCLI(t, source).Run("create", "--source", source, "--branch", tt.branch, "--dest", target)
+
+			args := []string{"create", "--source", source, "--branch", tt.branch, "--dest", target}
+			if tt.parent != "" {
+				args = append(args, "--parent", tt.parent)
+			}
+
+			result := newCLI(t, source).Run(args...)
 
 			assert.Equal(t, result.ExitCode(), tt.wantExit, result.Stderr())
 
@@ -571,6 +604,13 @@ func TestCreate_Guards(t *testing.T) {
 		for _, repo := range []string{"repoA", "sub/deep/repoB"} {
 			assert.Equal(t, worktreeCount(t, filepath.Join(f.Source, repo)), 1)
 		}
+
+		// With --parent the plan names it as the start point.
+		result = newCLI(t, f.Source).Run("create", "--dry-run", "--source", f.Source, "--branch", "feature", "--parent", "existing", "--dest", target)
+		assert.Equal(t, result.ExitCode(), 1, "the parent exists in repoA only")
+		assert.Assert(t, cmp.Contains(result.Stdout(), "parent: existing"))
+		assert.Assert(t, cmp.Contains(result.Stdout(), "repoA: create branch feature from existing"))
+		assert.Assert(t, cmp.Contains(result.Stdout(), `sub/deep/repoB: error: branch "feature" not found and parent "existing" does not exist`))
 	})
 
 	t.Run("no name or destination", func(t *testing.T) {

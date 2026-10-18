@@ -210,6 +210,7 @@ func PlanCreate(ctx context.Context, o CreateOptions) (*Plan, error) {
 
 	plan.Target = target
 	plan.Branch = branch
+	plan.Parent = o.Parent
 
 	resolveRefs(ctx, plan, cfg, o.Parallelism)
 
