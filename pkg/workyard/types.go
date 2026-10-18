@@ -111,6 +111,9 @@ type CreateOptions struct {
 	// Branch to check out in every repository; defaults to Name, or else the
 	// basename of Target.
 	Branch string
+	// Parent is the branch (or any commit-ish) Branch is created from in
+	// repositories where it does not exist yet, instead of the trunk.
+	Parent string
 	// Parallelism is the number of concurrent git operations (default: number
 	// of CPUs); file copies run with four times as many.
 	Parallelism int

@@ -195,13 +195,14 @@ Without `--source`, the source is that of the workyard you are in, else the near
 the source or one of its yards.
 
 When the branch does not exist in a repository it is created from that repository's trunk (`main`
-or `master`, or whatever `.workyard/config.yaml` says). A branch that exists only on a remote is
-created to track it; a tag or commit is checked out detached; a branch that is already checked out
-in the source is an error.
+or `master`, or whatever `.workyard/config.yaml` says), or from `--parent` if given, so a yard can
+be stacked on another yard's branch. A branch that exists only on a remote is created to track it;
+a tag or commit is checked out detached; a branch that is already checked out in the source is an
+error.
 
 | Command | Description |
 | --- | --- |
-| `workyard create [--source DIR] [--dest DIR] [--branch BRANCH] NAME` | Create a workyard, on branch NAME unless `--branch` says otherwise; `--dry-run` shows the plan |
+| `workyard create [--source DIR] [--dest DIR] [--branch BRANCH] [--parent BRANCH] NAME` | Create a workyard, on branch NAME unless `--branch` says otherwise, creating it from `--parent` (default: the trunk) where it does not exist; `--dry-run` shows the plan |
 | `workyard git [--parallel] [git args]` | `git` with the given arguments in every repo; shorthand for `workyard exec git ...` |
 | `workyard exec [--parallel] <command> [args]` | Any command in every repo, with the repo as working directory; exit code 1 if it failed anywhere |
 | `workyard list` (`ls`) | Workyards created from the current source (or the source of the current workyard) with branch, repository count and creation time |

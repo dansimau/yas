@@ -26,8 +26,9 @@ branch then defaults to the basename of the destination.
 
 When the branch does not exist in a repository it is created from the
 repository's trunk (main or master, or "trunk" in the source's
-.workyard/config.yaml). A branch that exists only on a remote is created to
-track it, and a tag or commit is checked out detached.
+.workyard/config.yaml), or from --parent when given. A branch that exists
+only on a remote is created to track it, and a tag or commit is checked out
+detached.
 
 The source defaults to that of the workyard containing the current directory,
 else the nearest ancestor of the current directory with a .workyard directory
@@ -39,10 +40,11 @@ Files ignored by git are not copied into worktrees, and submodules are not
 initialised.`
 
 type createCmd struct {
-	Source string `description:"Directory to copy (default: the current workyard's source, see above)" long:"source"  short:"s"`
-	Dest   string `description:"Directory to create (default: <yards-dir>/<name>)"                     long:"dest"    short:"d"`
-	Branch string `description:"Branch to check out in every repository (default: the name)"           long:"branch"  short:"b"`
-	DryRun bool   `description:"Show what would be done without creating anything"                     long:"dry-run"`
+	Source string `description:"Directory to copy (default: the current workyard's source, see above)"                                  long:"source"  short:"s"`
+	Dest   string `description:"Directory to create (default: <yards-dir>/<name>)"                                                      long:"dest"    short:"d"`
+	Branch string `description:"Branch to check out in every repository (default: the name)"                                            long:"branch"  short:"b"`
+	Parent string `description:"Branch (or commit) to create the branch from where it does not exist (default: the repository's trunk)" long:"parent"`
+	DryRun bool   `description:"Show what would be done without creating anything"                                                      long:"dry-run"`
 
 	Args struct {
 		Name string `description:"Name of the workyard, and default branch" positional-arg-name:"name"`
@@ -87,6 +89,7 @@ func (c *createCmd) Execute(args []string) error {
 		Name:        c.Args.Name,
 		Target:      c.Dest,
 		Branch:      c.Branch,
+		Parent:      c.Parent,
 		Parallelism: current.cmd.Parallelism,
 		Log:         log,
 	}

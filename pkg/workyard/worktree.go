@@ -20,7 +20,7 @@ const (
 	ActionTrack
 	// ActionDetach checks out StartPoint with a detached HEAD.
 	ActionDetach
-	// ActionCreate creates the branch from StartPoint (the trunk).
+	// ActionCreate creates the branch from StartPoint (the parent or trunk).
 	ActionCreate
 )
 
@@ -61,7 +61,7 @@ func resolveRefs(ctx context.Context, plan *Plan, cfg Config, jobs int) {
 	for _, repo := range plan.Repos {
 		p.Go(func(context.Context) error {
 			repo.Repo.Ref = plan.Branch
-			repo.Err = resolveRef(repo, cfg)
+			repo.Err = resolveRef(repo, plan.Parent, cfg)
 
 			return nil
 		})
@@ -96,7 +96,9 @@ func resolveRefs(ctx context.Context, plan *Plan, cfg Config, jobs int) {
 	}
 }
 
-func resolveRef(repo *RepoPlan, cfg Config) error {
+// resolveRef decides how repo's branch is checked out. A branch that does not
+// exist is created from parent, or from the repository's trunk when parent is "".
+func resolveRef(repo *RepoPlan, parent string, cfg Config) error {
 	git := gitexec.WithRepo(repo.Repo.Source)
 	ref := repo.Repo.Ref
 
@@ -160,30 +162,36 @@ func resolveRef(repo *RepoPlan, cfg Config) error {
 		return nil
 	}
 
-	// 4. Create from trunk.
-	trunk := cfg.trunkFor(repo.Repo.Path)
-	if trunk == "" {
-		trunk, err = git.DetectMainBranch()
-		if err != nil {
-			return err
+	// 4. Create from the parent, or else the trunk.
+	start, what := parent, "parent"
+
+	if start == "" {
+		what = "trunk"
+
+		start = cfg.trunkFor(repo.Repo.Path)
+		if start == "" {
+			start, err = git.DetectMainBranch()
+			if err != nil {
+				return err
+			}
+		}
+
+		if start == "" {
+			return fmt.Errorf("branch %q not found and no trunk branch to create it from (hint: set trunk in %s/%s, or use --parent)", ref, workyardDir, configFile)
 		}
 	}
 
-	if trunk == "" {
-		return fmt.Errorf("branch %q not found and no trunk branch to create it from (hint: set trunk in %s/%s)", ref, workyardDir, configFile)
-	}
-
-	isCommit, err = git.IsCommitish(trunk)
+	isCommit, err = git.IsCommitish(start)
 	if err != nil {
 		return err
 	}
 
 	if !isCommit {
-		return fmt.Errorf("branch %q not found and trunk %q does not exist", ref, trunk)
+		return fmt.Errorf("branch %q not found and %s %q does not exist", ref, what, start)
 	}
 
 	repo.Action = ActionCreate
-	repo.StartPoint = trunk
+	repo.StartPoint = start
 
 	return nil
 }

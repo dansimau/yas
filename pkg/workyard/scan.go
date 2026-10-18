@@ -54,6 +54,8 @@ type Plan struct {
 	Source string
 	Target string
 	Branch string
+	// Parent is the start point for branches that need creating ("" = trunk).
+	Parent string
 	// Root is the source directory itself, or nil when the source is a
 	// repository (Repos then has a single entry at ".").
 	Root  *dirNode
@@ -66,7 +68,13 @@ type Plan struct {
 
 // Describe writes a human-readable summary of the plan.
 func (p *Plan) Describe(w io.Writer) {
-	_, _ = fmt.Fprintf(w, "source: %s\ndestination: %s\nbranch: %s\n\n", p.Source, p.Target, p.Branch)
+	_, _ = fmt.Fprintf(w, "source: %s\ndestination: %s\nbranch: %s\n", p.Source, p.Target, p.Branch)
+
+	if p.Parent != "" {
+		_, _ = fmt.Fprintf(w, "parent: %s\n", p.Parent)
+	}
+
+	_, _ = fmt.Fprintln(w)
 
 	if p.Root != nil {
 		_, _ = fmt.Fprintf(w, "copy: %d subtree(s), %d file(s)\n", p.Subtrees, p.Files)
