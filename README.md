@@ -119,7 +119,7 @@ Use `yas sync --restack` to do the sync and restack everything in one step.
 
 yas can hand rebase conflicts to an external tool instead of stopping. Currently
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) is supported (it
-runs `claude -p ...` in the conflicted worktree, restricted to editing files):
+runs `claude -p --model haiku ...` in the conflicted worktree, restricted to editing files):
 
 ```sh
 yas config set --conflict-resolver=claude          # default: none
