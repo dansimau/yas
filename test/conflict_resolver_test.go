@@ -210,9 +210,9 @@ func TestConflictResolver_ClaudeContinue(t *testing.T) {
 		assert.Assert(t, strings.Contains(prompt, want), "prompt should mention %q:\n%s", want, prompt)
 	}
 
-	assert.DeepEqual(t, args[2:4], []string{"--permission-mode", "acceptEdits"})
-	assert.Equal(t, args[4], "--allowedTools")
-	assert.Assert(t, !strings.Contains(args[5], "git add"))
+	assert.DeepEqual(t, args[2:6], []string{"--model", "haiku", "--permission-mode", "acceptEdits"})
+	assert.Equal(t, args[6], "--allowedTools")
+	assert.Assert(t, !strings.Contains(args[7], "git add"))
 }
 
 func TestConflictResolver_ClaudeStopIsDefault(t *testing.T) {

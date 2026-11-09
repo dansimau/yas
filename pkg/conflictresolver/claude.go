@@ -12,6 +12,11 @@ import (
 // ClaudeName is the name of the Claude Code resolver.
 const ClaudeName = "claude"
 
+// claudeModel is the model alias passed to the Claude Code CLI. Conflict
+// resolution is a narrow, mechanical task, so the cheapest and fastest tier
+// is used; "haiku" resolves to the latest Haiku release.
+const claudeModel = "haiku"
+
 // claudeAllowedTools restricts the Claude Code CLI to reading and editing
 // files plus read-only git inspection. Anything that changes repository state
 // (git add, commit, rebase, ...) is deliberately excluded: yas performs those
@@ -79,6 +84,7 @@ func (c *Claude) Args(req Request) []string {
 	return []string{
 		c.Binary,
 		"-p", Prompt(req),
+		"--model", claudeModel,
 		"--permission-mode", "acceptEdits",
 		"--allowedTools", strings.Join(claudeAllowedTools, ","),
 	}

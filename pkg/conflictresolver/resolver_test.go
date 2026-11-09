@@ -206,6 +206,7 @@ func TestClaude_Args(t *testing.T) {
 	assert.Equal(t, args[1], "-p")
 	assert.Equal(t, args[2], conflictresolver.Prompt(req))
 	assert.DeepEqual(t, args[3:], []string{
+		"--model", "haiku",
 		"--permission-mode", "acceptEdits",
 		"--allowedTools", "Read,Edit,Write,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*)",
 	})
