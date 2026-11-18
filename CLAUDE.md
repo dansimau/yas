@@ -87,6 +87,13 @@ yas uses a Directed Acyclic Graph (DAG) from `github.com/heimdalr/dag` to model 
 - On conflict, saves `.yas/yas.restack.json` and (if `conflict-resolver` is not `none`) hands the conflicted files to the resolver (`pkg/yas/conflicts.go`); `after-resolve` decides whether to stop for review, continue when no markers remain, or force
 - Settings come from flags (`--conflict-resolver`, `--after-resolve` on restack/sync/move/continue), then the saved restack state (for `continue`), then config; defaults are `none`/`stop`
 
+**Rename** (`yas rename <name>`):
+
+- Renames the current branch with `git branch -m` and moves its entry in the state to the new name, re-pointing its children's `Parent`
+- The new name gets the same username prefix as `yas branch` (`prefixedBranchName`)
+- A worktree at the path yas created (`.yas/worktrees/<old>`) is moved with `git worktree move` to `.yas/worktrees/<new>`, and the shell follows via the shell hook when it is inside (same relative directory); failures here are warnings
+- Nothing is renamed on GitHub: a branch with an open PR is refused without `--force` (GitHub closes a PR whose head branch is renamed; with `--force` the PR stays on the old name and the next submit opens a new one), the carried-over upstream is dropped so the next submit pushes the new name, and a note points at `yas submit --stack` when child PRs still have the old name as base
+
 **Sync** (`yas sync`):
 
 - Tracks untracked branches by refreshing remote status

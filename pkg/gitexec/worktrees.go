@@ -285,6 +285,11 @@ func (r *Repo) WorktreeRemoveForce(worktreePath string, level int) error {
 	return r.run(args...)
 }
 
+// WorktreeMove moves a linked worktree to a new path.
+func (r *Repo) WorktreeMove(oldPath, newPath string) error {
+	return r.run("git", "worktree", "move", oldPath, newPath)
+}
+
 // WorktreePrune removes worktree administrative files for worktrees whose
 // directories no longer exist. Locked worktrees are left alone.
 func (r *Repo) WorktreePrune() error {
