@@ -98,7 +98,7 @@ func (yas *YAS) GetBranchList(currentStackOnly bool, showStatus bool, showAll bo
 
 	// If status flag is set, fetch PR status for all branches with PRs
 	if showStatus {
-		branchesWithPRs := yas.data.Branches.ToSlice().WithPRs()
+		branchesWithPRs := yas.TrackedBranches().WithPRs()
 		if len(branchesWithPRs) > 0 {
 			if err := yas.RefreshPRStatus(branchesWithPRs.BranchNames()...); err != nil {
 				return nil, fmt.Errorf("failed to refresh PR status: %w", err)

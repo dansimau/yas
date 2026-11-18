@@ -1045,3 +1045,60 @@ func TestSubmit_StackSetsUpstreamTrackingForEveryBranch(t *testing.T) {
 		assert.Equal(t, "origin/"+branch, upstreamOf(tempDir, branch), "branch %s should track its remote", branch)
 	}
 }
+
+// A branch that was deleted (for example by sync after its PR merged) stays in
+// the state file with its PR metadata. submit --outdated must not try to
+// inspect it.
+func TestSubmit_OutdatedIgnoresDeletedBranches(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	fakeOrigin := filepath.Join(tempDir, "origin.git")
+
+	cli := gocmdtester.FromPath(t, "../cmd/yas/main.go",
+		gocmdtester.WithWorkingDir(tempDir),
+	)
+
+	cli.SkipMockVerification()
+
+	mockNoGitHubPRForBranch(cli, "main")
+	mockGitHubPRForBranch(cli, "topic-a", yas.PullRequestMetadata{
+		ID:          "PR_1",
+		State:       "MERGED",
+		URL:         "https://github.com/test/test/pull/1",
+		BaseRefName: "main",
+	})
+
+	testutil.ExecOrFail(t, tempDir, stringutil.MustInterpolate(`
+		git init --bare {{.fakeOrigin}}
+
+		git init --initial-branch=main
+		git remote add origin {{.fakeOrigin}}
+
+		touch main
+		git add main
+		git commit -m "main-0"
+		git push -u origin main
+
+		git checkout -b topic-a
+		touch a
+		git add a
+		git commit -m "topic-a-0"
+		git push -u origin topic-a
+
+		git checkout main
+	`, map[string]string{"fakeOrigin": fakeOrigin}))
+
+	assert.NilError(t, cli.Run("config", "set", "--trunk-branch=main").Err())
+	assert.NilError(t, cli.Run("add", "topic-a", "--parent=main").Err())
+	assert.NilError(t, cli.Run("refresh", "topic-a").Err())
+	assert.NilError(t, cli.Run("sync").Err())
+
+	exists := mustExecOutput(tempDir, "git", "branch", "--list", "topic-a")
+	assert.Equal(t, strings.TrimSpace(exists), "", "sync should have deleted topic-a")
+
+	result := cli.Run("submit", "--outdated")
+	assert.NilError(t, result.Err())
+	assert.Assert(t, strings.Contains(result.Stdout(), "No branches with PRs found"),
+		"got: %s", result.Stdout())
+}
