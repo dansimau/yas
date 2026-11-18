@@ -85,6 +85,7 @@ yas uses a Directed Acyclic Graph (DAG) from `github.com/heimdalr/dag` to model 
 - Rebases each descendant from leaf nodes using `git rebase --update-refs`
 - Skips git hooks during rebase with `core.hooksPath=/dev/null`
 - On conflict, saves `.yas/yas.restack.json` and (if `conflict-resolver` is not `none`) hands the conflicted files to the resolver (`pkg/yas/conflicts.go`); `after-resolve` decides whether to stop for review, continue when no markers remain, or force
+- When the restack stops on a rebase in a worktree other than the one the user is in, `stopAtRebase` (`pkg/yas/restack_dir.go`) writes a `cd` to that worktree for the shell hook and records the original directory in the state (`return_dir`); `continue`/`abort` `cd` back when done. The state also records the worktree the restack was started in (`repo_dir`), and `continue`/`abort` operate there wherever they are run from. The shell hook sources the commands even when the binary exits non-zero
 - Settings come from flags (`--conflict-resolver`, `--after-resolve` on restack/sync/move/continue), then the saved restack state (for `continue`), then config; defaults are `none`/`stop`
 
 **Sync** (`yas sync`):
