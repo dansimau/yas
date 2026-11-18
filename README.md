@@ -29,7 +29,9 @@ go install github.com/dansimau/yas/cmd/yas@latest
 ```
 
 Install the shell hook so `yas branch` can change directory when
-switching between worktrees. Add to `~/.zshrc` or `~/.bashrc`:
+switching between worktrees, and so a restack that stops on a conflict in
+another worktree takes you there (and back again after `yas continue` or
+`yas abort`). Add to `~/.zshrc` or `~/.bashrc`:
 
 ```sh
 eval "$(yas hook zsh)"    # or: eval "$(yas hook bash)"

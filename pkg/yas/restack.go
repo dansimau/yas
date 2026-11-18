@@ -113,12 +113,13 @@ func (yas *YAS) Restack(branch string, dryRun bool, resolution ConflictResolutio
 			RebasedBranches:  rebasedBranches,
 			ConflictResolver: res.Resolver,
 			AfterResolve:     res.AfterResolve,
+			RepoDir:          yas.restackRepoDir(),
 		}); err != nil {
 			return fmt.Errorf("rebase failed and unable to save restack state: %w", err)
 		}
 
 		// Process the work queue
-		if err := yas.processRestackWorkQueue(startingBranch, branch, workQueue, &rebasedBranches, res); err != nil {
+		if err := yas.processRestackWorkQueue(startingBranch, branch, "", workQueue, &rebasedBranches, res); err != nil {
 			return err
 		}
 	}
@@ -279,7 +280,8 @@ func (yas *YAS) buildRestackWorkQueue(graph *dag.DAG, branchName string, workQue
 }
 
 // processRestackWorkQueue processes a queue of rebase operations, saving state on error.
-func (yas *YAS) processRestackWorkQueue(startingBranch, targetBranch string, workQueue [][2]string, rebasedBranches *[]string, res ConflictResolution) error {
+// returnDir is the RestackState.ReturnDir of the restack being continued, if any.
+func (yas *YAS) processRestackWorkQueue(startingBranch, targetBranch, returnDir string, workQueue [][2]string, rebasedBranches *[]string, res ConflictResolution) error {
 	for i, work := range workQueue {
 		childBranch := work[0]
 		parentBranch := work[1]
@@ -348,7 +350,7 @@ func (yas *YAS) processRestackWorkQueue(startingBranch, targetBranch string, wor
 			}
 
 			// Rebase is in progress (e.g., conflicts), save state for resuming later
-			if err := yas.saveRestackState(&RestackState{
+			state := &RestackState{
 				StartingBranch:   startingBranch,
 				TargetBranch:     targetBranch,
 				CurrentBranch:    childBranch,
@@ -357,7 +359,11 @@ func (yas *YAS) processRestackWorkQueue(startingBranch, targetBranch string, wor
 				RebasedBranches:  *rebasedBranches,
 				ConflictResolver: res.Resolver,
 				AfterResolve:     res.AfterResolve,
-			}); err != nil {
+				RepoDir:          yas.restackRepoDir(),
+				ReturnDir:        returnDir,
+			}
+
+			if err := yas.saveRestackState(state); err != nil {
 				return fmt.Errorf("rebase failed and unable to save restack state: %w", err)
 			}
 
@@ -365,7 +371,7 @@ func (yas *YAS) processRestackWorkQueue(startingBranch, targetBranch string, wor
 			// result means the rebase was driven to completion and we can
 			// carry on as if it had succeeded first time.
 			if err := yas.handleRebaseConflict(branch, res, childBranch, parentBranch, rebaseErr); err != nil {
-				return err
+				return yas.stopAtRebase(state, branch.Path(), err)
 			}
 		}
 
@@ -409,6 +415,8 @@ func (yas *YAS) Continue(resolution ConflictResolution) error {
 	if err != nil {
 		return fmt.Errorf("failed to load restack state: %w", err)
 	}
+
+	yas.useRestackRepoDir(state)
 
 	// Validate the settings but don't insist on the tool being installed yet:
 	// the user may have resolved the conflict by hand and no further conflict
@@ -468,7 +476,7 @@ func (yas *YAS) Continue(resolution ConflictResolution) error {
 				// A later commit in the same rebase has conflicts; let the
 				// resolver (if configured) have a go, otherwise stop here.
 				if err := yas.handleRebaseConflict(branch, res, state.CurrentBranch, state.CurrentParent, continueErr); err != nil {
-					return err
+					return yas.stopAtRebase(state, branch.Path(), err)
 				}
 
 				break
@@ -567,7 +575,7 @@ func (yas *YAS) Continue(resolution ConflictResolution) error {
 
 		fmt.Printf("\nContinuing restack with %d remaining branch(es)...\n", len(newWorkQueue))
 
-		if err := yas.processRestackWorkQueue(state.StartingBranch, targetBranch, newWorkQueue, &rebasedBranches, res); err != nil {
+		if err := yas.processRestackWorkQueue(state.StartingBranch, targetBranch, state.ReturnDir, newWorkQueue, &rebasedBranches, res); err != nil {
 			return err
 		}
 	}
@@ -606,6 +614,8 @@ func (yas *YAS) Continue(resolution ConflictResolution) error {
 
 	fmt.Printf("\nRestack completed successfully!\n")
 
+	returnFromRebase(state)
+
 	return nil
 }
 
@@ -627,6 +637,8 @@ func (yas *YAS) Abort() error {
 	if err != nil {
 		return fmt.Errorf("failed to load restack state: %w", err)
 	}
+
+	yas.useRestackRepoDir(state)
 
 	fmt.Printf("Aborting restack operation...\n")
 
@@ -669,6 +681,8 @@ func (yas *YAS) Abort() error {
 	}
 
 	fmt.Printf("\nRestack aborted successfully.\n")
+
+	returnFromRebase(state)
 
 	if len(state.RebasedBranches) > 0 {
 		fmt.Printf("Note: %d branch(es) were successfully rebased before the abort:\n", len(state.RebasedBranches))

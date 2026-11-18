@@ -49,14 +49,19 @@ func (h Hook) Script(shell string) string {
 
 	export %[3]s="$%[1]s_shell_exec_file"
 
-	command %[1]s "$@" || return $?
+	command %[1]s "$@"
+	local %[1]s_exit_code=$?
 
+	# Also after a failure: the command may ask to change directory to where
+	# the problem is.
 	if [ -s "$%[1]s_shell_exec_file" ]; then
-		source "$%[1]s_shell_exec_file" || return $?
+		source "$%[1]s_shell_exec_file" || %[1]s_exit_code=$?
 	fi
 
 	rm -f "$%[1]s_shell_exec_file"
 	unset %[3]s
+
+	return $%[1]s_exit_code
 }`, h.Command, shell, h.EnvVar)
 }
 

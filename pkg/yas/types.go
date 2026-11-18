@@ -158,4 +158,12 @@ type RestackState struct {
 	// behaviour unless overridden.
 	ConflictResolver string `json:"conflict_resolver,omitempty"`
 	AfterResolve     string `json:"after_resolve,omitempty"`
+	// RepoDir is the worktree the restack was started in. Branches without a
+	// worktree of their own are checked out and rebased there, so `yas
+	// continue` and `yas abort` work in it wherever they are run from.
+	RepoDir string `json:"repo_dir,omitempty"`
+	// ReturnDir is the directory the user's shell was in before it was moved
+	// to the worktree of a stopped rebase (empty if it was never moved); the
+	// shell is moved back there when the restack finishes or is aborted.
+	ReturnDir string `json:"return_dir,omitempty"`
 }
