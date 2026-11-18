@@ -188,6 +188,11 @@ func (r *Repo) CheckoutNewBranchFrom(branch string, startPoint string) error {
 	return r.run("git", "checkout", "-b", branch, startPoint)
 }
 
+// RenameBranch renames a local branch, wherever it is checked out.
+func (r *Repo) RenameBranch(oldName string, newName string) error {
+	return r.run("git", "branch", "-m", oldName, newName)
+}
+
 func (r *Repo) DeleteBranch(branch string) error {
 	return xexec.Command("git", "branch", "-D", branch).
 		WithEnvVars(CleanedGitEnv()).
@@ -350,6 +355,14 @@ func (r *Repo) SetUpstream(remote string, branchName string) error {
 	defer configWriteMu.Unlock()
 
 	return r.run("git", "branch", fmt.Sprintf("--set-upstream-to=%s/%s", remote, branchName), branchName)
+}
+
+// UnsetUpstream removes the branch's upstream tracking configuration.
+func (r *Repo) UnsetUpstream(branchName string) error {
+	configWriteMu.Lock()
+	defer configWriteMu.Unlock()
+
+	return r.run("git", "branch", "--unset-upstream", branchName)
 }
 
 func (r *Repo) ForcePushBranch(remote string, branchName string) error {

@@ -105,6 +105,35 @@ func (yas *YAS) validate() error {
 	return nil
 }
 
+// prefixedBranchName returns the full name for a branch the user called
+// branchName: with the username prefix when autoPrefixBranch is on (unless it
+// is already there), unchanged otherwise.
+func (yas *YAS) prefixedBranchName(branchName string) (string, error) {
+	if !yas.cfg.AutoPrefixBranch {
+		return branchName, nil
+	}
+
+	// Check GIT_AUTHOR_EMAIL env var first, then fall back to git config
+	email := os.Getenv("GIT_AUTHOR_EMAIL")
+	if email == "" {
+		var err error
+
+		email, err = yas.git.GetConfig("user.email")
+		if err != nil {
+			return "", fmt.Errorf("failed to get git user.email: %w", err)
+		}
+	}
+
+	// Username is the part of the email before the @
+	username, _, _ := strings.Cut(email, "@")
+
+	if strings.HasPrefix(branchName, username+"/") {
+		return branchName, nil
+	}
+
+	return fmt.Sprintf("%s/%s", username, branchName), nil
+}
+
 // CreateBranch creates a new branch with the given name, optionally applying a user prefix.
 // If parentBranch is empty, it uses the current branch as the parent.
 // The new branch is created, checked out, and added to the stack.
@@ -114,30 +143,9 @@ func (yas *YAS) validate() error {
 // worktree, so the current checkout is left alone. Switching to the new branch
 // is otherwise left to SwitchBranch.
 func (yas *YAS) CreateBranch(branchName string, parentBranch string, useWorktree bool) (string, error) {
-	// Determine full branch name (with or without prefix based on config)
-	fullBranchName := branchName
-
-	if yas.cfg.AutoPrefixBranch {
-		// Get git email to determine prefix
-		// Check GIT_AUTHOR_EMAIL env var first, then fall back to git config
-		email := os.Getenv("GIT_AUTHOR_EMAIL")
-		if email == "" {
-			var err error
-
-			email, err = yas.git.GetConfig("user.email")
-			if err != nil {
-				return "", fmt.Errorf("failed to get git user.email: %w", err)
-			}
-		}
-
-		// Extract username from email (part before @)
-		username := email
-		if idx := strings.Index(email, "@"); idx != -1 {
-			username = email[:idx]
-		}
-
-		// Create full branch name with username prefix
-		fullBranchName = fmt.Sprintf("%s/%s", username, branchName)
+	fullBranchName, err := yas.prefixedBranchName(branchName)
+	if err != nil {
+		return "", err
 	}
 
 	// Determine the current branch so we can decide where to base the new

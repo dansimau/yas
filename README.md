@@ -140,6 +140,7 @@ If the tool fails or leaves markers behind, yas stops exactly as it would for a 
 | `yas branch <name>` (`br`) | Switch to the named branch, creating it if it doesn't exist |
 | `yas add [branch]` | Track an existing branch and set its parent |
 | `yas move` | Move the current branch and its descendants to a new parent |
+| `yas rename <name>` | Rename the current branch, keeping its place in the stack; `--force` if it has an open PR |
 | `yas submit` | Push and open/update PRs |
 | `yas restack [branch]` | Rebase all branches in the current stack or `--all` for all branches; `--conflict-resolver`, `--after-resolve` |
 | `yas continue` / `yas abort` | Resume or abort a restack after conflicts |

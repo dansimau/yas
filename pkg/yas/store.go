@@ -171,6 +171,19 @@ func (m *branchMap) Set(name string, data BranchMetadata) {
 	m.data[name] = data
 }
 
+// Names returns the names of all branches in the map.
+func (m *branchMap) Names() []string {
+	m.RLock()
+	defer m.RUnlock()
+
+	names := make([]string, 0, len(m.data))
+	for name := range m.data {
+		names = append(names, name)
+	}
+
+	return names
+}
+
 func (m *branchMap) ToSlice() (bm Branches) {
 	m.RLock()
 	defer m.RUnlock()
