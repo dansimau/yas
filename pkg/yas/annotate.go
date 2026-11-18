@@ -30,7 +30,7 @@ func (yas *YAS) Annotate() error {
 
 // AnnotateAll annotates all branches that have PRs with stack information.
 func (yas *YAS) AnnotateAll() error {
-	branchesWithPRs := yas.data.Branches.ToSlice().WithPRs()
+	branchesWithPRs := yas.TrackedBranches().WithPRs()
 
 	if len(branchesWithPRs) == 0 {
 		fmt.Println("No branches with PRs found")

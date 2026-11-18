@@ -35,7 +35,7 @@ func (yas *YAS) Submit(draft bool) error {
 
 func (yas *YAS) SubmitOutdated(draft bool) error {
 	// Get all branches with PRs (optimization: skip branches without PRs)
-	branchesWithPRs := yas.data.Branches.ToSlice().WithPRs()
+	branchesWithPRs := yas.TrackedBranches().WithPRs()
 
 	if len(branchesWithPRs) == 0 {
 		fmt.Println("No branches with PRs found")
